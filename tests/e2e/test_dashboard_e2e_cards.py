@@ -33,6 +33,7 @@ from tests.e2e.dashboard_pages import (
     STATE_SUCCESS,
     STATES_SUCCESS,
     WIDE_WIDTHS,
+    assert_layout_holds,
     contrast_ratio,
 )
 
@@ -80,11 +81,16 @@ GEOMETRY = """() => {
     // list or chart caption keeps layout boxes Chromium never paints).
     const shown = el => el.getBoundingClientRect().height > 0
         && el.checkVisibility({visibilityProperty: true, contentVisibilityAuto: true});
-    const sibling = (el, step) => {
-        let at = el[step];
-        while (at && !shown(at)) at = at[step];
-        return at;
-    };
+    // What is painted before and after a card in document order, anywhere in the
+    // page's main content (not only the card's siblings: home's and the States list's
+    // card is its body's first child, under a lede outside that body; #567's review).
+    const painted = [...document.querySelectorAll("main *")].filter(shown);
+    const before = card => painted.filter(el => !el.contains(card)
+        && !card.contains(el)
+        && (el.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const after = card => painted.filter(el => !el.contains(card)
+        && !card.contains(el)
+        && (el.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_PRECEDING));
     return [...document.querySelectorAll(".card")].map(card => {
         const r = card.getBoundingClientRect();
         const s = getComputedStyle(card);
@@ -97,17 +103,19 @@ GEOMETRY = """() => {
         const kids = [...card.children].filter(shown)
             .map(el => el.getBoundingClientRect());
         const between = kids.slice(1).map((b, i) => b.top - kids[i].bottom);
-        const before = sibling(card, "previousElementSibling");
-        const after = sibling(card, "nextElementSibling");
-        const above = before ? before.getBoundingClientRect().bottom : null;
+        const ups = before(card).map(el => el.getBoundingClientRect().bottom);
+        const downs = after(card).map(el => el.getBoundingClientRect().top);
+        const above = ups.length ? Math.max(...ups) : null;
+        const below = downs.length ? Math.min(...downs) : null;
+        const holder = card.parentElement.getBoundingClientRect();
         return {
             gapBefore: above === null ? null : r.top - above,
-            gapAfter: after ? after.getBoundingClientRect().top - r.bottom : null,
+            gapAfter: below === null ? null : below - r.bottom,
             insetTop: first - top,
             insetBottom: bottom - last,
             into: above === null ? null : first - above,
             widestWithin: Math.max(0, ...between),
-            left: r.left, width: r.width,
+            left: r.left, width: r.width, holder: holder.width,
             side: [s.borderLeftWidth, s.borderRightWidth,
                    s.paddingLeft, s.paddingRight],
             wide: [...card.querySelectorAll("p, figcaption")]
@@ -120,39 +128,41 @@ GEOMETRY = """() => {
 @pytest.mark.parametrize("width", WIDTHS)
 @pytest.mark.parametrize("path", list(CARD_PAGES))
 def test_space_separates_every_card(page: Page, path: str, width: int) -> None:
-    success = open_page(page, path, width)
+    open_page(page, path, width)
     _, count = CARD_PAGES[path]
     found: list[dict[str, Any]] = page.evaluate(GEOMETRY)
     assert len(found) == count, found
-    content = page.evaluate(
-        f"""() => {{
-            const r = document.querySelector("{success}").getBoundingClientRect();
-            return {{left: r.left, width: r.width,
-                     page: document.documentElement.scrollWidth <= innerWidth}};
-        }}"""
-    )
-    # The page never scrolls sideways (home and the States list have no layout test
-    # of their own, so this is theirs too).
-    assert content["page"], content
     for card in found:
-        # No side edge or side padding: a card is exactly as wide as the page's
-        # content, so it takes no width from a table or a chart (the owner's choice
-        # at #567's plan gate).
+        # No side edge or side padding: a card is exactly as wide as the page body
+        # that holds it, so it takes no width from a table or a chart (the owner's
+        # choice at #567's plan gate).
         assert card["side"] == ["0px", "0px", "0px", "0px"], card
-        assert abs(card["width"] - content["width"]) <= 1, (card, content)
+        assert abs(card["width"] - card["holder"]) <= 1, card
         # Running text keeps the measure inside a card (D102(f)).
         assert card["wide"] == 0, card
+        # Every card has something painted above it (at least the page's heading)
+        # and below it (at least the provenance footer), so no check is skipped.
+        assert card["gapBefore"] is not None and card["gapAfter"] is not None, card
         # The space around a card, and inside its rules.
-        if card["gapBefore"] is not None:
-            assert card["gapBefore"] >= GAP_OUTSIDE_PX, card
-        if card["gapAfter"] is not None:
-            assert card["gapAfter"] >= GAP_OUTSIDE_PX, card
+        assert card["gapBefore"] >= GAP_OUTSIDE_PX, card
+        assert card["gapAfter"] >= GAP_OUTSIDE_PX, card
         assert card["insetTop"] >= INSET_PX, card
         assert card["insetBottom"] >= INSET_PX, card
         # Spacing alone separates the sections: the way into a card is wider than any
         # gap between the things inside it.
-        if card["into"] is not None:
-            assert card["into"] > card["widestWithin"], card
+        assert card["into"] > card["widestWithin"], card
+
+
+@pytest.mark.parametrize("width", WIDTHS)
+@pytest.mark.parametrize("path", ["/", "/states"])
+def test_every_width_keeps_order_measure_and_tables(
+    page: Page, path: str, width: int
+) -> None:
+    """Home and the States list take the layout checks every other page's own suite
+    runs (#567's 360 px criterion; neither had a layout test). Neither shows a table,
+    so the table check has nothing to hold."""
+    success = open_page(page, path, width)
+    assert_layout_holds(page, success, (), width, tables_expected=False)
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])

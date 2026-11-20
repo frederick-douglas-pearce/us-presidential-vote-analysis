@@ -543,12 +543,14 @@ fieldset.filter legend { padding: 0; }
 .metrics dt, .metrics dd { overflow-wrap: anywhere; }
 .metrics dd { margin: 0; }
 /* A page section's card (#567, D111): a top and a bottom rule and the space around
-   them. No top padding: the section's first heading (1.75rem), or a pair's own
-   margin-block from 76rem, sets the space under the top rule, as it set the space
-   above the section before, so D102(b)'s pair spacing holds inside a card at every
-   width. No side edge or side padding (the owner's choice at #567's plan gate), so a
-   card takes no width from a table or a chart. The States list is the one first child
-   with no top margin of its own (ul's is 0). */
+   them. No top padding: the card's first child's own top margin sets the space under
+   the top rule, as it set the space above the section before: a section heading's
+   1.75rem (or a pair's margin-block from 76rem, so D102(b)'s pair spacing holds inside
+   a card at every width), a .filters box's 1rem, or, for a chart first (.chart has no
+   margin), its title paragraph's 1em collapsing through the figure. The States list
+   (ul, margin 0) is the one first child that would touch the rule, so it takes 1rem.
+   No side edge or side padding (the owner's choice at #567's plan gate), so a card
+   takes no width from a table or a chart. */
 .card { border-block: 1px solid var(--card-edge); padding-block: 0 1rem; margin-block: 2rem; }
 .card > .states:first-child { margin-top: 1rem; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }

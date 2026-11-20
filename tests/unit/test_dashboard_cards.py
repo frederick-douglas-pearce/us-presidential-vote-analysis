@@ -21,7 +21,7 @@ import pytest
 from dash import html
 
 from explore import api, charts, components
-from tests.dashboard_cards import every_card, is_card
+from tests.dashboard_cards import CARD, every_card, is_card
 from tests.unit.test_dashboard_export import all_pages, page_key, page_of
 
 #: Each registered page's card count on its default success render: one per page
@@ -40,6 +40,28 @@ CARD_COUNTS = {
     "/candidate/<slug>": 1,
     "/not-found-404": 0,
 }
+
+#: The id of the ``Div`` whose children a page's cards are: its success marker, except
+#: on home, whose marker is the coverage list inside its card, so its cards sit in the
+#: render's unnamed body.
+def card_parent_id(key: str) -> str | None:
+    return None if key == "/" else str(page_of(key)["success"])
+
+
+#: Everything a page body may hold beside its cards, by component type and class (D111
+#: (b)): the page's own chrome, never a section's content. A section's table, chart,
+#: filters, notes or column-name list found here is outside its card.
+CHROME: frozenset[tuple[str, str | None]] = frozenset(
+    {
+        ("H1", None),
+        ("P", "lede"),
+        ("P", "next"),  # home's two browse links: navigation
+        ("Location", None),
+        ("Nav", "section-links"),
+        ("Nav", "neighbor-nav"),
+        ("Footer", "provenance-footer"),
+    }
+)
 
 #: A path value each templated page refuses, so it renders its not-found state.
 NOT_FOUND_VALUES = {"year": "1825", "usps": "ZZ", "slug": "no-such-candidate"}
@@ -71,11 +93,24 @@ class TestCard:
         card = components.card([html.H2("A section"), html.P("Its text")])
         assert type(card) is html.Div
         props = card.to_plotly_json()["props"]
-        assert props["className"] == components.CARD_CLASS == "card"
+        assert props["className"] == CARD == "card"
         # Nothing a reader's assistive technology or the Tab key would meet: the card
         # adds no landmark, name, role or tab stop (#567's tab-order criterion).
         assert set(props) == {"children", "className"}
         assert [type(kid).__name__ for kid in card.children] == ["H2", "P"]
+
+    def test_a_card_refuses_one_component_for_its_children(self) -> None:
+        # A component iterates over its descendants' ids, so it is refused rather
+        # than turned into a card of id strings (#567's review).
+        with pytest.raises(TypeError, match="not one component"):
+            components.card(html.Div([html.P("x", id="x")]))  # type: ignore[arg-type]
+
+    def test_a_card_refuses_a_card_beside_a_table(self) -> None:
+        # The refusal skips a table's cells, never the elements around the table.
+        scroll = html.Div(html.Table([]), className="table-scroll")
+        nested = html.Div([components.card([html.P("x")])])
+        with pytest.raises(ValueError, match="a card holds a card"):
+            components.card([scroll, nested])
 
     def test_a_card_keeps_its_children_in_source_order(self) -> None:
         kids = [html.H2("a", id="a"), html.P("b", id="b"), html.Div(id="c")]
@@ -112,17 +147,40 @@ class TestEveryPageCards:
         for key, tree in all_pages(monkeypatch).items():
             assert len(every_card(tree)) == CARD_COUNTS[key], key
 
-    def test_every_card_is_a_direct_child_of_the_page_body(
+    def test_every_card_is_a_child_of_the_page_body_itself(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A card frames a run of the page's own content, never something nested in
-        # another element (a pair's column, a section's box).
+        # A card frames a run of the page body's own children, so its parent is the
+        # page's success Div (home: its render's body), never a wrapper, a section's
+        # box or a pair's column, and never another card.
         for key, tree in all_pages(monkeypatch).items():
             for node, above in with_ancestors(tree):
                 if is_card(node):
+                    parent = above[-1]
                     assert not any(is_card(a) for a in above), key
-                    assert type(above[-1]) is html.Div, key
-                    assert node in above[-1].children, key
+                    assert type(parent) is html.Div, key
+                    assert getattr(parent, "id", None) == card_parent_id(key), key
+                    assert node in parent.children, key
+
+    def test_beside_its_cards_a_page_body_holds_only_chrome(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Every section's whole content is in its card (#567's review): whatever
+        # else sits in the body that holds the cards is page chrome from a closed
+        # set, so a table, chart, filter, note or list left outside a card fails.
+        for key, tree in all_pages(monkeypatch).items():
+            bodies = {
+                id(above[-1]): above[-1]
+                for node, above in with_ancestors(tree)
+                if is_card(node)
+            }
+            assert len(bodies) == (0 if CARD_COUNTS[key] == 0 else 1), key
+            for body in bodies.values():
+                for kid in body.children:
+                    if is_card(kid):
+                        continue
+                    kind = (type(kid).__name__, getattr(kid, "className", None))
+                    assert kind in CHROME, (key, kind)
 
     def test_every_section_heading_outside_the_footer_is_in_a_card(
         self, monkeypatch: pytest.MonkeyPatch
@@ -143,9 +201,11 @@ class TestEveryPageCards:
             for node, above in with_ancestors(tree):
                 name = type(node).__name__
                 classes = str(getattr(node, "className", "") or "").split()
-                if name in ("H1", "Footer") or {"lede", "section-links"} & set(
-                    classes
-                ):
+                if name in ("H1", "Footer") or {
+                    "lede",
+                    "section-links",
+                    "neighbor-nav",
+                } & set(classes):
                     assert not any(is_card(a) for a in above), (key, name, classes)
 
     def test_each_chart_shares_its_card_with_its_companion_table(

@@ -616,11 +616,21 @@ class TestThemeTokens:
         css = STYLESHEET.read_text(encoding="utf-8")
         header = css[: css.index("*/")]
         entries = re.split(r"^ {5}(?=--[\w-]+ {2,}\S)", header, flags=re.M)
-        marked = {
-            entry.split()[0]
-            for entry in entries
-            if entry.startswith("--") and "exempt from 3:1" in " ".join(entry.split())
-        }
+        marked = set()
+        for entry in entries:
+            if not entry.startswith("--"):
+                continue
+            # An entry is its token's line and the continuation lines indented under
+            # it; the first line that is not one (a blank line, a paragraph) ends it,
+            # so prose after the last entry is never read as that token's role.
+            first, *rest = entry.split("\n")
+            held = [first]
+            for line in rest:
+                if not line.startswith(" " * 6) or not line.strip():
+                    break
+                held.append(line)
+            if "exempt from 3:1" in " ".join(" ".join(held).split()):
+                marked.add(entry.split()[0])
         assert marked == DECORATIVE
 
     @pytest.mark.parametrize("theme", [LIGHT, EXPLICIT_DARK])
@@ -1933,6 +1943,27 @@ class TestLayoutRules:
                 assert not (flex and "reverse" in value), where
                 grid = name in {"grid-auto-flow", "grid"}
                 assert not (grid and "dense" in value), where
+
+    def test_a_card_draws_its_rules_in_the_card_edge_token(self) -> None:
+        # #567 (D111): the one .card rule, outside every media block, draws a top
+        # and a bottom rule in --card-edge and nothing at the sides, so the token the
+        # header records as decorative is the one the card paints with.
+        (card,) = [
+            dict(declarations(body))
+            for at, prelude, body in shipped_rules()
+            if " ".join(prelude.split()) == ".card"
+        ]
+        assert card == {
+            "border-block": "1px solid var(--card-edge)",
+            "padding-block": "0 1rem",
+            "margin-block": "2rem",
+        }
+        found = [
+            (at, prelude)
+            for at, prelude, _ in shipped_rules()
+            if re.search(r"\.card\b", prelude)
+        ]
+        assert found == [(None, ".card"), (None, ".card > .states:first-child")], found
 
     def test_the_header_comment_describes_the_layout(self) -> None:
         css = STYLESHEET.read_text(encoding="utf-8")

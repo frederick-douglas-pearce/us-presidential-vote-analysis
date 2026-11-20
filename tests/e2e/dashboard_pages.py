@@ -329,14 +329,21 @@ def rect(page: Page, selector: str) -> dict[str, float]:
 
 
 def assert_layout_holds(
-    page: Page, success: str, tables: tuple[str, ...], width: int
+    page: Page,
+    success: str,
+    tables: tuple[str, ...],
+    width: int,
+    *,
+    tables_expected: bool = True,
 ) -> None:
     """The checks every layout story inherits (#364, #543), at ``width``: no box under
     the page ``success`` marks is reordered (``order``, a reversed flex direction or a
     placed grid item) and none has a positive tab index; every paragraph, chart caption
     and party-notes item in ``main`` is within the 42rem measure; the page never
     scrolls sideways; each of ``tables`` (table ids) is there, and from about 1280 px
-    none scrolls."""
+    none scrolls. A page that shows no table (home, the States list; #567) passes
+    ``tables_expected=False`` with no ids: the other checks still run, and naming no
+    table is otherwise refused, so a caller cannot drop its tables by accident."""
     found = page.evaluate(
         f"""() => {{
             const root = document.querySelector("{success}");
@@ -365,7 +372,8 @@ def assert_layout_holds(
     assert found["tabbed"] == [], found
     assert found["texts"] > 0 and found["wide"] == [], found
     assert found["page"], found
-    assert tables and None not in found["tables"], found  # every table is there
+    assert bool(tables) == tables_expected, (tables, tables_expected)
+    assert None not in found["tables"], found  # every table is there
     if width >= 1280:
         assert all(found["tables"]), found
 

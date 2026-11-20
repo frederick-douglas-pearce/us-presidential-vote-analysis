@@ -37,8 +37,10 @@ chevrons and pinned declarations, #464, and the wide layout's rules, #544 and #5
 `tests/unit/test_dashboard_cards.py` (page section cards, #567, D111: `components.card`
 and its refusals in `TestCard`, every registered page's card count, headings, charts
 and companion tables in `TestEveryPageCards`, and no card on a whole-page not-found or
-degraded state in `TestNoSectionNoCard`; tests elsewhere name a card through
-`tests/dashboard_cards.py`'s strict `card_children`, never by flattening),
+degraded state in `TestNoSectionNoCard`; tests elsewhere name the card that holds an element through `tests/dashboard_cards.py`:
+`card_children` (the page child at a position must be a card), `card_holding` and `cards`
+(a page's direct-child cards), or `in_one_card` (exactly one card in the whole tree holds
+an id), never by flattening a card away),
 `tests/unit/test_dashboard_charts.py` (the chart registry, `components.chart`, C5's short-tick exception, #596, in `TestShortValueTicks`, the figure
 rules, the template, the config and the chart callback, #432, the not-drawn log check, #467, and the check's totality, #484, in `TestTotality`, `TestSlotKinds`, `TestTotalityGuards` and `TestPlaceholderScan`) and
 `tests/unit/test_dashboard_guards.py`
@@ -164,7 +166,7 @@ two charts on one page sharing one load (on the two-chart test page below), a re
 chart page drawing it in a theme chosen away, and the registered mount function (including
 that a plotly.js which lands after a failed load serves the next mount); and a blocked CDN
 leaving the page, the chart's title, caption and pointer and its table, with one console error
-and no loop, for one chart or two, and no second fetch on a return to the page (#452, D088); and a same-page re-render keeping the chart drawn, and a failed graph chunk (and on `/elections` the year slider's, `test_dashboard_e2e_elections.py`) logging a bounded number of errors and stopping (#456, D089). Page section cards (#567, D111, `test_dashboard_e2e_cards.py`): on every page that shows one, at 1280, 1850, 1100, 390 and 360 px, each card exactly the content's width with no side edge or padding, at least 24 px from what is before and after it and 12 px between its rules and what it holds, the space into it larger than any gap inside it, and its paragraphs within the measure; under forced colors its rules solid and at 3:1 in both palettes. Every `assert_layout_holds` caller also runs at 360 px since #567. The suite files a page loads (#524, `test_dashboard_e2e_suites.py`): no dash_table file and no lazily loaded dcc chunk on the home page or the not-found page, with the shell's dcc and html bundles seen, and on `/elections` the shared `async-datepicker` chunk still loaded.
+and no loop, for one chart or two, and no second fetch on a return to the page (#452, D088); and a same-page re-render keeping the chart drawn, and a failed graph chunk (and on `/elections` the year slider's, `test_dashboard_e2e_elections.py`) logging a bounded number of errors and stopping (#456, D089). Page section cards (#567, D111, `test_dashboard_e2e_cards.py`): on every page that shows one, at 1280, 1850, 1100, 390 and 360 px, each card exactly as wide as the page body holding it with no side edge or padding, at least 24 px from what is painted before and after it in document order (never skipped: every card has both), 12 px between its rules and what it holds, the space into it larger than any gap inside it, and its paragraphs within the measure; under forced colors its rules solid and at 3:1 in both palettes; and home and the States list, which have no suite of their own, through `assert_layout_holds` (with `tables_expected=False`) at those five widths. Every other `assert_layout_holds` caller also runs at 360 px since #567. The suite files a page loads (#524, `test_dashboard_e2e_suites.py`): no dash_table file and no lazily loaded dcc chunk on the home page or the not-found page, with the shell's dcc and html bundles seen, and on `/elections` the shared `async-datepicker` chunk still loaded.
 A test that asserts something did not happen waits for the event that could have caused it
 (the choice's callback, or a real `change` event of the device's setting), then makes a
 countable change as a barrier.

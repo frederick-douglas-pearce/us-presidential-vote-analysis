@@ -692,7 +692,29 @@ def _classes(node: Any) -> list[str]:
     return str(node.to_plotly_json()["props"].get("className") or "").split()
 
 
-CARD_CLASS = "card"
+# Private (#567's review): a page sets the class only through card(), and a constant
+# another module could import would be a way round the lint that guards that.
+_CARD_CLASS = "card"
+
+
+def _holds_a_card(children: Any) -> bool:
+    """Whether a card sits anywhere in ``children``. It reads each node's props once
+    and does not descend into a table or a table's scroll box, where no card can be:
+    a card wraps whole tables, so walking every cell on each render would cost far
+    more than the check is worth (#567's review)."""
+    stack = [children]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (list, tuple)):
+            stack.extend(node)
+        elif isinstance(node, Component):
+            props = node.to_plotly_json()["props"]
+            classes = str(props.get("className") or "").split()
+            if _CARD_CLASS in classes:
+                return True
+            if not isinstance(node, html.Table) and "table-scroll" not in classes:
+                stack.append(props.get("children"))
+    return False
 
 
 def card(children: Sequence[Any]) -> html.Div:
@@ -711,10 +733,14 @@ def card(children: Sequence[Any]) -> html.Div:
     (``test_dashboard_guards.py``) fails a runtime module other than this one that sets
     the ``card`` class in the shapes the pair lint reads.
     """
+    if isinstance(children, Component):
+        # A component is iterable (over its descendants' ids), so list() would build
+        # a card of id strings without a word: refuse it.
+        raise TypeError("card takes a sequence of elements, not one component")
     held = list(children)
-    if any(CARD_CLASS in _classes(node) for node in _within(held)):
+    if _holds_a_card(held):
         raise ValueError("a card holds a card")
-    return html.Div(held, className=CARD_CLASS)
+    return html.Div(held, className=_CARD_CLASS)
 
 
 def pair(
@@ -750,7 +776,7 @@ def pair(
         # A card frames a page section, and a pair sits inside one (#567, D111): a
         # card in a column would frame the column on its own, which D103 forbids, and
         # would become the column's first child under D102(b)'s margin reset.
-        if CARD_CLASS in classes:
+        if _CARD_CLASS in classes:
             raise ValueError(f"pair {ident!r} holds a card")
     columns = []
     for held, column_id in ((left, left_id), (right, right_id)):

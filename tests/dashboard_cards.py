@@ -13,14 +13,16 @@ from typing import Any
 
 from explore import components
 
+#: The card class, written out: ``components`` keeps its constant private, so no
+#: page can import it round the card lint (#567's review); ``TestCard`` pins the value.
+CARD = "card"
+
 
 def is_card(node: Any) -> bool:
-    """Whether ``node`` is a card ``components.card`` built: a plain ``Div`` whose
-    class is exactly the card class."""
-    return (
-        type(node).__name__ == "Div"
-        and getattr(node, "className", None) == components.CARD_CLASS
-    )
+    """Whether ``node`` carries the card class, as one class word among its classes:
+    the same reading ``components.card``'s refusal makes, so the tests and the runtime
+    agree on what a card is."""
+    return CARD in str(getattr(node, "className", None) or "").split()
 
 
 def cards(page: Any) -> list[Any]:
@@ -42,21 +44,11 @@ def card_holding(page: Any, node: Any) -> Any:
     return held
 
 
-def _walk(node: Any, found: list[Any]) -> None:
-    if isinstance(node, (list, tuple)):
-        for kid in node:
-            _walk(kid, found)
-    elif hasattr(node, "to_plotly_json"):
-        found.append(node)
-        _walk(getattr(node, "children", None), found)
-
-
 def every_card(tree: Any) -> list[Any]:
-    """Every card anywhere in ``tree``, depth first: a degraded state's layout wraps
-    its body, so this reaches cards below the success ``Div`` too."""
-    found: list[Any] = []
-    _walk(tree, found)
-    return [node for node in found if is_card(node)]
+    """Every card anywhere in ``tree``, depth first (the runtime's own walk,
+    ``components._within``): a degraded state's layout wraps its body, so this reaches
+    cards below the success ``Div`` too."""
+    return [node for node in components._within(tree) if is_card(node)]
 
 
 def in_one_card(tree: Any, ident: str, *, total: int = 1) -> Any:
@@ -66,8 +58,7 @@ def in_one_card(tree: Any, ident: str, *, total: int = 1) -> Any:
     assert len(held) == total, (ident, len(held))
     holding = []
     for card in held:
-        inside: list[Any] = []
-        _walk(card.children, inside)
+        inside = components._within(card.children)
         if any(getattr(node, "id", None) == ident for node in inside):
             holding.append(card)
     assert len(holding) == 1, (ident, len(holding))
