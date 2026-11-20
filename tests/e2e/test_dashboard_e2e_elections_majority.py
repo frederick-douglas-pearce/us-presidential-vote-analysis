@@ -196,7 +196,9 @@ def test_each_mark_is_its_measure_s_color_and_no_axis_gridline_is_drawn(
 ) -> None:
     """#593 (D109): circle red, triangle blue, crossbar purple, read from what the
     browser paints; and plotly draws no value-axis gridline on C2 (its gridlines are
-    shapes, which the unit test pins away from 50%). The control: C4, which keeps the
+    shapes, which ``TestC2Methods.test_no_gridline_at_the_majority_line`` in
+    ``tests/unit/test_dashboard_elections_majority.py`` pins away from 50%). The
+    control: C4, which keeps the
     axis's own gridlines, does draw ``.ygrid`` paths, so the count is not vacuous."""
     open_c2(page)
     for selector, measure, prop in (

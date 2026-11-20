@@ -792,7 +792,8 @@ class TestTimeSeriesAxis:
         assert (first_note["x"], first_note["xanchor"]) == (before["x0"], "left")
         assert (last_note["x"], last_note["xanchor"]) == (after["x1"], "right")
         # No marker in this body, so no key and no raise (#593's review: literal, never
-        # derived from the figure); the marked case is the next test.
+        # derived from the figure); the marked cases are
+        # ``test_the_after_label_rises_one_key_row_per_key_entry``.
         assert figure["layout"]["showlegend"] is False
         key = 0
         assert first_note["yshift"] == -over_time.BAND_LABEL_INSET_PX
