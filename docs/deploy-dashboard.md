@@ -1742,3 +1742,92 @@ did not render. C2 is drawn on every render, with the year ticks 1840, 1880, 192
 years the popular-vote and electoral leaders differed in MIT's range. §9's checks:
 `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200, and the plotly.js
 path a 404.
+
+### The chart refinements and the year filter, measured after deploy (2026-11-20, #593 and #596)
+
+#593 (D109) refines C2, C4, C5 and C7 and colors each chart by measure. #596 (D110) adds the
+year filter to `/elections/majority` and `/elections/over-time`, narrows C2's hybrid
+crossbar to 10 px and shortens C5's value-axis ticks (`~s`). Neither changes what a page
+reads: each subpage still makes one fill on a miss, N1 (`/v1/elections/summary`), and the
+filter is applied to that response, so a filtered view needs no other fill. Each issue asked
+for D071(g) to be re-measured on both subpages after deploy. Both shipped in one deploy, so
+one record covers both. The baselines are
+[#562's record](#the-elections-index-and-its-two-subpages-measured-after-deploy-2026-11-19-562)
+and [#564's](#c2s-three-shares-on-electionsmajority-measured-after-deploy-2026-11-20-564).
+
+Dashboard version `v-b042b4602c60-r35-a1` (deploy run 44777229480 of b042b46, the merge of
+#597), snapshot `37af4064…`, API 0.9.0, revision `usvote-api-00013-czh`, with no API deploy
+since 2026-11-12. The API origin was warm throughout and logged no `Starting new instance`
+in the window. Measured 16:59–17:02Z, by #277's method: `scripts/measure_dashboard_cold_start.py`
+(390 px, 10 Mbps / 100 ms, a fresh browser context each run), with `--chart "#c2 .main-svg"`
+on `/elections/majority` and `--chart "#c5 .main-svg"` on `/elections/over-time` (one run
+with `#c4`). The chart column is not a D071(g) measure. The filtered runs used
+`?year_from=1960` and, on B, `?year_from=1900&year_to=1980`. The previous day's canary had
+completed at 21:38Z and today's had not started when the window closed, so no canary request
+fell inside it.
+
+**Three instances**, one first visit each:
+
+- **A**, the deploy's new instance, up since 16:58:04Z: a first visit to
+  `/elections/over-time`, then runs from the cache on both pages, filtered and not. The
+  deploy's probes request `/`, so A held no N1 before the run.
+- **B** and **C**, after [restarts](#restarting-the-instance-to-empty-its-cache) at
+  17:00:06Z and 17:01:06Z: a first visit to `/elections/majority` on B, and to the filtered
+  link `/elections/over-time?year_from=1960` on C (a shared filtered link, the case #596
+  adds), then runs from the cache. Warmup ran on each as a loading request (2.27 s and
+  2.31 s), and each was serving its snapshot (2 responses) about 4 s after the delete
+  command was issued.
+
+Each first visit was a genuine miss: check 3 found no N1 fill on that instance before the
+run, and its `api fetch /v1/elections/summary` line was logged during it (16:59:17Z,
+17:00:32Z, 17:01:26Z). A's and B's fills were edge hits; C's reached the warm origin (45 ms
+there), the only `/v1/` request the origin logged in the window.
+
+| Run | Instance | TTFB (s) | First data (s) | Chart drawn (s) |
+|---|---|---|---|---|
+| `/elections/over-time`, first visit | A | 0.24 | 1.19 | 3.92 (C5) |
+| `/elections/majority`, first visit | B | 0.23 | 1.29 | 4.09 (C2) |
+| `/elections/over-time?year_from=1960`, first visit | C | 0.21 | 1.57 | 4.01 (C5) |
+| `/elections/majority`, from the cache (4 runs) | A, B | 0.11–0.18 | 1.04–1.08 | 3.66–3.84 (C2) |
+| `/elections/majority`, filtered, from the cache (5 runs) | A, B, C | 0.11–0.21 | 1.02–1.09 | 3.56–3.70 (C2) |
+| `/elections/over-time`, from the cache (4 runs) | A, B, C | 0.13–0.24 | 0.98–1.12 | 3.56–3.67 (C5), 3.69 (C4) |
+| `/elections/over-time`, filtered, from the cache (4 runs) | A, C | 0.09–0.32 | 1.02–1.16 | 3.51–3.88 (C5) |
+
+Every run reached data, with no degraded page and no section unavailable.
+
+- **TTFB met D071(g) on 20 of 20 runs** (0.09–0.32 s, against ≤ 1 s).
+- **First data met it on 20 of 20** (1.19–1.57 s on a first visit, 0.98–1.16 s from the
+  cache, against ≤ 3 s), within the baselines (1.54–1.64 s on a first visit, 0.99–1.53 s
+  from the cache).
+- **The fill.** The routing callback that makes the fill took 0.17 s (A), 0.28 s (B) and
+  0.38 s (C, filtered) on the server, against 0.17–0.34 s in the baselines, and
+  0.010–0.090 s for the renders from the cache, filtered or not (baselines 0.013–0.040 s;
+  the two above 0.04 s were A's first two renders of `/elections/majority`, 0.057 s and
+  0.090 s).
+- **Charts drawn** in 3.51–3.88 s from the cache and 3.92–4.09 s on a first visit, inside
+  the baselines' 3.59–4.58 s; a filtered view drew no slower than the full span.
+
+**Request budget held.** The new version logged only the expected fills: each instance's two
+prefetched paths as it started, and one N1 fill for each first visit. The runs from the
+cache, filtered or not, made none. The app logged no warnings and no 5xx since the deploy.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes): C, 124.7 MB
+(118.9 MiB), 32 % of the 384 MB D071 names for F1, after its runs and the checks below (86
+requests). This is below #562's peak of 134.2 MB, so D071's F1 flip condition is not near.
+
+**Checked on the deployed version** with a scripted browser, after the runs, at 360 px and
+390 px, in light and dark, on `/elections/majority` and `/elections/over-time` each with no
+filter and with `?year_from=1960`, and on `/state/TX` for C7 (20 renders): no sideways
+scroll, no unavailable note, and on every chart no text over other text or outside the
+chart's width.
+
+- **C2** draws 51 electoral-share points (17 when filtered to 1960 on), 13 popular-vote
+  triangles, 13 hybrid crossbars (`line-ew`, size 10) and 2 different-winner asterisks.
+- **C4** draws 51 bars (17 filtered); **C5** 13 bars, with value ticks 0, 50M, 100M and
+  150M.
+- **Year ticks** read 1840–2000 on the full span and 1980, 2000 when filtered; C7 reads
+  1840–2000.
+- **The filtered page's** `og:url` names the filter and its canonical link is query-free
+  (D110(b)).
+- **§9's checks:** `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200,
+  and the plotly.js path a 404.
