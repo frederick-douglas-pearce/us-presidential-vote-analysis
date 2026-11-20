@@ -52,7 +52,13 @@ from tests.unit.test_dashboard_app import (
     texts,
     url,
 )
-from tests.unit.test_dashboard_elections import classed, find, of_type, parse
+from tests.unit.test_dashboard_elections import (
+    caption_text,
+    classed,
+    find,
+    of_type,
+    parse,
+)
 from tests.unit.test_dashboard_export import body_rows, download
 
 PAGE: dict[str, Any] = dash.page_registry["pages.state"]
@@ -1664,7 +1670,7 @@ def c7_title(tree: Any) -> str:
 def c7_caption(tree: Any) -> str:
     (figure,) = [f for f in of_type(tree, "Figure") if f.id == C7_DOM]
     (caption,) = of_type(figure, "Figcaption")
-    return " ".join(texts(caption))
+    return caption_text(caption)
 
 
 def n2_state(usps: str) -> list[dict[str, Any]]:
@@ -1689,6 +1695,17 @@ def with_year(body: dict[str, Any], year: int, **fields: Any) -> dict[str, Any]:
 
 
 class TestC7:
+    def test_its_bars_are_electoral_red_and_its_caption_collapsed(self) -> None:
+        """#593 (D109): a state's electors appointed is electoral (red); the 14 px year
+        ticks and the key above the plot reach C7 through the shared pieces."""
+        tree = render()
+        figure = c7_figure(tree)
+        (bars,) = [tr for tr in figure["data"] if tr["type"] == "bar"]
+        assert bars["marker"]["color"] == "var(--chart-ec)"
+        assert figure["layout"]["xaxis"]["tickfont"] == {"size": 14}
+        (figcaption,) = of_type(tree, "Figcaption")
+        assert type(figcaption.children[0]).__name__ == "Details"
+
     def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
         assert charts.CHARTS["C7"] == charts.Chart("/state/<usps>", ELECTORS)
         tree = render()

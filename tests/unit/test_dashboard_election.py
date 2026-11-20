@@ -43,6 +43,7 @@ from tests.unit.test_dashboard_app import (
     url,
 )
 from tests.unit.test_dashboard_elections import (
+    caption_text,
     find,
     in_order,
     json_node,
@@ -632,7 +633,11 @@ class TestHeaders:
         assert set(MOD["PANEL_FIELDS"]) <= set(body["election"])
 
     def test_the_glossaries_name_every_column_and_the_count_reason(self) -> None:
-        glossaries = of_type(render(1872), "Details")
+        glossaries = [
+            d
+            for d in of_type(render(1872), "Details")
+            if getattr(d, "className", None) == "glossary"
+        ]
         assert len(glossaries) == 4
         named = [[texts(dd.children)[0] for dd in of_type(g, "Dd")] for g in glossaries]
         assert named[0] == list(MOD["PANEL_FIELDS"])
@@ -3298,6 +3303,24 @@ def t3_cells(year: int, body: Any = None) -> list[dict[str, str]]:
 
 
 class TestC1:
+    def test_each_series_is_its_measure_s_color_and_the_caption_stays_open(
+        self,
+    ) -> None:
+        """#593 (D109): electoral share red, popular-vote share blue, read by measure;
+        the caption stays open, its bar order being C1's one cue apart from color."""
+        tree = render_page(OV, 2016)
+        bars = {
+            tr["name"]: tr["marker"]["color"]
+            for tr in c1_figure(tree)["data"]
+            if tr["type"] == "bar"
+        }
+        assert bars == {
+            labels.LABELS["ec_share_full"]: "var(--chart-ec)",
+            labels.LABELS["pv_share"]: "var(--chart-pv)",
+        }
+        (figcaption,) = of_type(c1(tree), "Figcaption")
+        assert of_type(figcaption, "Details") == []
+
     def test_registered_with_t3_as_its_companion(self) -> None:
         from explore import charts
 
@@ -3703,7 +3726,7 @@ class TestC1:
         assert ec["hovertext"][0].startswith("&lt;b&gt;A &amp; B&lt;/b&gt;<br>")
 
     @pytest.mark.parametrize(
-        "name", ["var(--chart-1)", "var(--unset)", "x var(--page) y", "(a)"]
+        "name", ["var(--chart-ec)", "var(--unset)", "x var(--page) y", "(a)"]
     )
     def test_a_name_spelling_a_token_reference_is_drawn_as_written(
         self, name: str
@@ -3724,7 +3747,7 @@ class TestC1:
 
     def test_a_slug_spelling_a_token_reference_still_renders(self) -> None:
         body = year_body(2016)
-        body["summary"][0]["candidate_slug"] = "var(--chart-1)"
+        body["summary"][0]["candidate_slug"] = "var(--chart-ec)"
         assert c1(render(2016, body=body)) is not None
 
     @pytest.mark.parametrize("name", [7, None, " "])
@@ -3814,8 +3837,11 @@ def c3_figure(tree: Any) -> dict[str, Any]:
 
 
 def c3_caption(tree: Any) -> str:
+    """C3's caption and, after it, its table pointer, as a reader opening it reads
+    them (collapsed since #593)."""
     (caption,) = of_type(c3(tree), "Figcaption")
-    return "".join(texts(caption.children))
+    _, pointer = caption.children
+    return f"{caption_text(caption)} {''.join(texts(pointer.children))}"
 
 
 def c3_title(tree: Any) -> str:
@@ -4192,17 +4218,17 @@ class TestC3:
     ) -> None:
         found = c3_traces(c3_figure(section(1848)))
         assert found["striped"]["marker"] == {
-            "color": "var(--chart-1)",
+            "color": "var(--chart-ec)",
             "pattern": {"shape": "/", "fillmode": "overlay", "fgcolor": "var(--page)"},
         }
-        assert found["plain"]["marker"] == {"color": "var(--chart-1)"}
+        assert found["plain"]["marker"] == {"color": "var(--chart-ec)"}
 
     def test_the_selected_mark_is_page_filled_ringed_and_under_the_markers(
         self,
     ) -> None:
         """#435's review (F3): the mark sits half over its bar's start, so it is filled
         with the page color, which ``test_each_mark_meets_3_to_1_on_the_page``
-        (``test_dashboard_theme.py``) holds at 3:1 against ``--chart-1`` in both
+        (``test_dashboard_theme.py``) holds at 3:1 against ``--chart-ec`` in both
         palettes, ringed in the text color; drawn before the marker trace, so a
         marker in its row is on top."""
         from tests.unit.test_dashboard_theme import (
@@ -4229,7 +4255,7 @@ class TestC3:
         }
         for palette in (LIGHT, EXPLICIT_DARK):
             colors = block(palette)
-            pair = (parse_color(colors["--page"]), parse_color(colors["--chart-1"]))
+            pair = (parse_color(colors["--page"]), parse_color(colors["--chart-ec"]))
             assert contrast(*pair) >= NON_TEXT
 
     @pytest.mark.parametrize(
@@ -4357,7 +4383,7 @@ class TestC3:
         assert found["marks"]["hovertext"][0].startswith(f"{escaped}TX<br>")
 
     @pytest.mark.parametrize(
-        "name", ["var(--chart-1)", "var(--unset)", "x var(--page) y", "(a)"]
+        "name", ["var(--chart-ec)", "var(--unset)", "x var(--page) y", "(a)"]
     )
     def test_a_state_name_spelling_a_token_reference_is_drawn_as_written(
         self, name: str

@@ -19,9 +19,10 @@ from explore import charts, components, labels
 
 #: C4, C5 and C7's height, the same in every mode now that years run along the bottom
 #: (#558, D104). Their titles are page text (``components.chart`` takes them out of the
-#: figure), so the top margin is the template's; C5 adds room above it for its band
-#: labels (``pages/elections_over_time.py``), and C4 beside it takes C5's margin, so
-#: the pair's plots line up.
+#: figure), so the top margin is the template's, which plotly.js pushes for a key above
+#: the plot (#593, D109); C5 adds room for an after band's label
+#: (``pages/elections_over_time.py``), and C4 and C5 share one left and right margin
+#: there, so their stacked plots line up.
 HEIGHT_PX = 360
 TOP_PX = 16
 #: C4's marker series' symbols (#558, D104), which C7 draws too (#560): one series per
@@ -109,9 +110,12 @@ def point_hover(point: Point, state: str | None, *, total: bool) -> str:
     )
 
 
-def bar_trace(name: str, drawn: list[tuple[Point, int, str, str]]) -> dict[str, Any]:
+def bar_trace(
+    name: str, drawn: list[tuple[Point, int, str, str]], color: str
+) -> dict[str, Any]:
     """A series of bars, one per drawn row at its year, kept off the chart's key; no
-    bar carries text, and its hover writes the table's cells (#558, D104)."""
+    bar carries text, and its hover writes the table's cells (#558, D104). ``color``
+    is its measure's token (#593: :data:`explore.charts.EC_COLOR` or ``PV_COLOR``)."""
     return {
         "type": "bar",
         "name": name,
@@ -119,7 +123,7 @@ def bar_trace(name: str, drawn: list[tuple[Point, int, str, str]]) -> dict[str, 
         "ids": [str(point.year) for point, _, _, _ in drawn],
         "x": [point.year for point, _, _, _ in drawn],
         "y": [value for _, value, _, _ in drawn],
-        "marker": {"color": "var(--chart-1)"},
+        "marker": {"color": color},
         "hovertext": [hover for _, _, _, hover in drawn],
         "hovertemplate": "%{hovertext}<extra></extra>",
     }
@@ -134,11 +138,18 @@ def marker_trace(
     y: list[float] | None = None,
     size: int = 9,
     color: str = "var(--text)",
+    line_width: float | None = None,
 ) -> dict[str, Any]:
     """A time-series chart's series of markers, one per year, named by ``name`` in the
     chart's key (#558, D104: the key labels the marker, not a text beside each), drawn
     whole at the plot's edge. By default at zero, one per year with nothing to draw
-    (C2, C4, C5 and C7); C2 also draws its marks at their values (``y``, #564)."""
+    (C2, C4, C5 and C7); C2 also draws its marks at their values (``y``, #564).
+    ``line_width`` draws the marker's outline in ``color`` at that width: a line-only
+    symbol (C2's ``line-ew`` crossbar and ``asterisk``, #593) draws nothing without
+    it."""
+    marker: dict[str, Any] = {"symbol": symbol, "size": size, "color": color}
+    if line_width is not None:
+        marker["line"] = {"width": line_width, "color": color}
     return {
         "type": "scatter",
         "mode": "markers",
@@ -148,7 +159,7 @@ def marker_trace(
         "x": list(years),
         "y": [0] * len(years) if y is None else list(y),
         "cliponaxis": False,
-        "marker": {"symbol": symbol, "size": size, "color": color},
+        "marker": marker,
         "hovertext": list(hovers),
         "hovertemplate": "%{hovertext}<extra></extra>",
     }
@@ -195,9 +206,17 @@ def time_layout(
     return layout
 
 
-#: Room for each band label above the plot: two lines of 12 px text at plotly's 1.3
-#: line height (2 × 16 px) and 8 px between labels (#558, D104; shared since #564).
+#: Room for the after band's label above the plot: two lines of 12 px text at
+#: plotly's 1.3 line height (2 × 16 px) and 8 px below it (#558, D104; shared since
+#: #564). The before band's label sits inside its band since #593 and takes none.
 BAND_LABEL_PX = 40
+#: How far below the plot's top edge the before band's label sits inside its band
+#: (#593, D109): clear of the band's own edge line.
+BAND_LABEL_INSET_PX = 2
+#: One row of a chart's key above the plot: 14 px text at plotly's 1.3 line height,
+#: rounded up with its padding (#593). A chart reserves whole rows for its key only
+#: where the after band's label must sit above it (:func:`pv_bands`' ``key_px``).
+KEY_ROW_PX = 24
 
 
 def _band(
@@ -205,9 +224,11 @@ def _band(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """A shaded band over the served years ``first`` to ``last`` of ``years``
     (:func:`explore.components.year_edges`), the whole height of the plot, and its
-    label above the plot (#558, D104), never inside the band, which can be one
-    election wide: the band before the window's at its left edge, after it (``after``)
-    at its right, ``raised`` pixels higher where another label sits below it."""
+    label (#558, D104, as amended by D109 for #593). The band before the window's
+    label sits inside it, at its top left; that band spans every year before the
+    popular-vote window, so it is wide. The band after it (``after``) can be one
+    election wide, so its label sits above the plot at the band's right edge,
+    ``raised`` pixels higher to clear the chart's key there."""
     low, high = components.year_edges(years, first, last)
     shape = {
         "type": "rect",
@@ -221,7 +242,7 @@ def _band(
         "fillcolor": "var(--chart-grid)",
         "line": {"width": 1, "color": "var(--chart-reference)"},
     }
-    note = {
+    note: dict[str, Any] = {
         "text": label,
         "showarrow": False,
         "font": {"color": "var(--text)", "size": 12},
@@ -231,15 +252,18 @@ def _band(
         "align": "right" if after else "left",
         "yref": "paper",
         "y": 1,
-        "yanchor": "bottom",
-        "yshift": raised,
+        "yanchor": "bottom" if after else "top",
+        "yshift": raised if after else -BAND_LABEL_INSET_PX,
     }
+    if not after:
+        note["xshift"] = BAND_LABEL_INSET_PX
     return shape, note
 
 
 class Bands(NamedTuple):
     """The bands over the served years outside the popular-vote window: their shapes,
-    their labels, the top margin that holds the labels, and which bands are drawn."""
+    their labels, the top margin that holds the after band's label (0 with none), and
+    which bands are drawn."""
 
     shapes: list[dict[str, Any]]
     annotations: list[dict[str, Any]]
@@ -249,31 +273,39 @@ class Bands(NamedTuple):
 
 
 def pv_bands(
-    years: list[int], window: tuple[int, int], before_label: str, after_label: str
+    years: list[int],
+    window: tuple[int, int],
+    before_label: str,
+    after_label: str,
+    *,
+    key_px: int = 0,
 ) -> Bands:
     """The shaded bands over the served ``years`` before and after the popular-vote
-    ``window`` (read from ``coverage`` by the page), each labeled above the plot; with
-    both drawn, the before label goes on top (#436, D100; #558, D104). C5 and C2 (#564)
-    draw them; the labels are the page's."""
+    ``window`` (read from ``coverage`` by the page) (#436, D100; #558, D104; #593,
+    D109): the before band's label inside it, the after band's above the plot,
+    raised by ``key_px``, the room the chart reserves for its key above the plot.
+    ``top_px`` is the top margin the after band's label needs (the key's room, the
+    label's and the template's), or 0 when no after band is drawn: plotly.js then
+    pushes the top margin for the key alone. C5 and C2 (#564) draw them; the labels
+    are the page's."""
     pv_min, pv_max = window
     before = [year for year in years if year < pv_min]
     after = [year for year in years if year > pv_max]
-    raised = BAND_LABEL_PX if before and after else 0
     shapes: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
     if before:
         shape, note = _band(
-            years, before[0], before[-1], before_label, after=False, raised=raised
+            years, before[0], before[-1], before_label, after=False, raised=0
         )
         shapes.append(shape)
         annotations.append(note)
     if after:
         shape, note = _band(
-            years, after[0], after[-1], after_label, after=True, raised=0
+            years, after[0], after[-1], after_label, after=True, raised=key_px
         )
         shapes.append(shape)
         annotations.append(note)
-    top = TOP_PX + BAND_LABEL_PX * len(annotations)
+    top = TOP_PX + key_px + BAND_LABEL_PX if after else 0
     return Bands(shapes, annotations, top, bool(before), bool(after))
 
 
@@ -321,7 +353,7 @@ def c4_figure(
     ]
     data: list[dict[str, Any]] = []
     if drawn:
-        data.append(bar_trace(name, drawn))
+        data.append(bar_trace(name, drawn, charts.EC_COLOR))
     data += series(marks, C4_SYMBOLS)
     longest = max((value for _, value, _, _ in drawn), default=1)
     layout = time_layout(

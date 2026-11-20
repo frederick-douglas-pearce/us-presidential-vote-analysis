@@ -79,23 +79,40 @@ C2_UNAVAILABLE = (
 )
 
 #: C2's height (#564: taller than #558's 360 px, for the three marks a year and the
-#: key). Its title is page text (``components.chart`` takes it out of the figure).
-_C2_HEIGHT_PX = 420
+#: key; #593, D109: taller again, so the marks after 1976, which sit between 45% and
+#: 60%, stand apart). Its title is page text (``components.chart`` takes it out of the
+#: figure).
+_C2_HEIGHT_PX = 560
+#: Room C2 reserves for its key above the plot where an after band's label must sit
+#: above the key (:func:`explore.over_time.pv_bands`): three rows, the key's height at
+#: desktop width plus one (#593, D109).
+_C2_KEY_PX = 3 * over_time.KEY_ROW_PX
 #: How far below the majority line its label starts: more than C2's point radius.
 _C2_LINE_LABEL_SHIFT_PX = 6
 #: The value axis runs past 100% to hold the strip of disagreement marks (#564, D108),
 #: which sit at :data:`_C2_STRIP_Y`, above every share; its ticks stop at 100%.
 _C2_Y_TOP = 1.12
 _C2_STRIP_Y = 1.06
+#: The value axis's ticks, and where the majority line sits among them: the one tick
+#: that draws no gridline but the line itself (#593, D109).
+_C2_TICKS = (0, 0.25, 0.5, 0.75, 1)
+_C2_MAJORITY = 0.5
 #: C2's symbols (#558, D104; #564, D108): one per meaning across C2, C4, C5 and C7.
 #: The open circle is no figure in this dataset and the open square an unrecognized
 #: value, as in C4 and C5; the solid upward triangle is C2's alone (C4's open one means
 #: no electors appointed: the fill carries the meaning).
 _C2_EC_SYMBOL = "circle"
 _C2_PV_SYMBOL = "triangle-up"
-_C2_HYBRID_SYMBOL = "star"
-_C2_PV_DIFFERENT_SYMBOL = "hexagon"
+#: The hybrid score is a short horizontal crossbar on the connector (#593, D109): the
+#: average of the other two shares, it always sits at the connector's midpoint, so a
+#: crossbar reads as a tick on a range bar and stays visible when the circle and the
+#: triangle nearly meet. ``line-ew`` and ``asterisk`` are line-only symbols, drawn
+#: by their outline (:data:`_C2_LINE_PX`).
+_C2_HYBRID_SYMBOL = "line-ew"
+_C2_PV_DIFFERENT_SYMBOL = "asterisk"
 _C2_HYBRID_DIFFERENT_SYMBOL = "pentagon"
+#: The crossbar's and the asterisk's stroke width.
+_C2_LINE_PX = 3
 _C2_SYMBOLS = {
     labels.C2_NO_FIGURE: "circle-open",
     labels.UNRECOGNIZED: "square-open",
@@ -295,11 +312,11 @@ def _c2_figure(
     """C2's figure (#434, D096, as amended by D104 for #558 and D108 for #564): election
     year along the bottom (:func:`explore.components.year_axis`), and for each served
     year the leader's served ``ec_share_full`` (a circle), ``pv_share`` (a solid
-    triangle) joined to it by a thin line, and ``hybrid_score`` (a star), each drawn
-    wherever its table cell is a share, against a dashed line at half of each
-    election's electors appointed; a strip of marks above 100% where the served
-    ``pv_flip`` or ``hybrid_flip`` is true; and bands over the years outside the
-    popular-vote ``window`` (from ``coverage``).
+    triangle) joined to it by a thin line, and ``hybrid_score`` (a crossbar on that
+    line, #593), each drawn wherever its table cell is a share, against a dashed line
+    at half of each election's electors appointed; a strip of marks above 100% where
+    the served ``pv_flip`` or ``hybrid_flip`` is true; and bands over the years
+    outside the popular-vote ``window`` (from ``coverage``).
 
     No mark carries text: its hover writes the table's cells. A share or score the
     table does not show as one is a marker at zero, never a dropped year, in a series
@@ -307,7 +324,7 @@ def _c2_figure(
     dataset, else :data:`explore.labels.UNRECOGNIZED`), each with its own symbol and
     named in the chart's key; a popular-vote cell that reads
     :data:`explore.labels.NOT_APPLICABLE` draws nothing, and the band says why. Drawn
-    in the order connector, triangles, stars, circles, so the circle is on top.
+    in the order connector, triangles, crossbars, circles, so the circle is on top.
     """
     years = [row["year"] for row in rows]
     ec: list[tuple[int, float, str]] = []
@@ -409,15 +426,26 @@ def _c2_figure(
                 "hoverinfo": "skip",
             }
         )
-    series = (
-        (labels.LABELS["pv_share"], _C2_PV_SYMBOL, "var(--chart-2)", 8, pv),
-        (labels.C2_HYBRID_KEY, _C2_HYBRID_SYMBOL, "var(--chart-3)", 9, hybrid),
-        (labels.LABELS["ec_share_full"], _C2_EC_SYMBOL, "var(--chart-1)", 7, ec),
+    # name, symbol, color, size, stroke (a line-only symbol's outline), drawn
+    series: tuple[
+        tuple[str, str, str, int, float | None, list[tuple[int, float, str]]], ...
+    ] = (
+        (labels.LABELS["pv_share"], _C2_PV_SYMBOL, charts.PV_COLOR, 8, None, pv),
+        (
+            labels.C2_HYBRID_KEY,
+            _C2_HYBRID_SYMBOL,
+            charts.HYBRID_COLOR,
+            16,
+            _C2_LINE_PX,
+            hybrid,
+        ),
+        (labels.LABELS["ec_share_full"], _C2_EC_SYMBOL, charts.EC_COLOR, 7, None, ec),
         (
             labels.C2_PV_DIFFERENT_KEY,
             _C2_PV_DIFFERENT_SYMBOL,
             "var(--text)",
-            9,
+            11,
+            _C2_LINE_PX,
             pv_strip,
         ),
         (
@@ -425,10 +453,11 @@ def _c2_figure(
             _C2_HYBRID_DIFFERENT_SYMBOL,
             "var(--text)",
             9,
+            None,
             hybrid_strip,
         ),
     )
-    for name, symbol, color, size, drawn in series:
+    for name, symbol, color, size, stroke, drawn in series:
         if drawn:
             data.append(
                 over_time.marker_trace(
@@ -439,6 +468,7 @@ def _c2_figure(
                     y=[y for _, y, _ in drawn],
                     size=size,
                     color=color,
+                    line_width=stroke,
                 )
             )
     for label, symbol in _C2_SYMBOLS.items():
@@ -458,7 +488,26 @@ def _c2_figure(
         window,
         labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
         labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
+        key_px=_C2_KEY_PX,
     )
+    # The value axis draws no gridlines of its own (#593, D109): its 50% gridline
+    # showed through the majority line's dashes, so it read as a doubled line. The
+    # others are drawn as shapes from the ticks, under the line, over the bands.
+    gridlines = [
+        {
+            "type": "line",
+            "xref": "paper",
+            "x0": 0,
+            "x1": 1,
+            "yref": "y",
+            "y0": tick,
+            "y1": tick,
+            "layer": "below",
+            "line": {"width": 1, "color": "var(--chart-grid)"},
+        }
+        for tick in _C2_TICKS
+        if tick not in (0, _C2_MAJORITY)
+    ]
     layout: dict[str, Any] = {
         "title": {"text": labels.C2_TITLE},
         "height": _C2_HEIGHT_PX,
@@ -468,19 +517,21 @@ def _c2_figure(
         "yaxis": {
             "range": [0, _C2_Y_TOP],
             "tickformat": ".0%",
-            "tickvals": [0, 0.25, 0.5, 0.75, 1],
+            "tickvals": list(_C2_TICKS),
+            "showgrid": False,
             "title": {"text": labels.C2_VALUE_AXIS},
         },
         "shapes": [
             *bands.shapes,
+            *gridlines,
             {
                 "type": "line",
                 "xref": "paper",
                 "x0": 0,
                 "x1": 1,
                 "yref": "y",
-                "y0": 0.5,
-                "y1": 0.5,
+                "y0": _C2_MAJORITY,
+                "y1": _C2_MAJORITY,
                 "layer": "below",
                 "line": {
                     "dash": "dash",
@@ -502,7 +553,7 @@ def _c2_figure(
                 "x": years[1] if len(years) > 1 else years[0],
                 "xanchor": "left",
                 "yref": "y",
-                "y": 0.5,
+                "y": _C2_MAJORITY,
                 "yanchor": "top",
                 "yshift": -_C2_LINE_LABEL_SHIFT_PX,
                 "align": "left",
@@ -511,7 +562,7 @@ def _c2_figure(
             },
         ],
     }
-    if bands.shapes:
+    if bands.top_px:
         layout["margin"] = {"t": bands.top_px}
     return C2(
         {"data": data, "layout": layout},

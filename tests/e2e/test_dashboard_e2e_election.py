@@ -398,7 +398,7 @@ def test_c1_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     with no reload (a marker on ``window`` survives) and no request."""
     open_c1(page, 2016)
     light = first_ec_fill(page)
-    assert light == rgb(token(page, "--chart-1"))
+    assert light == rgb(token(page, "--chart-ec"))
     line = f"{C1} .shapelayer path"
     stroke = page.locator(line).first.evaluate("el => getComputedStyle(el).stroke")
     assert stroke == rgb(token(page, "--chart-reference"))
@@ -411,7 +411,7 @@ def test_c1_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     page.evaluate("window.__e2e_mark = 1")
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     expect(page.locator(EC_BARS).first).not_to_have_css("fill", light)
-    assert first_ec_fill(page) == rgb(token(page, "--chart-1"))
+    assert first_ec_fill(page) == rgb(token(page, "--chart-ec"))
     stroke = page.locator(line).first.evaluate("el => getComputedStyle(el).stroke")
     assert stroke == rgb(token(page, "--chart-reference"))
     page.wait_for_timeout(SETTLE_MS)
@@ -428,9 +428,9 @@ def test_c1_follows_a_dark_device_under_auto(page: Page) -> None:
     assert page.evaluate("document.documentElement.getAttribute('data-theme')") is None
     assert page.evaluate("matchMedia('(prefers-color-scheme: dark)').matches")
     expect(page.locator(EC_BARS).first).to_have_css(
-        "fill", rgb(token(page, "--chart-1"))
+        "fill", rgb(token(page, "--chart-ec"))
     )
-    assert first_ec_fill(page) != rgb("#2a78d6")  # not the light palette's --chart-1
+    assert first_ec_fill(page) != rgb("#c62f2f")  # not the light palette's --chart-ec
 
 
 @pytest.mark.plotlyjs_fetches(1)
@@ -874,7 +874,7 @@ def stripe_color(page: Page) -> str:
 @pytest.mark.plotlyjs_fetches(1)
 def test_c3_on_1848_labels_texas_and_stripes_present_day_bars(page: Page) -> None:
     """1848 draws both bar series: each bar centered on its row name (the shared
-    ``offsetgroup`` matters only here), the plain bars filled ``--chart-1`` and the
+    ``offsetgroup`` matters only here), the plain bars filled ``--chart-ec`` and the
     present-day bars striped in the page color, before and after a theme switch."""
     open_c3(page, 1848)
     ticks = assert_c3_readable(page, 1848)
@@ -891,7 +891,7 @@ def test_c3_on_1848_labels_texas_and_stripes_present_day_bars(page: Page) -> Non
                 "getComputedStyle(document.documentElement).colorScheme === 'dark'"
             )
             expect(page.locator(C3_STRIPED).first).to_be_visible()
-        chart_1 = rgb(token(page, "--chart-1"))
+        chart_1 = rgb(token(page, "--chart-ec"))
         # The plain bars (the first bar trace) are filled with the series color.
         expect(page.locator(C3_PLAIN).first).to_have_css("fill", chart_1)
         assert page.locator(C3_STRIPED).first.evaluate(
@@ -940,7 +940,7 @@ def test_c3_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     open_c3(page, 1848)
     bar = page.locator(f"{C3} .barlayer .trace:first-child .point path").first
     light = bar.evaluate("el => getComputedStyle(el).fill")
-    assert light == rgb(token(page, "--chart-1"))
+    assert light == rgb(token(page, "--chart-ec"))
     seen: list[str] = []
 
     def on_request(request: Request) -> None:
@@ -951,7 +951,7 @@ def test_c3_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     expect(bar).not_to_have_css("fill", light)
     assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
-        token(page, "--chart-1")
+        token(page, "--chart-ec")
     )
     page.wait_for_timeout(SETTLE_MS)
     assert seen == [], seen
@@ -971,11 +971,11 @@ def test_c3_follows_a_dark_device_under_auto(page: Page) -> None:
         "getComputedStyle(document.documentElement).colorScheme"
     ) == "dark"
     expect(page.locator(C3_PLAIN).first).to_have_css(
-        "fill", rgb(token(page, "--chart-1"))
+        "fill", rgb(token(page, "--chart-ec"))
     )
     assert page.locator(C3_PLAIN).first.evaluate(
         "el => getComputedStyle(el).fill"
-    ) != rgb("#2a78d6")  # not the light palette's --chart-1
+    ) != rgb("#c62f2f")  # not the light palette's --chart-ec
     assert stripe_color(page) == rgb(token(page, "--page"))
 
 

@@ -94,7 +94,7 @@ def build(figure: Any = None, **overrides: Any) -> Any:
 def bars(**second: Any) -> dict[str, Any]:
     """Two bar traces, the second changed by ``second``."""
     figure = copy.deepcopy(TEST_FIGURE)
-    figure["data"][1]["marker"] = {"color": "var(--chart-2)"}
+    figure["data"][1]["marker"] = {"color": "var(--chart-pv)"}
     figure["data"][1].update(second)
     return figure
 
@@ -218,13 +218,38 @@ class TestChartBuilder:
         assert store.data == expected
         assert "title" in TEST_FIGURE["layout"]  # the caller's figure is not changed
 
-    def test_the_caption_ends_with_the_table_pointer(self) -> None:
+    def test_the_caption_is_collapsed_and_the_table_pointer_follows_it(self) -> None:
+        """#593 (D109): the caption sits in a ``details`` closed on load, opened by
+        its summary; the table pointer follows it, outside it, always shown."""
         caption = build(caption="What it shows.").children[3]
+        details, pointer = caption.children
+        assert type(details).__name__ == "Details"
+        assert getattr(details, "open", None) is None  # closed on load
+        summary, paragraph = details.children
+        assert type(summary).__name__ == "Summary"
+        assert summary.children == labels.CHART_CAPTION_SUMMARY
+        assert type(paragraph).__name__ == "P"
+        assert paragraph.children == "What it shows."
+        assert type(pointer).__name__ == "P"
+        link, period = pointer.children
+        assert period == "."
+        assert type(link).__name__ == "A"
+        assert link.children == labels.CHART_TABLE_POINTER
+        assert link.href == "#elections-table"
+
+    def test_an_open_caption_ends_with_the_table_pointer(self) -> None:
+        """``collapsed=False`` (C1, #593): the caption is shown, the pointer at its
+        end, with no summary."""
+        figure = copy.deepcopy(TEST_FIGURE)
+        caption = components.chart(
+            "C1", figure, "elections-table", "What it shows.", collapsed=False
+        ).children[3]
         text, space, link, period = caption.children
         assert (text, space, period) == ("What it shows.", " ", ".")
         assert type(link).__name__ == "A"
         assert link.children == labels.CHART_TABLE_POINTER
         assert link.href == "#elections-table"
+        assert of_type(caption, "Details") == []
 
     @pytest.mark.parametrize(
         ("overrides", "message"),
@@ -287,8 +312,9 @@ class TestChartBuilder:
         assert [getattr(c, "id", None) for c in built.children] == ["c1-title", None]
         assert built.children[0].children == TEST_FIGURE["layout"]["title"]["text"]
         caption = built.children[1]
-        assert caption.children[0] == "A caption."
-        assert caption.children[2].href == "#elections-table"
+        details, pointer = caption.children
+        assert details.children[1].children == "A caption."
+        assert pointer.children[0].href == "#elections-table"
         [record] = [r for r in caplog.records if r.name == "explore.components"]
         assert record.levelno == logging.ERROR and record.chart_id == "C1"  # type: ignore[attr-defined]
         assert "C1 on /elections not drawn" in record.getMessage()
@@ -333,12 +359,12 @@ class TestColorAllowlist:
             ({"data": [{"marker": {"color": [1, 2]}}]}, "data[0].marker.color"),
             # A list of tokens colors points one by one: only colorway takes a list.
             (
-                {"data": [{"marker": {"color": ["var(--chart-1)", "var(--chart-2)"]}}]},
+                {"data": [{"marker": {"color": ["var(--chart-ec)", "var(--chart-pv)"]}}]},
                 "data[0].marker.color",
             ),
             ({"data": [{"marker": {"color": 3}}]}, "data[0].marker.color"),
             (
-                {"data": [{"line": {"color": "var(--chart-1) "}}]},
+                {"data": [{"line": {"color": "var(--chart-ec) "}}]},
                 "data[0].line.color",
             ),
             ({"data": [{"marker": {"colorscale": "Viridis"}}]}, "no colorscale"),
@@ -349,7 +375,7 @@ class TestColorAllowlist:
                 "layout.font.family",
             ),
             (
-                {"data": [{"name": "var(--chart-1)"}]},
+                {"data": [{"name": "var(--chart-ec)"}]},
                 "a token reference outside a color",
             ),
             # The font token is no color, and no color token is the font.
@@ -372,9 +398,9 @@ class TestColorAllowlist:
 
     def test_token_references_pass(self) -> None:
         figure = {
-            "data": [{"marker": {"color": "var(--chart-1)"}}],
+            "data": [{"marker": {"color": "var(--chart-ec)"}}],
             "layout": {
-                "colorway": ["var(--chart-1)", "var(--chart-2)"],
+                "colorway": ["var(--chart-ec)", "var(--chart-pv)"],
                 "font": {"family": "var(--font-body)", "color": "var(--text)"},
             },
         }
@@ -789,7 +815,7 @@ class TestTemplate:
     def test_the_template_names_no_color_and_every_token_exists(self) -> None:
         assert charts.color_problems(charts.TEMPLATE) == []
         named = charts.tokens_named(charts.TEMPLATE)
-        assert {"--page", "--text", "--chart-1", "--chart-axis"} <= named
+        assert {"--page", "--text", "--chart-ec", "--chart-axis"} <= named
         # A color token is declared in every palette block; the font stack, not a
         # color, only on the light block's bare :root, which the dark blocks inherit.
         assert "--font-body" in block(LIGHT) and "--font-body" in NOT_COLORS
@@ -800,9 +826,20 @@ class TestTemplate:
     def test_every_token_the_test_figure_names_is_a_color_token(self) -> None:
         assert charts.tokens_named(TEST_FIGURE) <= set(TOKENS)
 
-    def test_the_colorway_is_the_series_tokens_in_order(self) -> None:
-        series = [t for t in TOKENS if re.fullmatch(r"--chart-\d+", t)]
-        assert charts.TEMPLATE["layout"]["colorway"] == [f"var({t})" for t in series]
+    def test_the_colorway_is_the_measure_tokens(self) -> None:
+        """One token per measure (#593, D109): electoral, popular vote, hybrid. Every
+        trace sets its own color by measure, so the colorway is only a fallback."""
+        assert charts.TEMPLATE["layout"]["colorway"] == [
+            charts.EC_COLOR,
+            charts.PV_COLOR,
+            charts.HYBRID_COLOR,
+        ]
+        assert (charts.EC_COLOR, charts.PV_COLOR, charts.HYBRID_COLOR) == (
+            "var(--chart-ec)",
+            "var(--chart-pv)",
+            "var(--chart-hybrid)",
+        )
+        assert {"--chart-ec", "--chart-pv", "--chart-hybrid"} <= set(TOKENS)
 
     def test_the_shared_defaults(self) -> None:
         layout = charts.TEMPLATE["layout"]
@@ -889,7 +926,7 @@ class TestChartCallback:
             re.search(r"var token = new RegExp\((\"[^\"]*\")\);", script).group(1)  # type: ignore[union-attr]
         )
         assert pattern == "^" + charts.TOKEN_RE.pattern + "$"
-        assert re.fullmatch(pattern.strip("^$"), "var(--chart-1)")
+        assert re.fullmatch(pattern.strip("^$"), "var(--chart-ec)")
         assert "getPropertyValue(match[1]).trim()" in script
         assert "throw new Error('chart token ' + match[1] + ' is unset')" in script
         assert 'return [figure, {visibility: "visible"}];' in script
@@ -1376,7 +1413,7 @@ BASE: dict[str, Any] = {
         {
             "type": "bar",
             "name": "A",
-            "marker": {"color": "var(--chart-1)", "pattern": {"shape": "/"}},
+            "marker": {"color": "var(--chart-ec)", "pattern": {"shape": "/"}},
             "text": ["a"],
             "textposition": "auto",
             "texttemplate": "%{text}",
@@ -1388,8 +1425,8 @@ BASE: dict[str, Any] = {
             "type": "scatter",
             "mode": "markers+lines+text",
             "name": "B",
-            "marker": {"symbol": "diamond", "color": "var(--chart-2)"},
-            "line": {"dash": "dot", "color": "var(--chart-2)"},
+            "marker": {"symbol": "diamond", "color": "var(--chart-pv)"},
+            "line": {"dash": "dot", "color": "var(--chart-pv)"},
             "text": ["b"],
             "hoverinfo": "text",
             "hovertemplate": "%{text}",

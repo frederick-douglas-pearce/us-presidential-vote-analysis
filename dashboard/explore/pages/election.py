@@ -267,8 +267,8 @@ def _c1_figure(
     no_figure = False
     bars = []
     for field, color, hover in (
-        ("ec_share_full", "var(--chart-1)", labels.C1_EC_HOVER),
-        ("pv_share", "var(--chart-2)", labels.C1_PV_HOVER),
+        ("ec_share_full", charts.EC_COLOR, labels.C1_EC_HOVER),
+        ("pv_share", charts.PV_COLOR, labels.C1_PV_HOVER),
     ):
         if field not in offsets:
             continue
@@ -575,6 +575,9 @@ def render(
             figure,
             NATION_TABLE_ID,
             _c1_caption(has_popular_vote, no_figure, year, coverage),
+            # Open (#593, D109): its bar-order sentence is C1's one cue apart from
+            # color, since its key shows color swatches only (WCAG 1.4.1).
+            collapsed=False,
         )
     )
     rest = [

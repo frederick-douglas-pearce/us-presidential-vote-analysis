@@ -172,12 +172,20 @@ _REFUSED_KEY_RE = re.compile(r".*colorscale")
 #: the page's color (WCAG 1.4.11). C1 (#433, D091) made two of these rules: a hover or
 #: text template names no number format (:func:`template_problems`), and no bar sets
 #: its own ``width`` or ``offset``, which would defeat both gaps (:func:`bar_problems`).
+#: Each measure's color token (#593, D109): electoral-vote-derived values red,
+#: popular-vote-derived values blue, the hybrid score purple, on every chart. A
+#: series takes its measure's token, never one by position.
+EC_COLOR = "var(--chart-ec)"
+PV_COLOR = "var(--chart-pv)"
+HYBRID_COLOR = "var(--chart-hybrid)"
+
+
 TEMPLATE: dict[str, Any] = {
     "layout": {
         "font": {"family": "var(--font-body)", "color": "var(--text)", "size": 14},
         "paper_bgcolor": "var(--page)",
         "plot_bgcolor": "var(--page)",
-        "colorway": ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"],
+        "colorway": [EC_COLOR, PV_COLOR, HYBRID_COLOR],
         "hovermode": "closest",
         "dragmode": False,
         "barmode": "group",

@@ -22,14 +22,12 @@ from tests.e2e.dashboard_pages import (
     PV_FIRST,
     RESOURCE_ERROR,
     UNAVAILABLE,
-    WIDE_BREAKPOINT_PX,
     WIDE_WIDTHS,
     assert_hover_names_year,
     assert_layout_holds,
     assert_rendered,
     assert_year_ticks_apart,
     rect,
-    rects,
     served_years,
     year_ticks,
 )
@@ -91,9 +89,28 @@ def test_c4_and_c5_are_readable_at_phone_width(page: Page, width: int) -> None:
             assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, a)
             for b in drawn[i + 1 :]:
                 assert not overlaps(a, b), (chart, a, b)
+    assert_band_label_inside(page, C5)
     for chart in (C4, C5):
         bar = f"{chart} .barlayer .point path >> nth=-1"
         assert_hover_names_year(page, chart, bar, served_years()[-1])
+
+
+def assert_band_label_inside(page: Page, chart: str) -> None:
+    """The before band's label lies inside its band's box (#593, D109; the architect's
+    B2): the e2e overlap checks compare text with text only, so a label running out of
+    its band over the marks would pass them."""
+    (note,) = [
+        b
+        for b in boxes(page, f"{chart} .annotation-text")
+        if b["text"].startswith("Shaded:")
+    ]
+    band = page.locator(f"{chart} .layer-below .shapelayer path").first
+    box = band.bounding_box()
+    assert box is not None
+    assert note["x"] >= box["x"] - 0.5, (note, box)
+    assert note["x"] + note["w"] <= box["x"] + box["width"] + 0.5, (note, box)
+    assert note["y"] >= box["y"] - 0.5, (note, box)
+    assert note["y"] + note["h"] <= box["y"] + box["height"] + 0.5, (note, box)
 
 
 @pytest.mark.plotlyjs_fetches(1)
@@ -102,11 +119,12 @@ def test_c5_bands_the_years_before_the_window(page: Page) -> None:
     notes = [b["text"] for b in boxes(page, f"{C5} .annotation-text")]
     band = labels.C5_BEFORE_BAND.format(pv_year_min=PV_FIRST).replace("<br>", "")
     assert notes == [band]
-    # Above the plot (#558, D104), never inside the band.
+    # Inside the band at its top (#593, D109), under the plot's top edge.
     (note,) = boxes(page, f"{C5} .annotation-text")
     (plot,) = boxes(page, f"{C5} .draglayer .nsewdrag")
-    assert note["y"] + note["h"] <= plot["y"] + 1, (note, plot)
+    assert plot["y"] <= note["y"] <= plot["y"] + 12, (note, plot)
     expect(page.locator(f"{C5} .layer-below .shapelayer path")).to_have_count(1)
+    assert_band_label_inside(page, C5)
 
 
 @pytest.mark.plotlyjs_fetches(1)
@@ -117,10 +135,14 @@ def test_c4_and_c5_redraw_on_a_theme_switch_with_no_request(page: Page) -> None:
     seen: list[str] = []
     page.on("request", lambda r: seen.append(urlsplit(r.url).path))
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
-    for bar, before in zip(bars, light, strict=True):
+    # Each chart's measure (#593, D109): electors appointed red, the total popular
+    # vote blue.
+    for bar, before, measure in zip(
+        bars, light, ("--chart-ec", "--chart-pv"), strict=True
+    ):
         expect(bar).not_to_have_css("fill", before)
         assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
-            token(page, "--chart-1")
+            token(page, measure)
         )
     page.wait_for_timeout(SETTLE_MS)
     assert seen == [], seen
@@ -177,11 +199,21 @@ def test_with_plotlyjs_blocked_c4_and_c5_keep_their_text_and_table(page: Page) -
     expect(page.locator(OVER_TIME_ROWS)).to_have_count(len(served_years()))
 
 
-# --- the wide layout (#553, D102, D103) ----------------------------------------------
+@pytest.mark.plotlyjs_fetches(1)
+def test_each_caption_is_closed_until_its_summary_is_opened(page: Page) -> None:
+    """#593 (D109): the caption is hidden on load and shown once its summary is
+    clicked; the table pointer is shown throughout."""
+    open_over_time(page)
+    for chart, basis in ((C4, labels.C4_BASIS), (C5, labels.C5_BASIS)):
+        text = page.locator(f"{chart} .chart-caption-text")
+        expect(text).to_be_hidden()
+        expect(page.locator(f"{chart} .chart-pointer a")).to_be_visible()
+        page.locator(f"{chart} summary").click()
+        expect(text).to_be_visible()
+        expect(text).to_contain_text(basis)
 
-OVER_TIME_PAIR = "#elections-over-time-pair"
-OVER_TIME_COLUMNS = f"{OVER_TIME_PAIR} > div"
-HEADING_GAP_PX = 1.75 * 16
+
+# --- C4 above C5 (#593, D109, amending D102 and D103(c)) ------------------------------
 
 
 def open_at(page: Page, width: int) -> None:
@@ -207,60 +239,40 @@ def wait_charts_fill(page: Page) -> None:
     )
 
 
-def side_by_side(left: dict[str, float], right: dict[str, float]) -> None:
-    """Two equal columns, the first to the left of the second, their tops level."""
-    assert left["right"] < right["left"], (left, right)
-    assert abs(left["width"] - right["width"]) <= 1, (left, right)
-    assert abs(left["top"] - right["top"]) <= 1, (left, right)
+def assert_plots_align(page: Page) -> None:
+    """C4's plot area directly above C5's: the same left edge and width, so a year
+    reads straight down both (#593's architect review, I2)."""
+    c4, c5 = (rect(page, f"{chart} .draglayer .nsewdrag") for chart in (C4, C5))
+    assert abs(c4["left"] - c5["left"]) <= 1, (c4, c5)
+    assert abs(c4["width"] - c5["width"]) <= 1, (c4, c5)
+    assert c4["bottom"] <= c5["top"], (c4, c5)
 
 
 @pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", WIDE_WIDTHS)
-def test_wide_c4_sits_beside_c5_with_their_table_below(page: Page, width: int) -> None:
-    open_at(page, width)
-    wait_charts_fill(page)
-    left, right = rects(page, OVER_TIME_COLUMNS)
-    side_by_side(left, right)
-    for chart, column in ((C4, left), (C5, right)):
-        graph = rect(page, f"{chart} .chart-graph")
-        assert abs(graph["width"] - column["width"]) <= 1, (chart, graph, column)
-        assert abs(graph["left"] - column["left"]) <= 1, (chart, graph, column)
-    # The companion table's heading a section heading's gap below the taller column,
-    # and its table across both columns.
-    heading = rect(page, f"{OVER_TIME_PAIR} + h2")
-    taller = max(left["bottom"], right["bottom"])
-    assert heading["top"] - taller >= HEADING_GAP_PX - 1, (heading, taller)
-    table = rect(page, ".table-scroll:has(#elections-over-time-table)")
-    assert table["top"] > taller, (table, taller)
-    assert abs(table["left"] - left["left"]) <= 1, (table, left)
-    assert table["right"] >= right["right"] - 1, (table, right)
-
-
-
-@pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", [NARROW_DESKTOP, 390])
-def test_narrow_the_pair_stacks_as_before(page: Page, width: int) -> None:
-    open_at(page, width)
-    left, right = rects(page, OVER_TIME_COLUMNS)
-    assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
-    assert abs(left["left"] - right["left"]) <= 0.5, (width, left, right)
-    assert rect(page, C4)["bottom"] <= rect(page, C5)["top"] + 0.5
-
-
-@pytest.mark.plotlyjs_fetches(1)
-def test_c4_and_c5_fill_their_columns_after_a_resize_across_the_breakpoint(
-    page: Page,
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_c4_sits_above_c5_with_their_plots_aligned(
+    page: Page, width: int, theme: str
 ) -> None:
+    open_at(page, width)
+    if theme == "dark":
+        page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    wait_charts_fill(page)
+    expect(page.locator(".pair")).to_have_count(0)
+    assert rect(page, C4)["bottom"] <= rect(page, C5)["top"] + 0.5
+    assert abs(rect(page, C4)["left"] - rect(page, C5)["left"]) <= 0.5
+    assert_plots_align(page)
+    table = rect(page, ".table-scroll:has(#elections-over-time-table)")
+    assert table["top"] > rect(page, C5)["bottom"], table
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_plots_stay_aligned_across_resizes(page: Page) -> None:
     open_at(page, 1280)
-    for width in (1280, NARROW_DESKTOP, 1280, 1850, 1280):
+    for width in (1280, NARROW_DESKTOP, 1280, 1850, 390, 1280):
         page.set_viewport_size({"width": width, "height": 900})
         wait_charts_fill(page)
-        left, right = rects(page, OVER_TIME_COLUMNS)
-        # Side by side from the breakpoint, stacked below it, after every crossing.
-        if width >= WIDE_BREAKPOINT_PX:
-            side_by_side(left, right)
-        else:
-            assert right["top"] >= left["bottom"] - 0.5, (width, left, right)
+        assert_plots_align(page)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 

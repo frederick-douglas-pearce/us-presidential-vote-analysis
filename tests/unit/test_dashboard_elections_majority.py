@@ -33,6 +33,7 @@ from tests.unit.test_dashboard_elections import (
     _second_leader,
     _without,
     c2_figure,
+    caption_text,
     find,
     in_order,
     n1_client,
@@ -286,8 +287,7 @@ class TestC2:
         assert marks["marker"]["symbol"] == MOD["_C2_SYMBOLS"][label]
         assert figure["layout"]["showlegend"] is True
         assert figure["layout"]["legend"] == components.TIME_SERIES_LEGEND
-        (caption,) = of_type(find(tree, C2), "Figcaption")
-        assert caption.children[0].endswith(labels.C2_NO_SHARE_NOTE)
+        assert _caption(tree).endswith(labels.C2_NO_SHARE_NOTE)
         if label == labels.UNRECOGNIZED:
             note = f"{labels.UNRECOGNIZED}<br>{labels.UNRECOGNIZED_NOTE}"
             assert note in marks["hovertext"][0]
@@ -298,14 +298,15 @@ class TestC2:
         leader's share served, there is no marker, no key and no note (Class B
         survivor: the note added unconditionally)."""
         tree = render_c2()
-        (caption,) = of_type(find(tree, C2), "Figcaption")
-        assert labels.C2_NO_SHARE_NOTE not in caption.children[0]
-        assert caption.children[0].endswith(labels.C2_PV_DIFFERENT_NOTE)
+        assert labels.C2_NO_SHARE_NOTE not in _caption(tree)
+        assert _caption(tree).endswith(labels.C2_PV_DIFFERENT_NOTE)
         assert markers(c2_figure(tree)) == []  # the premise: no marker drawn
 
     def test_the_majority_line_is_a_dashed_shape_at_half(self) -> None:
         layout = c2_figure(render_c2())["layout"]
-        (line,) = [s for s in layout["shapes"] if s["type"] == "line"]
+        (line,) = [
+            s for s in layout["shapes"] if s["type"] == "line" and "dash" in s["line"]
+        ]
         # Horizontal across the plot at half (#558, D104).
         assert (line["yref"], line["y0"], line["y1"]) == ("y", 0.5, 0.5)
         assert (line["xref"], line["x0"], line["x1"]) == ("paper", 0, 1)
@@ -423,8 +424,7 @@ def _named_or_none(figure: dict[str, Any], name: str) -> dict[str, Any] | None:
 
 def _caption(tree: Any) -> str:
     (caption,) = of_type(find(tree, C2), "Figcaption")
-    text: str = caption.children[0]
-    return text
+    return caption_text(caption)
 
 
 def _cell_of(tree: Any, year: int, field: str) -> str:
@@ -458,8 +458,8 @@ class TestC2Methods:
         assert c2 == {
             "circle": "electoral share",
             "triangle-up": "popular-vote share",
-            "star": "hybrid score",
-            "hexagon": "popular-vote winner differs",
+            "line-ew": "hybrid score",
+            "asterisk": "popular-vote winner differs",
             "pentagon": "hybrid winner differs",
             "circle-open": labels.C2_NO_FIGURE,
             "square-open": labels.UNRECOGNIZED,
@@ -721,8 +721,9 @@ class TestC2Methods:
         assert labels.C5_AFTER_NOTE.format(pv_year_max=WINDOW[1]) not in _caption(
             served
         )
-        top = over_time.TOP_PX + over_time.BAND_LABEL_PX
-        assert c2_figure(served)["layout"]["margin"] == {"t": top}
+        # The before band's label sits inside its band (#593, D109): no top margin of
+        # the chart's own, so plotly.js pushes it for the key alone.
+        assert "margin" not in c2_figure(served)["layout"]
         index = copy.deepcopy(BODY)
         index["meta"]["provenance"]["coverage"].update(
             pv_year_min=1980, pv_year_max=2016
@@ -742,9 +743,16 @@ class TestC2Methods:
         assert labels.C5_AFTER_BAND.format(pv_year_max=2016) in notes(moved)
         assert labels.C2_BEFORE_NOTE.format(pv_year_min=1980) in _caption(moved)
         assert labels.C5_AFTER_NOTE.format(pv_year_max=2016) in _caption(moved)
+        # The after band's label sits above the key, which keeps its rows (#593).
         assert c2_figure(moved)["layout"]["margin"] == {
-            "t": over_time.TOP_PX + 2 * over_time.BAND_LABEL_PX
+            "t": over_time.TOP_PX + MOD["_C2_KEY_PX"] + over_time.BAND_LABEL_PX
         }
+        (after,) = [
+            n
+            for n in c2_figure(moved)["layout"]["annotations"]
+            if n["text"] == labels.C5_AFTER_BAND.format(pv_year_max=2016)
+        ]
+        assert after["yshift"] == MOD["_C2_KEY_PX"] == 3 * over_time.KEY_ROW_PX
         assert _cell_of(moved, 1976, "pv_share") == labels.NOT_APPLICABLE
         triangles = named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
         assert 1976 not in triangles and 2020 not in triangles and 1980 in triangles
@@ -759,18 +767,83 @@ class TestC2Methods:
             MOD["leaders"](copy.deepcopy(BODY), body, HAS_PV)
 
     def test_each_series_draws_at_its_size(self) -> None:
-        """Class B (#564): a star and a triangle drawn larger than the circle show
-        around it where they coincide; a hand-written literal, not the page's table."""
+        """Class B (#564): a triangle drawn larger than the circle shows around it
+        where they coincide, and the crossbar (#593) is wider than both; the two
+        line-only symbols draw an outline, the others none. A hand-written literal,
+        not the page's table."""
         figure = c2_figure(render_c2())
-        sizes = {
-            t["name"]: t["marker"]["size"] for t in figure["data"] if "marker" in t
-        }
+        marked = [t for t in figure["data"] if "marker" in t]
+        sizes = {t["name"]: t["marker"]["size"] for t in marked}
         assert sizes == {
             labels.LABELS["ec_share_full"]: 7,
             labels.LABELS["pv_share"]: 8,
-            labels.C2_HYBRID_KEY: 9,
-            labels.C2_PV_DIFFERENT_KEY: 9,
+            labels.C2_HYBRID_KEY: 16,
+            labels.C2_PV_DIFFERENT_KEY: 11,
         }
+        strokes = {
+            t["name"]: t["marker"]["line"] for t in marked if "line" in t["marker"]
+        }
+        assert strokes == {
+            labels.C2_HYBRID_KEY: {"width": 3, "color": "var(--chart-hybrid)"},
+            labels.C2_PV_DIFFERENT_KEY: {"width": 3, "color": "var(--text)"},
+        }
+
+    def test_each_measure_is_its_color(self) -> None:
+        """#593 (D109): read by measure, never by trace position: electoral red,
+        popular vote blue, hybrid purple; the strip marks the text color."""
+        figure = c2_figure(render_c2())
+        by_measure = {
+            labels.LABELS["ec_share_full"]: "var(--chart-ec)",
+            labels.LABELS["pv_share"]: "var(--chart-pv)",
+            labels.C2_HYBRID_KEY: "var(--chart-hybrid)",
+            labels.C2_PV_DIFFERENT_KEY: "var(--text)",
+        }
+        for name, color in by_measure.items():
+            assert named(figure, name)["marker"]["color"] == color, name
+
+    def test_the_crossbar_sits_halfway_between_the_circle_and_the_triangle(
+        self,
+    ) -> None:
+        """#593's ba spec: the caption says the crossbar sits halfway, which holds
+        while the hybrid's electoral share is the full one (policy (b), D038)."""
+        figure = c2_figure(render_c2())
+        circle = dict(
+            zip(*(named(figure, labels.LABELS["ec_share_full"])[k] for k in "xy"), strict=True)
+        )
+        triangle = dict(
+            zip(*(named(figure, labels.LABELS["pv_share"])[k] for k in "xy"), strict=True)
+        )
+        crossbar = dict(zip(*(named(figure, labels.C2_HYBRID_KEY)[k] for k in "xy"), strict=True))
+        assert crossbar and set(crossbar) == set(triangle)
+        for year, y in crossbar.items():
+            assert y == pytest.approx((circle[year] + triangle[year]) / 2), year
+
+    def test_no_gridline_at_the_majority_line(self) -> None:
+        """#593 (D109): the value axis draws no gridlines of its own, so none shows
+        through the majority line's dashes; the others are shapes at the ticks, and
+        the 50% tick keeps its label."""
+        layout = c2_figure(render_c2())["layout"]
+        assert layout["yaxis"]["showgrid"] is False
+        assert layout["yaxis"]["tickvals"] == [0, 0.25, 0.5, 0.75, 1]
+        grid = [
+            s
+            for s in layout["shapes"]
+            if s["type"] == "line" and s["line"]["color"] == "var(--chart-grid)"
+        ]
+        assert sorted(s["y0"] for s in grid) == [0.25, 0.75, 1]
+        assert all(
+            (s["y0"] == s["y1"], s["xref"], s["layer"]) == (True, "paper", "below")
+            for s in grid
+        )
+        at_half = [
+            s for s in layout["shapes"] if s["type"] == "line" and s["y0"] == 0.5
+        ]
+        assert len(at_half) == 1 and at_half[0]["line"]["dash"] == "dash"
+        # Drawn after the bands and the gridlines, so on top of both.
+        assert layout["shapes"][-1] is at_half[0]
+
+    def test_c2_is_560_px_tall(self) -> None:
+        assert c2_figure(render_c2())["layout"]["height"] == 560
 
     def test_the_drawn_symbols_are_the_table_s_and_distinct(self) -> None:
         """g.1: read off the drawn traces, not the module's constants."""
@@ -791,8 +864,8 @@ class TestC2Methods:
         assert drawn == {
             labels.LABELS["ec_share_full"]: "circle",
             labels.LABELS["pv_share"]: "triangle-up",
-            labels.C2_HYBRID_KEY: "star",
-            labels.C2_PV_DIFFERENT_KEY: "hexagon",
+            labels.C2_HYBRID_KEY: "line-ew",
+            labels.C2_PV_DIFFERENT_KEY: "asterisk",
             labels.C2_HYBRID_DIFFERENT_KEY: "pentagon",
         }
         assert len(set(drawn.values())) == len(drawn)
@@ -863,7 +936,9 @@ class TestC2Methods:
                 if part in t:
                     painted.add(t[part]["color"])
         for shape in figure["layout"]["shapes"]:
-            painted.add(shape["line"]["color"])
+            # The gridlines (#593) are decoration under the marks, like the template's.
+            if shape["line"]["color"] != "var(--chart-grid)":
+                painted.add(shape["line"]["color"])
         for note in figure["layout"]["annotations"]:
             assert note["font"]["color"] == "var(--text)"
         tokens = {c.removeprefix("var(").removesuffix(")") for c in painted}
@@ -908,8 +983,8 @@ class TestC2Methods:
         words = {
             labels.C2_EC_MARK: ("circle", MOD["_C2_EC_SYMBOL"]),
             labels.C2_PV_MARK: ("solid triangle", MOD["_C2_PV_SYMBOL"]),
-            labels.C2_HYBRID_MARK: ("star", MOD["_C2_HYBRID_SYMBOL"]),
-            labels.C2_PV_DIFFERENT_NOTE: ("hexagon", MOD["_C2_PV_DIFFERENT_SYMBOL"]),
+            labels.C2_HYBRID_MARK: ("crossbar", MOD["_C2_HYBRID_SYMBOL"]),
+            labels.C2_PV_DIFFERENT_NOTE: ("asterisk", MOD["_C2_PV_DIFFERENT_SYMBOL"]),
             labels.C2_HYBRID_DIFFERENT_NOTE: (
                 "pentagon",
                 MOD["_C2_HYBRID_DIFFERENT_SYMBOL"],
@@ -918,8 +993,8 @@ class TestC2Methods:
         plotly = {
             "circle": "circle",
             "solid triangle": "triangle-up",
-            "star": "star",
-            "hexagon": "hexagon",
+            "crossbar": "line-ew",
+            "asterisk": "asterisk",
             "pentagon": "pentagon",
         }
         for sentence, (word, symbol) in words.items():

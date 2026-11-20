@@ -134,8 +134,8 @@ def test_a_chart_draws_in_the_theme_in_effect(page: Page) -> None:
     expect(page.locator(f"{CHART} .chart-graph > div")).to_have_css(
         "visibility", "visible"
     )
-    assert first_fill(page) == rgb(token(page, "--chart-1"))
-    assert first_fill(page) == rgb("#2a78d6")  # the light palette: Chromium's default
+    assert first_fill(page) == rgb(token(page, "--chart-ec"))
+    assert first_fill(page) == rgb("#c62f2f")  # the light palette: Chromium's default
     expect(page.locator(f"{CHART} .chart-title")).to_have_text("A test chart")
     expect(page.locator(GRAPH)).to_have_count(1)
 
@@ -156,7 +156,7 @@ def test_a_theme_switch_redraws_the_chart_with_no_reload_or_request(
     href = page.evaluate("location.href")
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     expect(page.locator(FIRST_BAR).first).not_to_have_css("fill", light)
-    assert first_fill(page) == rgb(token(page, "--chart-1"))
+    assert first_fill(page) == rgb(token(page, "--chart-ec"))
     # The template, not only the trace: in dark its paper and tick text differ from
     # plotly's own defaults (a white paper, #444 tick text), so a template plotly
     # ignored fails.
@@ -176,9 +176,17 @@ def test_the_table_pointer_moves_within_the_page(page: Page) -> None:
     open_chart(page)
     pointer = page.locator(f"{CHART} figcaption a")
     expect(pointer).to_have_text(labels.CHART_TABLE_POINTER)
-    expect(page.locator(f"{CHART} figcaption")).to_have_text(
-        f"A caption. {labels.CHART_TABLE_POINTER}."
+    # The caption collapsed under its summary, the pointer its own shown sentence
+    # (#593, D109).
+    expect(page.locator(f"{CHART} figcaption summary")).to_have_text(
+        labels.CHART_CAPTION_SUMMARY
     )
+    expect(page.locator(f"{CHART} .chart-caption-text")).to_have_text("A caption.")
+    expect(page.locator(f"{CHART} .chart-caption-text")).to_be_hidden()
+    expect(page.locator(f"{CHART} .chart-pointer")).to_have_text(
+        f"{labels.CHART_TABLE_POINTER}."
+    )
+    expect(pointer).to_be_visible()
     seen: list[str] = []
 
     def on_request(request: Request) -> None:
@@ -345,7 +353,7 @@ def test_a_return_to_the_chart_draws_it_in_the_theme_chosen_away(page: Page) -> 
     assert_rendered(page, f"#{CHART_SUCCESS}")
     page.locator(FIRST_BAR).first.wait_for()
     expect(page.locator(FIRST_BAR).first).not_to_have_css("fill", light)
-    assert first_fill(page) == rgb(token(page, "--chart-1"))
+    assert first_fill(page) == rgb(token(page, "--chart-ec"))
     assert painted(page)["paper"] == rgb(token(page, "--page"))
     assert token(page, "--page") == "#121212"
     assert page.evaluate("window.__e2e_mark") == 1  # no document load
@@ -449,7 +457,7 @@ def test_the_registered_callback_resolves_without_touching_its_source(
             const spec = deps.find(d => d.output === output).clientside_function;
             const fn = window.dash_clientside[spec.namespace][spec.function_name];
             const noUpdate = window.dash_clientside.no_update;
-            const source = {data: [{marker: {color: "var(--chart-1)"}, name: "A"}],
+            const source = {data: [{marker: {color: "var(--chart-ec)"}, name: "A"}],
                             layout: {}};
             const before = JSON.stringify(source);
             const waiting = fn(source, null);
@@ -470,7 +478,7 @@ def test_the_registered_callback_resolves_without_touching_its_source(
     )
     assert result["waiting"] is True
     assert result["unchanged"] is True
-    assert result["color"] == token(page, "--chart-1")
+    assert result["color"] == token(page, "--chart-ec")
     assert result["name"] == "A"
     assert result["style"] == {"visibility": "visible"}
     assert result["unset"] == "chart token --nope is unset"

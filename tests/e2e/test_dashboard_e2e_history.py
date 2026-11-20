@@ -345,7 +345,7 @@ def test_c7_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     open_c7(page)
     bar = page.locator(f"{C7} .barlayer .point path").first
     light = bar.evaluate("el => getComputedStyle(el).fill")
-    assert light == rgb(token(page, "--chart-1"))
+    assert light == rgb(token(page, "--chart-ec"))
     seen: list[str] = []
 
     def on_request(request: Request) -> None:
@@ -356,7 +356,7 @@ def test_c7_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
     expect(bar).not_to_have_css("fill", light)
     assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
-        token(page, "--chart-1")
+        token(page, "--chart-ec")
     )
     page.wait_for_timeout(SETTLE_MS)
     assert seen == [], seen
