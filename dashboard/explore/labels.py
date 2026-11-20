@@ -452,14 +452,11 @@ C2_TITLE = (
 )
 #: The value axis's title, up the side: the shares and the score share one axis.
 C2_VALUE_AXIS = "Leader's shares<br>and hybrid score"
-#: The dashed line's label, just below the line at the left (#564's plan gate, D108):
-#: "each election's", since the number of electors appointed changes with the year
-#: (never a fixed number such as 270). Three lines since #564, so it ends before the
-#: first popular-vote year at 360 px in CI's wider font (the words are unchanged).
-C2_MAJORITY_LINE = "Majority line: half of<br>each election's<br>electors appointed"
-#: The dashed line's entry in C2's key (#596, D110: the owner's choice at #596's plan
-#: gate, replacing the label below the line, which a filter set among the marks): the
-#: words of :data:`C2_MAJORITY_LINE`, on two lines so the entry fits 360 px.
+#: The dashed line's entry in C2's key, last, on every view (#596, D110: the owner's
+#: choice at #596's plan gate, replacing the label below the line, which a filter set
+#: among the marks): "each election's", since the number of electors appointed changes
+#: with the year (never a fixed number such as 270); on two lines so the entry fits
+#: 360 px.
 C2_MAJORITY_KEY = "Majority line: half of each<br>election's electors appointed"
 #: C2's title and value axis when no year shown has popular-vote figures (#596, D110;
 #: ba spec for #596, option B, the owner's choice): only the electoral share is drawn,

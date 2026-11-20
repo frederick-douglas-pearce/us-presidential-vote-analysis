@@ -166,20 +166,21 @@ articles and announcements). Every rule binds all three unless the rule states a
   electoral share. It can be 0 for a state whose votes were withheld (1864, 1868). It is the top
   rung of the ladder **appointed ≥ cast ≥ counted**. `electoral_denominator` on each
   `/v1/elections/summary` item is the same national figure.
-- **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7, and the C4/C5 table and C4's bars with one
-  state chosen);
-  `LABELS["national_electoral_denominator"]` (T3); in C1, the hover line "Electors appointed"
-  (`labels.C1_EC_HOVER`), the majority line's label `labels.C1_MAJORITY_LINE`, and the caption
-  sentences `labels.C1_BASES`, `labels.C1_EC_BASIS` and `labels.C1_MAJORITY_NOTE`. In C3, the hover
-  line "Electors appointed" (`labels.C3_BAR_HOVER`) and the caption sentence `labels.C3_RATIO`. In
-  C2, the hover line "Electors appointed" (`labels.C2_HOVER`), the line label
-  `labels.C2_MAJORITY_LINE`, and the caption sentences `labels.C1_EC_BASIS` and
-  `labels.C2_MAJORITY_NOTE`. `LABELS["electoral_denominator"]` (the C4/C5 table); in C4: the bars, the value-axis title `labels.C4_VALUE_AXIS`, the hover line
-  "Electors appointed", `labels.C4_TITLE`, the key entries `labels.C4_NO_ELECTORS_TOOK_NO_PART` and `labels.C4_NO_ELECTORS`,
-  `labels.C4_BASIS`, `labels.C4_ALL_STATES` and `labels.C4_ZERO_NOTE`. C7 on the state history:
-  its bars, `labels.C4_TITLE_STATE` or `labels.C7_TITLE_THIS_STATE`, `labels.C4_VALUE_AXIS`, the
-  hover line "Electors appointed" (`labels.C4_STATE_HOVER`), the key entries, `labels.C4_BASIS`
-  and `labels.C4_ZERO_NOTE`, and `LABELS["state_electoral_votes"]` in its companion table.
+- **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7, and the C4/C5 table and C4's bars
+  with one state chosen); `LABELS["national_electoral_denominator"]` (T3); in C1, the hover line
+  "Electors appointed" (`labels.C1_EC_HOVER`), the majority line's label `labels.C1_MAJORITY_LINE`,
+  and the caption sentences `labels.C1_BASES`, `labels.C1_EC_BASIS` and `labels.C1_MAJORITY_NOTE`.
+  In C3, the hover line "Electors appointed" (`labels.C3_BAR_HOVER`) and the caption sentence
+  `labels.C3_RATIO`. In C2, the hover line "Electors appointed" (`labels.C2_HOVER`), the majority
+  line's key entry `labels.C2_MAJORITY_KEY` (#596, D110), and the caption sentences
+  `labels.C1_EC_BASIS` and `labels.C2_MAJORITY_NOTE`. `LABELS["electoral_denominator"]` (the C4/C5
+  table); in C4: the bars, the value-axis title `labels.C4_VALUE_AXIS`, the hover line "Electors
+  appointed", `labels.C4_TITLE`, the key entries `labels.C4_NO_ELECTORS_TOOK_NO_PART` and
+  `labels.C4_NO_ELECTORS`, `labels.C4_BASIS`, `labels.C4_ALL_STATES` and `labels.C4_ZERO_NOTE`. C7
+  on the state history: its bars, `labels.C4_TITLE_STATE` or `labels.C7_TITLE_THIS_STATE`,
+  `labels.C4_VALUE_AXIS`, the hover line "Electors appointed" (`labels.C4_STATE_HOVER`), the key
+  entries, `labels.C4_BASIS` and `labels.C4_ZERO_NOTE`, and `LABELS["state_electoral_votes"]` in its
+  companion table.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`;
   `ElectionSummary.electoral_denominator`;
@@ -775,15 +776,17 @@ articles and announcements). Every rule binds all three unless the rule states a
   - Election year runs along the bottom as a number, so a gap between served elections is drawn at
     its true width, with a tick every 40 years. The value axis runs up the side, with ticks from 0
     to 100% (it runs to 112% to hold the strip). The line is horizontal at 0.5 and the test is
-    strict, so a point on the line is not a majority. Its label sits just below the line at the
-    left, from the second served year (D104(e) as D108 amends it).
+    strict, so a point on the line is not a majority. It is drawn under every mark, across the year
+    axis's whole range, with no hover. It has no label in the plot: on every view it is the last
+    entry in the chart's key, `labels.C2_MAJORITY_KEY`, so a year filter cannot set its words among
+    the marks (#596, D110, replacing the in-plot label of D104(e) as D108 amended it).
   - A share or score that is not a finite number draws a marker at zero with no text label, one
     point per label and year (two missing marks of one label in one year share it, their hovers
     joined), in a
     series named by its label (`labels.C2_NO_FIGURE` for no figure in this dataset, or
     `labels.UNRECOGNIZED`), which the chart's key shows, and the caption adds
     `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
-  - The key is always shown, above the plot.
+  - The key is always shown, above the plot; its last entry is the majority line.
   - The page's year filters (`year_from`, `year_to`, `pv`, the list page's) narrow the chart, its
     companion table and its download alike; with none, every served year shows (#596, D110,
     reversing D096's "no filter"). The bands follow the years shown, so with only the years with a
@@ -796,13 +799,13 @@ articles and announcements). Every rule binds all three unless the rule states a
   - Placed by `pages/elections_majority.py` through `components.chart`.
   - Chart text in `labels.py`: `labels.C2_TITLE`; the axes `LABELS["year"]` and
     `labels.C2_VALUE_AXIS` (`labels.C2_TITLE_NO_PV` and `labels.C2_VALUE_AXIS_NO_PV` when no year
-    shown has popular-vote figures); the line label `labels.C2_MAJORITY_LINE`; the band labels
-    `labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`; the hovers `labels.C2_HOVER`,
-    `labels.C2_PV_HOVER`, `labels.C2_HYBRID_HOVER`, `labels.C2_PV_DIFFERENT_HOVER` and
-    `labels.C2_HYBRID_DIFFERENT_HOVER`; the key entries `LABELS["ec_share_full"]`,
-    `LABELS["pv_share"]`, `labels.C2_HYBRID_KEY`, `labels.C2_PV_DIFFERENT_KEY` and
-    `labels.C2_HYBRID_DIFFERENT_KEY` (each when drawn), and `labels.C2_NO_FIGURE` and
-    `labels.UNRECOGNIZED`, shown only when such a marker is drawn; the caption
+    shown has popular-vote figures); the band labels `labels.C5_BEFORE_BAND` /
+    `labels.C5_AFTER_BAND`; the hovers `labels.C2_HOVER`, `labels.C2_PV_HOVER`,
+    `labels.C2_HYBRID_HOVER`, `labels.C2_PV_DIFFERENT_HOVER` and `labels.C2_HYBRID_DIFFERENT_HOVER`;
+    the key entries `LABELS["ec_share_full"]`, `LABELS["pv_share"]`, `labels.C2_HYBRID_KEY`,
+    `labels.C2_PV_DIFFERENT_KEY` and `labels.C2_HYBRID_DIFFERENT_KEY` (each when drawn),
+    `labels.C2_NO_FIGURE` and `labels.UNRECOGNIZED`, shown only when such a marker is drawn, and,
+    last on every view, the majority line's entry `labels.C2_MAJORITY_KEY` (#596, D110); the caption
     `labels.C2_LEADER_POINT`, `labels.C2_EC_MARK`, `labels.C1_EC_BASIS`, `labels.C2_PV_MARK`,
     `labels.C2_HYBRID_MARK`, `labels.C2_MAJORITY_NOTE`, `labels.C1_LINE_EC_ONLY`,
     `labels.C2_PLURALITY_NOTE`, `labels.C2_TOOK_OFFICE`, then, each only when drawn,
@@ -823,9 +826,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99 of 261, 37.9 percent; the House
   chose John Quincy Adams); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it
   happened"; the 1992 example (William J. Clinton, 43.0%) checked against served N1; reader wording:
-  `ba` spec for
-  #434, approved at its plan gate (2026-11-11), with its historical claims, and `ba` spec for
-  #564, approved at its plan gate (2026-11-19); #593; D109; `ba` spec for #593.
+  `ba` spec for #434, approved at its plan gate (2026-11-11), with its historical claims, and `ba`
+  spec for #564, approved at its plan gate (2026-11-19); #593; D109; `ba` spec for #593; the
+  majority line named in the key rather than labeled in the plot: owner decision at #596's plan gate
+  (2026-11-20), D110.
 - **Not:** A chart of winners: in 1824 the leader had no majority. The chart does not show who took
   office (*Took office*); its companion table does. Not votes cast. The line is not a fixed number
   such as 270. The crossbar (the hybrid score) is not an official measure. A strip mark is not a correction or recount:
@@ -842,11 +846,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["ec_determinative"]`; `labels.EC_MAJORITY`, `labels.NO_EC_MAJORITY`, via
   `labels.ec_majority`; in C1, the dashed line at half of the electors appointed, labeled
   `labels.C1_MAJORITY_LINE`, and the caption sentences `labels.C1_MAJORITY_NOTE` and, in a year with
-  popular-vote figures, `labels.C1_LINE_EC_ONLY`. In C2, the dashed line labeled
-  `labels.C2_MAJORITY_LINE`, the caption sentence `labels.C2_MAJORITY_NOTE`, the hover's last line
-  (`labels.ec_majority`), the companion table's column, the Electoral College majority page's
-  heading (`HEADING` in `pages/elections_majority.py`) and its section link
-  `labels.SECTION_MAJORITY`. `labels.C1_LINE_EC_ONLY` in C2's caption; C2's line label sits just below the line at the left (#564, D108).
+  popular-vote figures, `labels.C1_LINE_EC_ONLY`. In C2, the dashed line, named in the chart's key
+  by `labels.C2_MAJORITY_KEY` (#596, D110), the caption sentence `labels.C2_MAJORITY_NOTE`, the
+  hover's last line (`labels.ec_majority`), the companion table's column, the Electoral College
+  majority page's heading (`HEADING` in `pages/elections_majority.py`) and its section link
+  `labels.SECTION_MAJORITY`; `labels.C1_LINE_EC_ONLY` in C2's caption.
 - **Source:** `ElectionSummary.ec_determinative`; D041; D046 §4;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Appointed, not cast".
 - **Not:** A majority of the votes cast or counted; the base is the electors appointed. A null,

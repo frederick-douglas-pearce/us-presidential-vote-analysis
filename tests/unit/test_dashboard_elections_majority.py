@@ -332,9 +332,9 @@ class TestC2:
             s["type"] == "line" and "dash" in s.get("line", {})
             for s in layout["shapes"]
         )
-        # The key's entry reads the line's words (#596).
+        # The key's entry reads the words approved at #564's plan gate (#596).
         assert labels.C2_MAJORITY_KEY.replace("<br>", " ") == (
-            labels.C2_MAJORITY_LINE.replace("<br>", " ")
+            "Majority line: half of each election's electors appointed"
         )
         # The axis runs past 100% for the strip; its ticks stop at 100% (#564).
         assert layout["yaxis"]["range"] == [0, MOD["_C2_Y_TOP"]]

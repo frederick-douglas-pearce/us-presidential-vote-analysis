@@ -42,7 +42,8 @@ SETTLE_MS = 1000
 # --- chart C2 (#434, D096) ------------------------------------------------------------
 
 #: C2's drawn texts (#558, D104): its year ticks along the bottom, its share ticks, both
-#: axes' titles, the majority line's label and the key's entries; no point draws text.
+#: axes' titles, the band labels and the key's entries (the majority line's among them
+#: since #596); no point draws text.
 C2_CHART_TEXTS = ", ".join(
     f"{C2} {part}"
     for part in (
