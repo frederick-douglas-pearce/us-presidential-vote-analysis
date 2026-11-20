@@ -605,8 +605,12 @@ def render(
             election_view.section_nav(year, election_view.OVERVIEW),
             # Source order is reading order at every width: the panel's section is the
             # pair's left column, National results' heading and C1 its right (#544).
-            components.pair(_panel(block, year, coverage), top, PAIR_ID),
-            *rest,
+            # One card (#567, D111): the pair and T3 below it share it, as a chart and
+            # its companion table do, so it holds the panel's and National results'
+            # headings.
+            components.card(
+                [components.pair(_panel(block, year, coverage), top, PAIR_ID), *rest]
+            ),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

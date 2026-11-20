@@ -33,6 +33,7 @@ from tests.e2e.dashboard_pages import (
     MARKS,
     NARROW_DESKTOP,
     OVER_TIME_SUCCESS,
+    PHONE_WIDTHS,
     PROVENANCE,
     PV,
     PV_BOX,
@@ -326,7 +327,7 @@ def test_narrow_the_list_pair_stacks_as_before(page: Page, width: int) -> None:
     assert rect(page, PV)["bottom"] <= rect(page, "#elections-metrics")["top"] + 0.5
 
 
-@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
 def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> None:
     open_at(page, width)
     assert_layout_holds(page, ELECTIONS_SUCCESS, TABLES, width)

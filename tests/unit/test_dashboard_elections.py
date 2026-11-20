@@ -28,6 +28,7 @@ from dash.development.base_component import Component
 
 from explore import api, charts, components, elections_view, labels, metrics
 from explore import app as appmod
+from tests.dashboard_cards import card_children, card_holding, cards, in_one_card
 from tests.unit.test_dashboard_app import (
     META,
     RECORDED,
@@ -2393,9 +2394,10 @@ class TestWideLayout:
     def test_the_list_pair_holds_the_filters_left_and_the_metrics_right(self) -> None:
         tree = render_n1()
         pair = self.pair(tree, "LIST_PAIR_ID")
-        kids = list(tree.children)
-        # A direct child of the success marker, right after the list's heading.
-        heading = kids[kids.index(pair) - 1]
+        # In the list's card (#567), right after the list's heading, which opens it.
+        held = card_children(tree, 4)
+        assert held[1] is pair
+        heading = held[0]
         assert type(heading).__name__ == "H2"
         assert heading.children == MOD["LIST_HEADING"]
         left, right = pair.children
@@ -2411,8 +2413,9 @@ class TestWideLayout:
         tree = render_n1()
         pair = self.pair(tree, "LIST_PAIR_ID")
         assert of_type(pair, "Table") == [] and find(pair, TABLE_ID) is None
-        kids = list(tree.children)
-        assert any(find(kid, TABLE_ID) is not None for kid in kids[kids.index(pair) :])
+        # T1 follows the pair in the pair's own card (#567).
+        held = card_holding(tree, pair).children
+        assert any(find(kid, TABLE_ID) is not None for kid in held[held.index(pair) :])
 
     def test_the_list_opens_the_page_in_no_pair(self) -> None:
         """Since #562 C2 has its own page: the heading, the lede and the URL control
@@ -2422,7 +2425,10 @@ class TestWideLayout:
         assert type(kids[0]).__name__ == "H1" and kids[1].className == "lede"
         assert type(kids[2]).__name__ == "Location"
         assert kids[3].id == elections_view.SECTIONS_ID  # the section links (#562)
-        assert type(kids[4]).__name__ == "H2" and kids[4].children == MOD["LIST_HEADING"]
+        # Then the list's one card (#567), opened by its heading.
+        assert cards(tree) == [kids[4]]
+        held = card_children(tree, 4)
+        assert type(held[0]).__name__ == "H2" and held[0].children == MOD["LIST_HEADING"]
         assert find(tree, charts.dom_id("C2")) is None
 
     def test_an_unavailable_n1_keeps_the_list_pair(self) -> None:
@@ -2430,6 +2436,10 @@ class TestWideLayout:
         # The list pair stands, its right column holding the averages' sentence.
         _, right = self.pair(tree, "LIST_PAIR_ID").children
         assert find(right, MOD["METRICS_UNAVAILABLE_ID"]) is not None
+        # It stays in the list's one card, with the pair (#567).
+        assert in_one_card(tree, MOD["METRICS_UNAVAILABLE_ID"]) is in_one_card(
+            tree, MOD["LIST_PAIR_ID"]
+        )
 
     def test_an_empty_list_keeps_the_pair_and_its_sentence_follows(self) -> None:
         tree = render_n1(query={"year_to": "1900", "pv": "1"})

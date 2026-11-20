@@ -201,18 +201,25 @@ def render(
         [
             state_view.section_nav(usps, state_view.PER_CAPITA, search),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
-            _controls(chosen, span),
-            html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            *components.table(
-                shown,
-                _row,
-                PER_CAPITA_FIELDS,
-                PER_CAPITA_TABLE_ID,
-                _download(usps, per_capita, search),
-                extra=PER_CAPITA_EXTRA,
-                notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
+            # The page's one section, named by its H1, in one card (#567, D111).
+            components.card(
+                [
+                    _controls(chosen, span),
+                    html.P(
+                        f"Showing {len(shown)} of {len(rows)} rows", className="count"
+                    ),
+                    *components.table(
+                        shown,
+                        _row,
+                        PER_CAPITA_FIELDS,
+                        PER_CAPITA_TABLE_ID,
+                        _download(usps, per_capita, search),
+                        extra=PER_CAPITA_EXTRA,
+                        notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
+                    ),
+                    labels.glossary(PER_CAPITA_FIELDS),
+                ]
             ),
-            labels.glossary(PER_CAPITA_FIELDS),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

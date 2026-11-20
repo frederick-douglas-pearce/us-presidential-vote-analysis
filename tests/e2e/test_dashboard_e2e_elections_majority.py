@@ -301,7 +301,7 @@ def test_wide_c2_stays_full_width_above_its_table(page: Page, width: int) -> Non
 
 
 @pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
 def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> None:
     page.set_viewport_size({"width": width, "height": 900})
     open_c2(page, width=width)

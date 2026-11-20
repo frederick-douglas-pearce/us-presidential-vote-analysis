@@ -18,6 +18,7 @@ import dash
 import pytest
 
 from explore import api, charts, components, elections_view, labels, over_time
+from tests.dashboard_cards import cards, in_one_card
 from tests.unit.test_dashboard_app import (
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     route,
@@ -483,6 +484,8 @@ class TestOverTimeDegraded:
         assert find(tree, MOD["OVER_TIME_UNAVAILABLE_ID"]) is not None
         assert find(tree, C4) is None and find(tree, C5) is None
         assert find(tree, OVER_TIME) is None
+        # The section's note is in the section's one card (#567).
+        in_one_card(tree, MOD["OVER_TIME_UNAVAILABLE_ID"])
         # The page's success marker, heading and lede stay (D096(d)'s rule).
         assert tree.id == PAGE_ID
         assert of_type(tree, "H1")[0].children == MOD["HEADING"]
@@ -894,8 +897,10 @@ class TestWideLayout:
         order = ids_of(tree)
         # C4, then C5, then the companion table (D102(d)).
         assert order.index(C4) < order.index(C5) < order.index(OVER_TIME)
+        # Both charts sit directly in the page's one card (#567), with no wrapper.
         c4, c5 = find(tree, C4), find(tree, C5)
-        assert c4 in tree.children and c5 in tree.children
+        (card,) = cards(tree)
+        assert c4 in card.children and c5 in card.children
 
     def test_the_heading_and_lede_open_the_page_with_the_year_filters(self) -> None:
         """The year filters of ``/elections`` (#596, D110): one slider, one checklist
@@ -988,6 +993,10 @@ class TestOverTimeFilters:
         assert find(tree, C4) is None and find(tree, C5) is None
         assert find(tree, MOD["OVER_TIME_TABLE_ID"]) is None
         assert len(of_type(tree, "RangeSlider")) == 1
+        # The note and the filters share the section's one card (#567).
+        assert in_one_card(tree, elections_view.NO_MATCH_ID) is in_one_card(
+            tree, elections_view.YEARS_ID
+        )
 
     def test_a_failed_n1_shows_no_filters(self) -> None:
         tree = MOD["render"](copy.deepcopy(BODY), None, [("pv", "1")])

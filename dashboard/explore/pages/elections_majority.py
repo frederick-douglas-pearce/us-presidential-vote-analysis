@@ -766,7 +766,9 @@ def render(
             html.P(f"{LEDE} {FILTER_SENTENCE}" if filtered else LEDE, className="lede"),
             dcc.Location(id=elections_view.URL_ID, refresh="callback-nav"),
             elections_view.section_nav(elections_view.MAJORITY, search),
-            *section,
+            # C2's section in one card (#567, D111), on every branch: the chart and its
+            # table, the empty note, or the section's unavailable note.
+            components.card(section),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

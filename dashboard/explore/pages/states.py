@@ -58,13 +58,18 @@ def render(body: dict[str, Any], year: int) -> html.Div:
     states = roster(body, year)
     return html.Div(
         [
-            html.Ul(
+            # The page's one section, named by its H1, in one card (#567, D111).
+            components.card(
                 [
-                    html.Li(dcc.Link(name, href=f"/state/{usps}"))
-                    for usps, name in states
-                ],
-                id=LIST_ID,
-                className="states",
+                    html.Ul(
+                        [
+                            html.Li(dcc.Link(name, href=f"/state/{usps}"))
+                            for usps, name in states
+                        ],
+                        id=LIST_ID,
+                        className="states",
+                    )
+                ]
             ),
             components.provenance_footer(body["meta"]["provenance"]),
         ],

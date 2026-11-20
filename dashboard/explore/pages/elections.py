@@ -257,36 +257,43 @@ def render(
             html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             elections_view.section_nav(elections_view.LIST, search),
-            html.H2(LIST_HEADING),
-            # Source order is reading order at every width: the filters are the pair's
-            # left column and the count and averages they narrow its right, which is
-            # METRICS_ID itself, so the pair's margin reset reaches the count (#553).
-            components.pair(
-                [controls],
+            # The list's one section in one card (#567, D111): its filters, count and
+            # averages (the pair) and T1 below them.
+            components.card(
                 [
-                    html.P(
-                        labels.METRIC_LABELS["elections_shown"].format(
-                            shown=metrics.count(shown),
-                            total=metrics.count(elections),
-                        ),
-                        id=METRIC_IDS["elections_shown"],
-                        className="count",
+                    html.H2(LIST_HEADING),
+                    # Source order is reading order at every width: the filters are
+                    # the pair's left column and the count and averages they narrow
+                    # its right, which is METRICS_ID itself, so the pair's margin
+                    # reset reaches the count (#553).
+                    components.pair(
+                        [controls],
+                        [
+                            html.P(
+                                labels.METRIC_LABELS["elections_shown"].format(
+                                    shown=metrics.count(shown),
+                                    total=metrics.count(elections),
+                                ),
+                                id=METRIC_IDS["elections_shown"],
+                                className="count",
+                            ),
+                            *_averages(body, summary, shown, chosen.pv_only),
+                        ],
+                        LIST_PAIR_ID,
+                        right_id=METRICS_ID,
                     ),
-                    *_averages(body, summary, shown, chosen.pv_only),
-                ],
-                LIST_PAIR_ID,
-                right_id=METRICS_ID,
+                    *components.table(
+                        shown,
+                        _row,
+                        FIELDS,
+                        TABLE_ID,
+                        download,
+                        notes=(labels.HAS_POPULAR_VOTE_NOTE,),
+                        empty=labels.NO_ELECTIONS_MATCH,
+                    ),
+                    labels.glossary(FIELDS, ident=GLOSSARY_ID),
+                ]
             ),
-            *components.table(
-                shown,
-                _row,
-                FIELDS,
-                TABLE_ID,
-                download,
-                notes=(labels.HAS_POPULAR_VOTE_NOTE,),
-                empty=labels.NO_ELECTIONS_MATCH,
-            ),
-            labels.glossary(FIELDS, ident=GLOSSARY_ID),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

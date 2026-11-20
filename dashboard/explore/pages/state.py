@@ -516,22 +516,30 @@ def render(
                 state_view.HISTORY,
                 state_view.year_search(chosen.year_from, chosen.year_to, span),
             ),
-            *_electors_section(rows, served, usps, body, source),
-            html.H2(HISTORY_TABLE_HEADING),
-            dcc.Location(id=URL_ID, refresh="callback-nav"),
-            _controls(rows, chosen, span),
-            html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            *components.table(
-                shown,
-                lambda r: _row(r, coverage),
-                FIELDS,
-                TABLE_ID,
-                _download(usps, body, chosen, span),
-                extra=EXTRA,
-                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
+            # Two sections, two cards (#567, D111): C7 with its table, and T4 with the
+            # filters that narrow only it.
+            components.card(_electors_section(rows, served, usps, body, source)),
+            components.card(
+                [
+                    html.H2(HISTORY_TABLE_HEADING),
+                    dcc.Location(id=URL_ID, refresh="callback-nav"),
+                    _controls(rows, chosen, span),
+                    html.P(
+                        f"Showing {len(shown)} of {len(rows)} rows", className="count"
+                    ),
+                    *components.table(
+                        shown,
+                        lambda r: _row(r, coverage),
+                        FIELDS,
+                        TABLE_ID,
+                        _download(usps, body, chosen, span),
+                        extra=EXTRA,
+                        notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
+                    ),
+                    *labels.party_notes(shown),
+                    labels.glossary(GLOSSARY),
+                ]
             ),
-            *labels.party_notes(shown),
-            labels.glossary(GLOSSARY),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
