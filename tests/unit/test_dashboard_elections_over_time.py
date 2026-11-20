@@ -588,6 +588,8 @@ class TestTimeSeriesAxis:
         figures.append(c2_figure(render_majority()))
         for figure in figures:
             for t in figure["data"]:
+                if t.get("hoverinfo") == "skip":  # C2's connector (#564): no hover
+                    continue
                 assert len(t["x"]) == len(t["hovertext"]) > 0
                 for x, hover in zip(t["x"], t["hovertext"], strict=True):
                     assert hover.startswith(str(x)), (t["name"], x)
@@ -619,17 +621,21 @@ class TestTimeSeriesAxis:
         leaders_[1]["ec_share_full"] = None
         leaders_[2]["ec_share_full"] = "zz"
         figure = c2_figure(render_majority(summary))
-        symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
+        names = (labels.C2_NO_FIGURE, labels.UNRECOGNIZED)
+        marks = [t for t in figure["data"] if t["name"] in names]
+        symbols = {t["name"]: t["marker"]["symbol"] for t in marks}
         assert symbols == {
-            labels.C1_NO_SHARE: "circle-open",
+            labels.C2_NO_FIGURE: "circle-open",
             labels.UNRECOGNIZED: "square-open",
         }
         assert charts.figure_problems(figure) == []
         # Every hover, the markers' too, names the year it is drawn at (F5).
         for t in figure["data"]:
+            if t.get("hoverinfo") == "skip":  # C2's connector (#564): no hover
+                continue
             for x, hover in zip(t["x"], t["hovertext"], strict=True):
                 assert hover.startswith(f"{x}: "), (t["name"], x)
-        assert [t["x"] for t in figure["data"][1:]] == [
+        assert [t["x"] for t in marks] == [
             [leaders_[1]["year"]],
             [leaders_[2]["year"]],
         ]
@@ -649,12 +655,45 @@ class TestTimeSeriesAxis:
                 if t["type"] == "scatter":
                     assert t["cliponaxis"] is False, t["name"]
 
+    def test_marker_trace_carries_its_keywords_and_keeps_its_defaults(self) -> None:
+        """#564: C2 passes ``y``, ``size`` and ``color``; C4, C5 and C7 keep zeros, 9 and
+        the text color."""
+        plain = over_time.marker_trace("n", "x", [1824, 1828], ["a", "b"])
+        assert plain["y"] == [0, 0]
+        assert plain["marker"] == {"symbol": "x", "size": 9, "color": "var(--text)"}
+        drawn = over_time.marker_trace(
+            "n", "star", [1824], ["a"], y=[0.4], size=5, color="var(--chart-3)"
+        )
+        assert drawn["y"] == [0.4]
+        assert drawn["marker"] == {
+            "symbol": "star",
+            "size": 5,
+            "color": "var(--chart-3)",
+        }
+
+    def test_c5_s_bands_are_the_shared_pv_bands(self) -> None:
+        """g.7 (#564's review): C5 draws exactly what ``over_time.pv_bands`` gives for its
+        years and window, the function C2 shares, so the two cannot drift apart."""
+        c5 = chart_figure(render_over_time(), C5)
+        coverage = BODY["meta"]["provenance"]["coverage"]
+        window = (coverage["pv_year_min"], coverage["pv_year_max"])
+        years = sorted(row["year"] for row in BODY["data"])
+        expected = over_time.pv_bands(
+            years,
+            window,
+            labels.C5_BEFORE_BAND.format(pv_year_min=window[0]),
+            labels.C5_AFTER_BAND.format(pv_year_max=window[1]),
+        )
+        assert c5["layout"]["shapes"] == expected.shapes
+        assert c5["layout"]["annotations"] == expected.annotations
+        assert c5["layout"]["margin"] == {"t": expected.top_px}
+
     def test_the_pair_s_plots_start_at_one_height(self) -> None:
         """C4 takes C5's top margin, the room C5's band labels need (#558, cr.6)."""
         tree = render_over_time()
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
         assert c4["layout"]["margin"] == c5["layout"]["margin"]
-        assert c5["layout"]["margin"]["t"] == (over_time.TOP_PX + MOD["_BAND_LABEL_PX"])
+        assert c5["layout"]["margin"]["t"] == (over_time.TOP_PX + over_time.BAND_LABEL_PX)
 
     def test_no_years_is_a_type_error(self) -> None:
         """Caught by a page's degraded state, never a 500 (#558, cr.10)."""
@@ -695,12 +734,12 @@ class TestTimeSeriesAxis:
         # of 12 px text at plotly's 1.3 line height, plus a gap, so the two never touch
         # (#558, guard-efficacy F2).
         assert (
-            first_note["yshift"] == MOD["_BAND_LABEL_PX"] and last_note["yshift"] == 0
+            first_note["yshift"] == over_time.BAND_LABEL_PX and last_note["yshift"] == 0
         )
         assert first_note["font"]["size"] == last_note["font"]["size"] == 12
-        assert MOD["_BAND_LABEL_PX"] >= 2 * math.ceil(12 * 1.3) + 4
+        assert 2 * math.ceil(12 * 1.3) + 4 <= over_time.BAND_LABEL_PX
         assert figure["layout"]["margin"]["t"] == (
-            over_time.TOP_PX + 2 * MOD["_BAND_LABEL_PX"]
+            over_time.TOP_PX + 2 * over_time.BAND_LABEL_PX
         )
         assert charts.figure_problems(figure) == []
 

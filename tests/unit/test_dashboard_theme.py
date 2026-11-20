@@ -1185,6 +1185,27 @@ class TestChartColors:
         ratio = contrast(parse_color(palette[token]), parse_color(palette["--page"]))
         assert ratio >= NON_TEXT, (theme, token, round(ratio, 2))
 
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("token", (*CHART_MARKS, "--text"))
+    def test_each_mark_meets_3_to_1_on_a_band(self, theme: str, token: str) -> None:
+        """C2 draws its marks, its majority line and that line's label over the band
+        before the popular-vote window, filled ``--chart-grid`` (#564, D108; C5 draws
+        no bar there): each at 3:1 on that fill too, the label's text included."""
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        fill = parse_color(palette["--chart-grid"])
+        ratio = contrast(parse_color(palette[token]), fill)
+        assert ratio >= NON_TEXT, (theme, token, round(ratio, 2))
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    def test_the_majority_label_meets_aa_on_a_band(self, theme: str) -> None:
+        """C2's majority-line label sits at the left (#564), over the band: text, so
+        WCAG 1.4.3's ratio, in the color the figure paints it."""
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        ratio = contrast(
+            parse_color(palette["--text"]), parse_color(palette["--chart-grid"])
+        )
+        assert ratio >= AA, (theme, round(ratio, 2))
+
     def test_what_the_template_paints_is_what_these_tests_measure(self) -> None:
         """Closure over ``charts.TEMPLATE`` (#432's review): each color it paints is a
         token one of these tests holds to its ratio, so a template that moves text or a

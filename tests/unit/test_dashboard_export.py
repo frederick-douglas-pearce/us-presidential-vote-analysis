@@ -2248,9 +2248,16 @@ LEADER_ROW_FIELDS = (
 AVERAGED_FIELDS = ("ec_margin", "pv_margin")
 
 
+#: The year's winners C2's leader table shows (#564): a value that is no text reads
+#: "Unrecognized value" (a text sentinel would show as a name).
+LEADER_ITEM_NAMES = ("pv_winner", "hybrid_winner")
+
+
 def _leaders(body: dict[str, Any]) -> None:
     _row(*LEADER_ROW_FIELDS)(body)
     body["elections"][0]["ec_determinative"] = SENTINEL
+    for field in LEADER_ITEM_NAMES:
+        body["elections"][0][field] = 7
     for field in AVERAGED_FIELDS:
         body["elections"][0][field] = SENTINEL
 
@@ -2320,8 +2327,11 @@ UNRECOGNIZED_CELLS = {
     },
     # The first year's allotment and 2016's national total (#436).
     "/elections/over-time": {"elections-over-time-table": 2},
-    # One per doctored field, ``ec_determinative`` from the year's item (#434).
-    "/elections/majority": {"elections-leader-table": len(LEADER_ROW_FIELDS) + 1},
+    # One per doctored field, ``ec_determinative`` and the two winners from the year's
+    # item (#434, #564).
+    "/elections/majority": {
+        "elections-leader-table": len(LEADER_ROW_FIELDS) + 1 + len(LEADER_ITEM_NAMES)
+    },
     "/election/<year>": {
         "election-nation": len(SUMMARY_ROW_FIELDS),
         "election-panel": len(PANEL_WORDED_FIELDS) + len(PANEL_NAME_FIELDS),
@@ -2616,13 +2626,33 @@ def _year_rows(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
     return lambda body: [row for row in body["data"] if row["year"] == year]
 
 
+def _leader_of(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """N1's rank-1 ``data`` row of one year (C2's leader, #564)."""
+    return lambda body: [
+        row
+        for row in body["data"]
+        if row["year"] == year and row["electoral_rank"] == 1
+    ]
+
+
+def _item_of(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """N1's ``elections`` item of one year (#564)."""
+    return lambda body: [item for item in body["elections"] if item["year"] == year]
+
+
 #: Per live chart (#484): the page it renders on with its path values and query, and
 #: the served rows its figure is built from. Every live ``CHARTS`` row has an entry
 #: (``test_every_live_chart_has_its_served_rows``). C4 and C5 read N1 (#436; all states
 #: only since #562); C5's rows are every row of one year inside the window.
 SERVED_ROWS: dict[str, list[Served]] = {
     "C1": [Served({"year": "2016"}, "", "/v1/elections/2016", _first("summary"))],
-    "C2": [Served({}, "", "/v1/elections/summary", _first("data"))],
+    # #564: 1824's leader (outside the popular-vote window), 2016's leader (inside it:
+    # the triangle and the star) and 2016's item (the winners and flags the strip reads).
+    "C2": [
+        Served({}, "", "/v1/elections/summary", _first("data")),
+        Served({}, "", api.SUMMARY_PATH, _leader_of(2016)),
+        Served({}, "", api.SUMMARY_PATH, _item_of(2016)),
+    ],
     "C3": [
         Served({"year": "2016"}, "", "/v1/elections/2016/per-capita", _first("data"))
     ],

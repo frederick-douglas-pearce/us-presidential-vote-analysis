@@ -435,53 +435,122 @@ C1_NO_PV_CAPTION = (
 )
 
 #: Chart C2 (#434; ba spec, approved by the owner at #434's plan gate, 2026-11-11, with
-#: its historical claims): each election's Electoral College leader's electoral share
-#: against the majority line, on the elections index, beside its companion table. Not
-#: ``LABELS`` keys. The point series is named ``LABELS["ec_share_full"]`` and kept off
-#: the chart's key; no point carries text, and its hover writes :func:`share_cell` of
-#: the served share, as T3 writes it (#558, D104). Its marker series are named
-#: :data:`C1_NO_SHARE` and :data:`UNRECOGNIZED`, reused, each in the chart's key.
-C2_TITLE = "The Electoral College leader's electoral share in each election"
-#: The share axis's title, up the side (#558, D104): ``LABELS["ec_share_full"]``'s words
-#: on two lines, which ``LABELS`` cannot hold (tables use it too).
-C2_VALUE_AXIS = "Electoral share<br>(counted ÷ appointed)"
-#: The dashed line's label: "each election's", since the number of electors appointed
-#: changes with the year (never a fixed number such as 270).
-C2_MAJORITY_LINE = "Majority line: half of each<br>election's electors appointed"
-#: A point's hover, filled with strings the page writes: the year as written, the
+#: its historical claims; extended by #564, ba spec v3, approved at #564's plan gate,
+#: 2026-11-19, D108): each election's Electoral College leader's electoral share,
+#: popular-vote share and hybrid score, against the majority line, beside its companion
+#: table. Not ``LABELS`` keys. The circle series is named ``LABELS["ec_share_full"]``,
+#: the triangle series ``LABELS["pv_share"]``, both in the chart's key; no mark carries
+#: text, and each hover writes the companion table's cells (#558, D104). Its marker
+#: series are named :data:`C2_NO_FIGURE` and :data:`UNRECOGNIZED`, each in the key.
+C2_TITLE = (
+    "The Electoral College leader's electoral share, popular-vote share and hybrid "
+    "score in each election"
+)
+#: The value axis's title, up the side: the shares and the score share one axis.
+C2_VALUE_AXIS = "Leader's shares<br>and hybrid score"
+#: The dashed line's label, just below the line at the left (#564's plan gate, D108):
+#: "each election's", since the number of electors appointed changes with the year
+#: (never a fixed number such as 270). Three lines since #564, so it ends before the
+#: first popular-vote year at 360 px in CI's wider font (the words are unchanged).
+C2_MAJORITY_LINE = "Majority line: half of<br>each election's<br>electors appointed"
+#: The circle's hover, filled with strings the page writes: the year as written, the
 #: name as served, the companion table's cells, and the majority line every year.
 C2_HOVER = (
     "{year}: {candidate}<br>Electoral share (counted ÷ appointed): {share}<br>"
     "Electoral votes counted: {counted}<br>Electors appointed: {appointed}<br>"
     "{majority}"
 )
-#: The caption's sentences, joined in the order ``pages/elections.py`` gives, between
-#: which it puts :data:`C1_EC_BASIS`.
+#: The hybrid series' name in the chart's key: the project's proposal (#564, D108).
+C2_HYBRID_KEY = "Hybrid score (the project's proposal)"
+#: The strip series' names in the key: a mark above a year in which a different
+#: candidate came first under that method, from the served flag (#564, D108).
+C2_PV_DIFFERENT_KEY = "Popular-vote winner: a different candidate"
+C2_HYBRID_DIFFERENT_KEY = "Hybrid winner: a different candidate"
+#: The marker series for a share or score this dataset has no figure for (#564's option
+#: A): one open-circle series for any of the three marks; its hover says which.
+C2_NO_FIGURE = "No share or score in this dataset"
+#: The triangle's and the star's hovers, and the strip marks' (#564): table cells only.
+C2_PV_HOVER = "{year}: {candidate}<br>Popular-vote share: {share}"
+C2_HYBRID_HOVER = (
+    "{year}: {candidate}<br>Hybrid score: {score}<br>"
+    "The project's proposal, not an official measure"
+)
+C2_PV_DIFFERENT_HOVER = (
+    "{year}: a different candidate won the popular vote<br>"
+    "Popular-vote winner: {winner}"
+)
+C2_HYBRID_DIFFERENT_HOVER = (
+    "{year}: a different candidate had the highest hybrid score<br>"
+    "Hybrid winner: {winner}<br>The project's proposal, not an official measure"
+)
+#: The caption's sentences, in the order ``pages/elections_majority.py`` gives, with
+#: :data:`C1_EC_BASIS` after :data:`C2_EC_MARK` and :data:`C1_LINE_EC_ONLY` after
+#: :data:`C2_MAJORITY_NOTE`. The shape words are pinned to the traces' symbols.
 C2_LEADER_POINT = (
-    "Each point is that election's Electoral College leader: the candidate with the "
-    "most electoral votes counted."
+    "Each year's marks are for that election's Electoral College leader: the candidate "
+    "with the most electoral votes counted."
+)
+C2_EC_MARK = "The circle is the leader's electoral share."
+C2_PV_MARK = (
+    "The solid triangle is the leader's popular-vote share, their share of all votes "
+    "cast for president nationally, and a thin line joins it to the circle."
+)
+C2_HYBRID_MARK = (
+    "The star is the leader's hybrid score: the average of their electoral share and "
+    "popular-vote share. The hybrid score is the project's own proposal, not an "
+    "official measure."
 )
 C2_MAJORITY_NOTE = (
     "The dashed line marks half of each election's electors appointed: a leader whose "
     "electoral share is more than half had a majority of them. With half or less, no "
     "candidate had a majority, and the election went to the House of Representatives."
 )
+#: Its example is pinned to the served 1992 leader's ``pv_share`` (#564's plan gate).
+C2_PLURALITY_NOTE = (
+    "A popular-vote share under 50% is not unusual: a candidate can win the popular "
+    "vote with less than half of all votes, as William J. Clinton did in 1992 with "
+    "43.0%."
+)
 C2_TOOK_OFFICE = (
     "The leader did not always take office: in 1824 the leader, Andrew Jackson, had "
     "no majority, and the House of Representatives chose John Quincy Adams."
 )
-#: The caption's last sentence, only when a marker is drawn (#558, D104): the marker
-#: sits at zero, and without a text label it would read as 0%.
-C2_NO_SHARE_NOTE = (
-    "A marker at the bottom of the chart in place of a point means this dataset has "
-    "no electoral share to draw for that election, and the chart's key says why. It "
-    "is not a zero."
+#: Only when the band before the popular-vote window is drawn; its bound from coverage.
+C2_BEFORE_NOTE = (
+    "The shaded years come before {pv_year_min}, when this dataset's popular-vote "
+    "figures begin, so only the circle is drawn for them. Shading means this dataset "
+    "has no popular-vote share or hybrid score for those years, not that no popular "
+    "vote was held."
 )
-#: The companion table's first note (with :data:`C2_TOOK_OFFICE`), under the table and
-#: in its CSV's preamble, which has no caption.
+#: Only when that strip series is drawn.
+C2_PV_DIFFERENT_NOTE = (
+    "A hexagon along the top of the chart marks a year in which a different candidate "
+    "won the popular vote; the table names them."
+)
+C2_HYBRID_DIFFERENT_NOTE = (
+    "A pentagon along the top of the chart marks a year in which a different "
+    "candidate had the highest hybrid score; the table names them."
+)
+#: The caption's last sentence, only when a marker is drawn (#558, D104; #564): the
+#: marker sits at zero, and without a text label it would read as 0%.
+C2_NO_SHARE_NOTE = (
+    "A marker at the bottom of the chart in place of a circle, triangle or star means "
+    "this dataset has no figure to draw there for that election: its hover says which, "
+    "and the chart's key says why. It is not a zero."
+)
+#: The companion table's notes, under the table and in its CSV's preamble, which has no
+#: caption: with :data:`C2_TOOK_OFFICE` and :data:`HYBRID_NOTE` (#564).
 C2_LEADER_ROW = (
     "Each row is that election's Electoral College leader: the candidate with the "
     "most electoral votes counted."
+)
+C2_TABLE_METHODS_NOTE = (
+    "The popular-vote share and hybrid score are the leader's own. The popular-vote "
+    "winner and hybrid winner columns name who came first under that method, who may "
+    "be a different candidate."
+)
+C2_HYBRID_TABLE_NOTE = (
+    "The hybrid score is the project's own proposal, not an official measure."
 )
 
 #: Chart C3 (#435; ba spec, revised after the architect's review and approved by the
@@ -1324,6 +1393,18 @@ def ec_majority(value: object) -> str:
     if value is False:
         return NO_EC_MAJORITY
     return _unknown(value)
+
+
+def national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
+    """A national cell that needs the popular vote, on T3's year rule (#352; shared by
+    T3 and C2's table since #564): :data:`NOT_APPLICABLE` in a year with no popular
+    vote (the index row's ``has_popular_vote``), and inside it a null (or a blank,
+    #355) is a candidate with no popular-vote figure."""
+    if not has_popular_vote:
+        return NOT_APPLICABLE
+    if is_blank(value):
+        return NO_NATIONAL_FIGURE
+    return share(value) if as_share else number(value)
 
 
 def share_cell(value: object) -> str:

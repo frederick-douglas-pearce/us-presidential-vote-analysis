@@ -623,6 +623,8 @@ _Story of epic #N (E9 — public dashboard)._
   popular vote from `meta.provenance.coverage`). Candidate shares use **counted** votes (2016 Trump =
   304 of 538); state totals use the **appointed** allotment.
 - No hybrid series in S6: the hybrid waits for S7's labeled opinion tab.
+  **Amended by D108 (#564):** a chart may draw the hybrid when its key, hover and caption call it
+  the project's proposal (C2 first; #550 inherits it); argument for it stays in S7.
 - Cross-election data comes from two routes with no query parameters, filled on first use (D074(ii)'s
   precedent; D072 unchanged): #431 (every election's national summary) and #428 (every state's
   per-election row). #343's backfill stays deferred.

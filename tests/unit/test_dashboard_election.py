@@ -3240,7 +3240,7 @@ class TestPanelCells:
 def test_a_blank_t3_figure_is_a_missing_one() -> None:
     """#355's review: a blank is no value, so inside the window it reads as a
     candidate with no popular-vote figure, as a null does."""
-    national_pv = MOD["_national_pv"]
+    national_pv = labels.national_pv
     assert national_pv("", True, False) == labels.NO_NATIONAL_FIGURE
     assert national_pv(" ", True, True) == labels.NO_NATIONAL_FIGURE
     assert national_pv("", False, True) == labels.NOT_APPLICABLE

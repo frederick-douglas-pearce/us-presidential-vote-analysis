@@ -158,18 +158,6 @@ dash.register_page(
 )
 
 
-def _national_pv(value: Any, has_popular_vote: bool, as_share: bool) -> str:
-    """A T3 cell that needs the popular vote: :data:`labels.NOT_APPLICABLE` in a year
-    with no popular vote (T3's year rule, from the index row), the panel's wording for
-    the same cause (#352), and inside it a null (or a blank, #355) is a candidate with
-    no popular-vote figure."""
-    if not has_popular_vote:
-        return labels.NOT_APPLICABLE
-    if labels.is_blank(value):
-        return labels.NO_NATIONAL_FIGURE
-    return labels.share(value) if as_share else labels.number(value)
-
-
 #: The T3 fields :func:`_nation_cells` words, in T3's order: every column but the
 #: candidate and the party, which are cells of their own (a link, a note).
 NATION_WORDED = NATION_FIELDS[2:]
@@ -188,14 +176,14 @@ def _nation_cells(row: dict[str, Any], has_popular_vote: bool) -> dict[str, str]
         ),
         "electoral_rank": labels.number(row["electoral_rank"]),
         "took_office": labels.yes_no(row["took_office"]),
-        "national_pv_votes": _national_pv(
+        "national_pv_votes": labels.national_pv(
             row["national_pv_votes"], has_popular_vote, False
         ),
         # Nullable in the API's schema, though real for every served year.
         "ec_share_full": labels.share_cell(row["ec_share_full"]),
-        "pv_share": _national_pv(row["pv_share"], has_popular_vote, True),
+        "pv_share": labels.national_pv(row["pv_share"], has_popular_vote, True),
         # On T3's year rule, so the row agrees with itself.
-        "hybrid_score": _national_pv(row["hybrid_score"], has_popular_vote, True),
+        "hybrid_score": labels.national_pv(row["hybrid_score"], has_popular_vote, True),
     }
 
 
