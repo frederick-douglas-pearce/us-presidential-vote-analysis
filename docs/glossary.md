@@ -817,11 +817,13 @@ articles and announcements). Every rule binds all three unless the rule states a
     `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, `labels.C2_PV_DIFFERENT_NOTE`,
     `labels.C2_HYBRID_DIFFERENT_NOTE` and `labels.C2_NO_SHARE_NOTE`, then
     `labels.CHART_TABLE_POINTER`.
-  - In `pages/elections_majority.py`: `HEADING` (the page's, formerly C2's section heading),
-    `LEDE`, `C2_TABLE_HEADING`, the companion table's columns (existing `LABELS` keys), the table
-    notes `labels.C2_LEADER_ROW`, `labels.C2_TOOK_OFFICE`, `labels.C2_TABLE_METHODS_NOTE`,
-    `labels.HYBRID_NOTE` and `labels.C2_HYBRID_TABLE_NOTE`, the download "the Electoral College
-    leaders" (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`.
+  - In `pages/elections_majority.py`: `HEADING` (the page's, formerly C2's section heading), `LEDE`,
+    `FILTER_SENTENCE` (success only, after `LEDE`), the filters' `labels.YEARS_FILTER` and
+    `labels.PV_ONLY_FILTER`, `labels.NO_ELECTIONS_MATCH`, `C2_TABLE_HEADING`, the companion table's
+    columns (existing `LABELS` keys), the table notes `labels.C2_LEADER_ROW`,
+    `labels.C2_TOOK_OFFICE`, `labels.C2_TABLE_METHODS_NOTE`, `labels.HYBRID_NOTE` and
+    `labels.C2_HYBRID_TABLE_NOTE`, the download "the Electoral College leaders"
+    (`elections-electoral-college-leaders.csv`), and `C2_UNAVAILABLE`.
 - **Source:** #434 acceptance criteria (the counted basis: owner, 2026-11-05); #564 acceptance
   criteria; `CHARTS`; `NationalSummaryRow.ec_share_full`, `pv_share`, `hybrid_score`,
   `electoral_rank`, `national_electoral_votes_counted` and `national_electoral_denominator`,
