@@ -1290,7 +1290,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   it reads *Not in this dataset* with `labels.PARTY_NULL_NOTE`. T2 and T4 name the window's side
   (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`). C2's leader table follows T3's rule (`has_popular_vote`, #564).
 - **Shown as:** `labels.NOT_APPLICABLE` (panel; T3 and C2's leader table through
-  `labels.national_pv`, called from `pages/election.py` and `pages/elections_majority.py`; `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no
+  `labels.national_pv`, called from `pages/election.py` and `pages/elections_majority.py`); `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no
   popular-vote bar is drawn, the title `labels.C1_TITLE_NO_PV` and the caption sentence
   `labels.C1_NO_PV_CAPTION`; `labels.NOT_APPLICABLE` as the national total's cell outside the
   window (the C4/C5 table); C5's band (vertical, over the years outside the window) and its labels
@@ -1347,7 +1347,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/elections/majority` and `/elections/over-time`, `HEADING`, `LEDE`, the title and description
   in each page's module. `elections_view.py` ships no wording of its own.
 - **Source:** #562 (owner agreement at the 2026-11-17 review); D092 (the subpage pattern); D107;
-  reader wording: `ba` spec for #562, approved at its plan gate (2026-11-19).
+  reader wording: `ba` spec for #562, approved at its plan gate (2026-11-19); `LEDE` and description on `/elections/majority`: `ba` spec for #564, approved at its plan gate (2026-11-19).
 - **Not:** *Election pages* (one election's three pages). *Site navigation*. A filter: the section
   links change the page, not the rows.
 - **Status:** settled
