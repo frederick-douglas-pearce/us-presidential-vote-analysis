@@ -1084,8 +1084,9 @@ class TestNarrowBand:
         )
 
     def test_the_cases_sit_at_the_boundary(self) -> None:
-        """The cases above straddle 0.5 closely, so a threshold anywhere else, a strict
-        comparison, or the unpadded span would flip one of them."""
+        """The cases above straddle 0.5 closely: a threshold above one half, a strict
+        comparison, or an unpadded axis would flip one of them; the last assert pins
+        the value itself, which a threshold just under one half would not flip."""
         years = [1900, 1904, 1908, 1912, 1916, 1920, 1924, 1928, 1932, 1936, 1940]
         shares = [
             self.share(years, 1924),
@@ -1095,3 +1096,19 @@ class TestNarrowBand:
         assert shares[0] > 0.5 and shares[1] == 0.5 and shares[2] < 0.5
         assert all(abs(x - 0.5) < 0.1 for x in shares), shares
         assert over_time.BAND_INSIDE_SHARE == 0.5
+
+
+class TestOverTimeReviewGuards:
+    """Guards #596's round-2 review found missing."""
+
+    def test_a_hidden_year_s_defect_degrades_the_filtered_view_too(self) -> None:
+        """r2.1: every served year's point and table row are built before the filters
+        apply, so a filtered view never shows what the default view refuses (D110(a),
+        its addendum). 1828 is hidden by ``year_from=1900``."""
+        summary = copy.deepcopy(SUMMARY)
+        (item,) = [i for i in summary["elections"] if i["year"] == 1828]
+        del item["electoral_denominator"]
+        for pairs in ([], [("year_from", "1900")]):
+            tree = MOD["render"](copy.deepcopy(BODY), copy.deepcopy(summary), pairs)
+            assert find(tree, MOD["OVER_TIME_UNAVAILABLE_ID"]) is not None, pairs
+            assert find(tree, C4) is None and find(tree, C5) is None, pairs

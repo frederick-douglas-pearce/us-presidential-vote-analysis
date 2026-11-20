@@ -186,7 +186,11 @@ def test_filtered_c2_is_readable_at_360(page: Page, query: str) -> None:
         for b in boxes(page, f"{C2} .layer-below .shapelayer path")
         if abs(b["h"] - plot["h"]) < 2
     ]
-    for note in boxes(page, f"{C2} .annotation-text"):
+    notes = boxes(page, f"{C2} .annotation-text")
+    if query == "?year_from=1968":
+        # Not vacuous (#596's round 2): the narrow band and its one label are drawn.
+        assert len(bands) == 1 and len(notes) == 1, (bands, notes)
+    for note in notes:
         above = note["y"] + note["h"] <= plot["y"] + 1
         inside = any(
             band["x"] - 1 <= note["x"]
