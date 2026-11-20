@@ -791,7 +791,10 @@ class TestTimeSeriesAxis:
         )
         assert (first_note["x"], first_note["xanchor"]) == (before["x0"], "left")
         assert (last_note["x"], last_note["xanchor"]) == (after["x1"], "right")
-        key = over_time.KEY_ROW_PX if figure["layout"]["showlegend"] else 0
+        # No marker in this body, so no key and no raise (#593's review: literal, never
+        # derived from the figure); the marked case is the next test.
+        assert figure["layout"]["showlegend"] is False
+        key = 0
         assert first_note["yshift"] == -over_time.BAND_LABEL_INSET_PX
         assert last_note["yshift"] == key
         # The after label's room: two lines of 12 px text at plotly's 1.3 line height,
@@ -805,6 +808,40 @@ class TestTimeSeriesAxis:
         assert first_note["text"] == labels.C5_BEFORE_BAND
         assert first_note["text"].count("<br>") == 1
         assert charts.figure_problems(figure) == []
+
+
+    @pytest.mark.parametrize(("doctored", "rows"), [(("x",), 1), (("x", None), 2)])
+    def test_the_after_label_rises_one_key_row_per_key_entry(
+        self, doctored: tuple[Any, ...], rows: int
+    ) -> None:
+        """#593's review: with an after band drawn, the label is raised by one key row
+        per entry the key shows (an unrecognized total, then also a missing one inside
+        the window), and the top margin holds it."""
+        moved, summary = after_2016()
+        for value, year in zip(doctored, (1996, 2000), strict=False):
+            for row in summary["data"]:
+                if row["year"] == year:
+                    row["national_pv_denominator"] = value
+        figure = chart_figure(render_over_time(index=moved, summary=summary), C5)
+        assert len([tr for tr in figure["data"] if tr["showlegend"]]) == rows
+        (after,) = [
+            n
+            for n in figure["layout"]["annotations"]
+            if n["text"] == labels.C5_AFTER_BAND.format(pv_year_max=2016)
+        ]
+        assert after["yshift"] == rows * 24
+        assert figure["layout"]["margin"]["t"] == 16 + rows * 24 + 40
+
+    def test_the_key_sits_above_the_plot(self) -> None:
+        """#593 (D109), pinned by value, not by the constant compared with itself."""
+        assert components.TIME_SERIES_LEGEND == {
+            "orientation": "h",
+            "yref": "paper",
+            "y": 1,
+            "yanchor": "bottom",
+            "x": 0,
+            "xanchor": "left",
+        }
 
 
 class TestWideLayout:

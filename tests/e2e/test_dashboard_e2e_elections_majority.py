@@ -190,12 +190,14 @@ def test_with_plotlyjs_blocked_c2_s_title_caption_and_table_render(
     expect(page.locator(f"{C2} .js-plotly-plot")).to_have_count(0)
 
 
-@pytest.mark.plotlyjs_fetches(1)
-def test_each_mark_is_its_measure_s_color_and_the_majority_line_is_one_dash(
+@pytest.mark.plotlyjs_fetches(2)
+def test_each_mark_is_its_measure_s_color_and_no_axis_gridline_is_drawn(
     page: Page,
 ) -> None:
     """#593 (D109): circle red, triangle blue, crossbar purple, read from what the
-    browser paints; and one line at 50%, the dashed one, with no gridline under it."""
+    browser paints; and plotly draws no value-axis gridline on C2 (its gridlines are
+    shapes, which the unit test pins away from 50%). The control: C4, which keeps the
+    axis's own gridlines, does draw ``.ygrid`` paths, so the count is not vacuous."""
     open_c2(page)
     for selector, measure, prop in (
         (C2_POINTS, "--chart-ec", "fill"),
@@ -207,6 +209,9 @@ def test_each_mark_is_its_measure_s_color_and_the_majority_line_is_one_dash(
         )
         assert painted == rgb(token(page, measure)), (selector, painted)
     expect(page.locator(f"{C2} .ygrid")).to_have_count(0)
+    page.goto("/elections/over-time")
+    page.locator("#c4 .main-svg").first.wait_for()
+    expect(page.locator("#c4 .ygrid").first).to_be_attached()
 
 
 @pytest.mark.plotlyjs_fetches(1)

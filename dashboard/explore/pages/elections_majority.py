@@ -83,18 +83,15 @@ C2_UNAVAILABLE = (
 #: 60%, stand apart). Its title is page text (``components.chart`` takes it out of the
 #: figure).
 _C2_HEIGHT_PX = 560
-#: Room C2 reserves for its key above the plot where an after band's label must sit
-#: above the key (:func:`explore.over_time.pv_bands`): three rows, the key's height at
-#: desktop width plus one (#593, D109).
-_C2_KEY_PX = 3 * over_time.KEY_ROW_PX
 #: How far below the majority line its label starts: more than C2's point radius.
 _C2_LINE_LABEL_SHIFT_PX = 6
 #: The value axis runs past 100% to hold the strip of disagreement marks (#564, D108),
 #: which sit at :data:`_C2_STRIP_Y`, above every share; its ticks stop at 100%.
 _C2_Y_TOP = 1.12
 _C2_STRIP_Y = 1.06
-#: The value axis's ticks, and where the majority line sits among them: the one tick
-#: that draws no gridline but the line itself (#593, D109).
+#: The value axis's ticks, and where the majority line sits among them (#593, D109):
+#: every tick but 0, which is the axis line, and 50%, which is the majority line,
+#: draws a gridline shape.
 _C2_TICKS = (0, 0.25, 0.5, 0.75, 1)
 _C2_MAJORITY = 0.5
 #: C2's symbols (#558, D104; #564, D108): one per meaning across C2, C4, C5 and C7.
@@ -488,7 +485,9 @@ def _c2_figure(
         window,
         labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
         labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
-        key_px=_C2_KEY_PX,
+        # One key row per entry the key shows, the most rows it can wrap to, counted
+        # from the traces built above (#593's review).
+        key_px=over_time.KEY_ROW_PX * sum(1 for t in data if t.get("showlegend")),
     )
     # The value axis draws no gridlines of its own (#593, D109): its 50% gridline
     # showed through the majority line's dashes, so it read as a doubled line. The

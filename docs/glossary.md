@@ -390,8 +390,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Chart (C1, C2, …)
 - **Plain:** A drawing of some of this dataset's numbers on a page, with a title, a caption under
-  it that the reader opens with "About this chart", and a link, always shown, to the table on the
-  same page that holds its numbers. The tables are the record.
+  it (on most charts the reader opens it with "About this chart"), and a link, always shown, to
+  the table on the same page that holds its numbers. The tables are the record.
   A chart is another way to see it, and the page works without one.
 - **Precise:** Built only by `components.chart(chart_id, figure, table_id, caption)`. It is an
   HTML `figure` element holding, in order, the **chart title**, the drawing, and a caption
@@ -1457,8 +1457,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.UNRECOGNIZED` for any other cell), with T6's cell in full in its hover; never a
   zero-length bar and never an infinity. The bars are two series split on T6's border cell,
   sharing one row slot: striped exactly where the cell is `BOUNDARY_BASIS["present_day"]`, plain
-  for every other row. Both are `--chart-ec`, red: people per electoral vote is counted per
-  elector (owner, #593's plan gate). The stripes mean present-day borders in every year. The legend has an entry for each bar series drawn and, when a state is selected, one for its mark (`labels.C3_SELECTED`); the marker series has none (its name, `labels.C3_NO_FIGURE_SERIES`, is never shown). The plain series is named `BOUNDARY_BASIS["at_election"]` when every
+  for every other row. Both are `--chart-ec`, red, the color of values derived from electoral
+  votes (owner, #593's plan gate). The stripes mean present-day borders in every year. The legend has an entry for each bar series drawn and, when a state is selected, one for its mark (`labels.C3_SELECTED`); the marker series has none (its name, `labels.C3_NO_FIGURE_SERIES`, is never shown). The plain series is named `BOUNDARY_BASIS["at_election"]` when every
   plain row is at the election, and `labels.C3_PLAIN_SERIES` otherwise, and in that case the
   caption adds `labels.C3_PLAIN_MIXED`. The selected state (the page's filter, once T6's rows name
   it) is marked by one diamond, filled with the page color (`--page`) and ringed in the text color (`--text`), at zero in its row (the start of the row), in a series of its own named
@@ -2140,7 +2140,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "win margin", "winning margin" | margin | `labels.METRIC_LABELS`, `LABELS["ec_margin"]`, `LABELS["pv_margin"]` | A margin is first place's lead over second under one method; in 1824 the Electoral College leader did not win. |
 | "mean" in reader text | average | `labels.METRIC_LABELS` | The plain word; "mean" stays in code and D097. |
 | "turnout" | "total popular vote" | `labels.C5_*` | Turnout is a share of eligible voters, which this dataset doesn't have. |
-| "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_BAND`, `labels.C5_BEFORE_NOTE` | |
+| "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_NOTE`, `labels.C2_BEFORE_NOTE` | The band label, `labels.C5_BEFORE_BAND`, says "no popular-vote figures in this dataset" and leaves the year to these notes (#593). |
 
 ## Open decisions
 

@@ -1211,17 +1211,39 @@ class TestChartColors:
         """#593 (D109): the summary that opens a chart's caption is a control, so it
         takes the focus ring every control here takes, --accent at 3:1 on the page
         in both palettes."""
-        css = STYLESHEET.read_text()
-        assert (
-            ".chart summary:focus-visible { outline: 2px solid var(--accent); "
-            "outline-offset: 2px; }"
-        ) in css
+        # Read through the stylesheet's own parser, so a commented-out rule is no rule
+        # (#593's review).
+        assert toggle_rule(".chart summary:focus-visible") == {
+            "outline": "2px solid var(--accent)",
+            "outline-offset": "2px",
+        }
         for key in (LIGHT, EXPLICIT_DARK):
             palette = block(key)
             ratio = contrast(
                 parse_color(palette["--accent"]), parse_color(palette["--page"])
             )
             assert ratio >= NON_TEXT, (key, round(ratio, 2))
+
+    def test_each_measure_token_is_its_decided_color(self) -> None:
+        """D109(a): each measure's token holds the value the owner approved, in each
+        palette block, so swapping two measures' values fails even though contrast and
+        separation are symmetric and would not."""
+        expected = {
+            LIGHT: {
+                "--chart-ec": "#c62f2f",
+                "--chart-pv": "#1f7fd6",
+                "--chart-hybrid": "#6a2c9e",
+            },
+            EXPLICIT_DARK: {
+                "--chart-ec": "#e8605a",
+                "--chart-pv": "#3f86e3",
+                "--chart-hybrid": "#d7a6ec",
+            },
+        }
+        for key in PALETTE_BLOCKS:
+            palette = block(key)
+            want = expected[LIGHT if key == LIGHT else EXPLICIT_DARK]
+            assert {t: palette[t] for t in want} == want, key
 
     def test_what_the_template_paints_is_what_these_tests_measure(self) -> None:
         """Closure over ``charts.TEMPLATE`` (#432's review): each color it paints is a

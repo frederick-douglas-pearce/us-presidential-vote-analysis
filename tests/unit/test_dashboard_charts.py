@@ -237,6 +237,11 @@ class TestChartBuilder:
         assert link.children == labels.CHART_TABLE_POINTER
         assert link.href == "#elections-table"
 
+    def test_the_figure_is_named_by_its_title(self) -> None:
+        """#593's review: a closed caption leaves its text out of the figure's name,
+        so the figure, drawn or not, is named by its chart title."""
+        assert getattr(build(), "aria-labelledby") == "c1-title"
+
     def test_an_open_caption_ends_with_the_table_pointer(self) -> None:
         """``collapsed=False`` (C1, #593): the caption is shown, the pointer at its
         end, with no summary."""
@@ -309,6 +314,7 @@ class TestChartBuilder:
         change(figure)
         built = build(figure)
         assert built.id == "c1" and not self.mounted(built)
+        assert getattr(built, "aria-labelledby") == "c1-title"
         assert [getattr(c, "id", None) for c in built.children] == ["c1-title", None]
         assert built.children[0].children == TEST_FIGURE["layout"]["title"]["text"]
         caption = built.children[1]

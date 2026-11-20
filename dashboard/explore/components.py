@@ -547,7 +547,9 @@ def chart(
     link): the chart title as page text (a paragraph, since a chart cannot know the
     page's outline), so it shows and wraps when plotly.js cannot load; the chart's
     mount point, a ``role="img"`` wrapper named by that title, which hides the
-    drawing's SVG from assistive technology; the store holding the unresolved figure;
+    drawing's SVG from assistive technology (the figure itself is named by that title
+    too, #593, since a closed caption leaves its own text out of the name); the store
+    holding the unresolved figure;
     and the caption, followed by :data:`labels.CHART_TABLE_POINTER`, a link to the
     companion table. The caption is collapsed (#593, D109): an HTML ``details`` closed
     on load and opened by its summary, :data:`labels.CHART_CAPTION_SUMMARY`, with the
@@ -626,7 +628,7 @@ def chart(
             problems[:LOGGED_PROBLEMS],
             extra={"chart_id": chart_id},
         )
-        return html.Figure([heading, pointer], id=dom, className="chart")
+        return html.Figure([heading, pointer], id=dom, className="chart", **named)
     return html.Figure(
         [
             heading,
@@ -641,6 +643,10 @@ def chart(
         ],
         id=dom,
         className="chart",
+        # Named by its title, not its figcaption (#593's review): a closed caption's
+        # text is left out of the name, which would leave every chart's figure named
+        # by the same summary and pointer.
+        **named,
     )
 
 

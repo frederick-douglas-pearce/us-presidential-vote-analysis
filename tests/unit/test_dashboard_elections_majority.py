@@ -307,8 +307,11 @@ class TestC2:
         (line,) = [
             s for s in layout["shapes"] if s["type"] == "line" and "dash" in s["line"]
         ]
-        # Horizontal across the plot at half (#558, D104).
+        # Horizontal across the plot at half (#558, D104), in the reference token
+        # (#593's review: the gridlines' exemption from the painted-color check is by
+        # color, so the line's own color is pinned here).
         assert (line["yref"], line["y0"], line["y1"]) == ("y", 0.5, 0.5)
+        assert line["line"]["color"] == "var(--chart-reference)"
         assert (line["xref"], line["x0"], line["x1"]) == ("paper", 0, 1)
         assert line["line"]["dash"] == "dash"
         # One label, just below the line at the left (owner, #564's plan gate, D108).
@@ -474,7 +477,7 @@ class TestC2Methods:
                 assert label in (labels.NOT_IN_DATASET, labels.C5_NO_TOTAL)
 
     def test_the_drawing_order_puts_the_circle_on_top(self) -> None:
-        """M1: the connector under the triangles, then the stars, then the circles."""
+        """M1: the connector under the triangles, then the crossbars, then the circles."""
         names = [t["name"] for t in c2_figure(render_c2())["data"]]
         order = [
             labels.LABELS["pv_share"],  # the connector, no marker
@@ -485,7 +488,7 @@ class TestC2Methods:
         assert names[:4] == order
         assert "marker" not in c2_figure(render_c2())["data"][0]
 
-    def test_the_triangle_and_star_stand_at_the_served_values(self) -> None:
+    def test_the_triangle_and_crossbar_stand_at_the_served_values(self) -> None:
         """T2: each mark's y is the served value whose table cell its hover writes, in
         every year T3's rule treats as having a popular vote, and in no other."""
         tree = render_c2()
@@ -743,16 +746,20 @@ class TestC2Methods:
         assert labels.C5_AFTER_BAND.format(pv_year_max=2016) in notes(moved)
         assert labels.C2_BEFORE_NOTE.format(pv_year_min=1980) in _caption(moved)
         assert labels.C5_AFTER_NOTE.format(pv_year_max=2016) in _caption(moved)
-        # The after band's label sits above the key, which keeps its rows (#593).
+        # The after band's label sits above the key, raised by one key row per entry
+        # the key shows, the most rows it can wrap to (#593's review): here the
+        # triangle, the crossbar, the circle and the popular-vote strip, four.
+        keyed = [tr for tr in c2_figure(moved)["data"] if tr.get("showlegend")]
+        assert len(keyed) == 4
         assert c2_figure(moved)["layout"]["margin"] == {
-            "t": over_time.TOP_PX + MOD["_C2_KEY_PX"] + over_time.BAND_LABEL_PX
+            "t": over_time.TOP_PX + 4 * 24 + over_time.BAND_LABEL_PX
         }
         (after,) = [
             n
             for n in c2_figure(moved)["layout"]["annotations"]
             if n["text"] == labels.C5_AFTER_BAND.format(pv_year_max=2016)
         ]
-        assert after["yshift"] == MOD["_C2_KEY_PX"] == 3 * over_time.KEY_ROW_PX
+        assert after["yshift"] == 4 * 24 == len(keyed) * over_time.KEY_ROW_PX
         assert _cell_of(moved, 1976, "pv_share") == labels.NOT_APPLICABLE
         triangles = named(c2_figure(moved), labels.LABELS["pv_share"])["x"]
         assert 1976 not in triangles and 2020 not in triangles and 1980 in triangles
@@ -841,6 +848,14 @@ class TestC2Methods:
         assert len(at_half) == 1 and at_half[0]["line"]["dash"] == "dash"
         # Drawn after the bands and the gridlines, so on top of both.
         assert layout["shapes"][-1] is at_half[0]
+
+    def test_the_caption_is_collapsed(self) -> None:
+        """#593 (D109): C2's caption closed under its summary, the pointer after it."""
+        (figcaption,) = of_type(find(render_c2(), C2), "Figcaption")
+        details, pointer = figcaption.children
+        assert type(details).__name__ == "Details"
+        assert details.children[0].children == labels.CHART_CAPTION_SUMMARY
+        assert pointer.children[0].children == labels.CHART_TABLE_POINTER
 
     def test_c2_is_560_px_tall(self) -> None:
         assert c2_figure(render_c2())["layout"]["height"] == 560
@@ -959,9 +974,9 @@ class TestC2Methods:
         """AC5: its trace name and key, its hover, the caption and the table note."""
         tree = render_c2()
         figure = c2_figure(tree)
-        star = named(figure, labels.C2_HYBRID_KEY)
-        assert star["showlegend"] is True and "proposal" in star["name"]
-        assert all("proposal" in hover for hover in star["hovertext"])
+        crossbar = named(figure, labels.C2_HYBRID_KEY)
+        assert crossbar["showlegend"] is True and "proposal" in crossbar["name"]
+        assert all("proposal" in hover for hover in crossbar["hovertext"])
         assert labels.C2_HYBRID_MARK in _caption(tree)
         assert "proposal" in labels.C2_HYBRID_MARK
         assert labels.C2_HYBRID_TABLE_NOTE in texts(tree)

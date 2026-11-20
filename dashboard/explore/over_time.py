@@ -182,19 +182,26 @@ def series(
 
 
 def time_layout(
-    title: str, axis: str, years: list[int], longest: int, *, marked: bool
+    title: str,
+    axis: str,
+    years: list[int],
+    longest: int,
+    *,
+    marked: bool,
+    tick_px: int = components.YEAR_TICK_FONT_PX,
 ) -> dict[str, Any]:
     """C4, C5 and C7's shared layout (#558, D104): election year along the bottom, the
     served years' axis in every mode (:func:`explore.components.year_axis`), so a
     state's years before its first election keep their place; the value up the side
     from zero, with a few full-number ticks; and the chart's key where a marker is
-    drawn (``marked``)."""
+    drawn (``marked``). ``tick_px`` is the year ticks' size (#593: C4 and C5 pass
+    :data:`explore.components.YEAR_TICK_NARROW_PX`; C7 takes the default)."""
     layout: dict[str, Any] = {
         "title": {"text": title},
         "height": HEIGHT_PX,
         "margin": {"t": TOP_PX},
         "showlegend": marked,
-        "xaxis": components.year_axis(years),
+        "xaxis": components.year_axis(years, tick_px=tick_px),
         "yaxis": {
             "range": [0, max(longest, 1)],
             "nticks": 4,
@@ -320,13 +327,19 @@ class OverTime(NamedTuple):
 
 
 def c4_figure(
-    points: list[Point], years: list[int], title: str, state: str | None
+    points: list[Point],
+    years: list[int],
+    title: str,
+    state: str | None,
+    *,
+    tick_px: int = components.YEAR_TICK_FONT_PX,
 ) -> OverTime:
     """C4's figure (#436, D100): the appointed allotment of each row with one, as a
     bar at its year; a zero allotment is a marker by its cause (the D091 exception),
     and a null or unknown one a marker, each label a series of its own named in the
     chart's key (#558, D104).
-    ``state`` is the escaped state name, or ``None`` for all states."""
+    ``state`` is the escaped state name, or ``None`` for all states; ``tick_px`` the
+    year ticks' size (:func:`time_layout`)."""
     drawn: list[tuple[Point, int, str, str]] = []
     marks: dict[str, list[tuple[Point, str]]] = {}
     for point in points:
@@ -357,7 +370,12 @@ def c4_figure(
     data += series(marks, C4_SYMBOLS)
     longest = max((value for _, value, _, _ in drawn), default=1)
     layout = time_layout(
-        title, labels.C4_VALUE_AXIS, years, longest, marked=bool(marks)
+        title,
+        labels.C4_VALUE_AXIS,
+        years,
+        longest,
+        marked=bool(marks),
+        tick_px=tick_px,
     )
     zeros = bool(
         marks.keys() & {labels.C4_NO_ELECTORS, labels.C4_NO_ELECTORS_TOOK_NO_PART}

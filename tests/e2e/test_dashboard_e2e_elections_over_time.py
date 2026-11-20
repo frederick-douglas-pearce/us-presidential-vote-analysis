@@ -98,11 +98,13 @@ def test_c4_and_c5_are_readable_at_phone_width(page: Page, width: int) -> None:
 def assert_band_label_inside(page: Page, chart: str) -> None:
     """The before band's label lies inside its band's box (#593, D109; the architect's
     B2): the e2e overlap checks compare text with text only, so a label running out of
-    its band over the marks would pass them."""
+    its band over the marks would pass them. The label is found by its exact text
+    (the after band's starts "Shaded:" too); the before band is the chart's first
+    shape (``over_time.pv_bands`` draws it first), so this holds on a recording with
+    an after band as well."""
+    before = labels.C5_BEFORE_BAND.replace("<br>", "")
     (note,) = [
-        b
-        for b in boxes(page, f"{chart} .annotation-text")
-        if b["text"].startswith("Shaded:")
+        b for b in boxes(page, f"{chart} .annotation-text") if b["text"] == before
     ]
     band = page.locator(f"{chart} .layer-below .shapelayer path").first
     box = band.bounding_box()
