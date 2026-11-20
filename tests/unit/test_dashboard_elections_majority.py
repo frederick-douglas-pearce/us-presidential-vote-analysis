@@ -1467,6 +1467,25 @@ class TestC2ReviewGuards:
             assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, pairs
             assert find(tree, C2) is None, pairs
 
+    def test_a_hidden_year_s_table_row_defect_degrades_the_filtered_view_too(
+        self,
+    ) -> None:
+        """#596's acceptance gate (a surviving mutant): the table row of a year the
+        filters hide is built too, so a leader with no ``candidate``, which only the row
+        (and the figure, for shown years) reads, degrades a filtered view as it does the
+        default one."""
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r
+            for r in summary["data"]
+            if r["year"] == 1828 and r["electoral_rank"] == 1
+        ]
+        del row["candidate"]
+        for pairs in ([], [("year_from", "1900")]):
+            tree = MOD["render"](copy.deepcopy(BODY), copy.deepcopy(summary), pairs)
+            assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, pairs
+            assert find(tree, C2) is None, pairs
+
     def test_every_trace_carries_its_stable_uid(self) -> None:
         """guard-efficacy .4: the e2e tests select traces by ``uid``; each trace has
         one, none twice, and the four the e2e tests name sit on the right series."""

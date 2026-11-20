@@ -295,8 +295,10 @@ def _over_time_section(
     (#596, D110), or :func:`explore.elections_view.no_match` when they show none; or,
     when N1 could not be read (``summary`` is ``None``) or is malformed,
     :data:`OVER_TIME_UNAVAILABLE` only, with no filters. Every served year's
-    allotment, total and cells are read before the filters apply (#596's review,
-    cr.1), so a filtered view never shows what the default view would refuse. The
+    allotment, total and cells are read (``_all_states_points``) before the filters
+    apply (#596's review, cr.1), so a filtered view never shows what the default view
+    would refuse; a table row only wraps those cells, so none is built for a hidden
+    year. The
     ``try`` covers everything built from
     N1; never ``components.chart``, which no page catches around (D095(f))."""
     try:
@@ -307,8 +309,6 @@ def _over_time_section(
         totals = national_pv(summary, sorted(items))
         every = _all_states_points(items, totals, coverage)
         controls = elections_view.filter_controls(*served_span, chosen)
-        for point in every:
-            _over_time_row(point)
         points = [
             point
             for point in every
