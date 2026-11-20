@@ -5,7 +5,10 @@ on first use) in the same view as the index: each ``elections`` item's
 ``electoral_denominator`` (checked by :func:`explore.elections_view.n1_items`) and each
 year's one ``national_pv_denominator`` across N1's rows (:func:`national_pv`).
 
-No filter reaches the page: it has no ``query=`` parser. The one-state mode (D100(a),
+The year filters of ``/elections`` narrow both charts, the table and its download
+(#596, D110, amending D107's all-years scope): the page's ``query=`` parser is
+:func:`explore.elections_view.parse_filters`, which drops an old ``state`` key, so it
+still changes nothing. The one-state mode (D100(a),
 (c), (e), (f)) retired with #562: a state's electors appointed are chart C7, on its
 own page. A failed or malformed N1 degrades the section only; the heading, lede and
 success marker stay.
@@ -46,6 +49,13 @@ LEDE = (
     "are on that state's page."
 )
 
+#: Page-level wording (ba spec for #596, approved at #596's plan gate, 2026-11-20):
+#: shown after :data:`LEDE` only when the filter controls render.
+FILTER_SENTENCE = (
+    "Narrow the charts and table by year, or to the years with a popular vote in this "
+    "dataset."
+)
+
 #: Charts C4 and C5 (#436, D100) and the companion table they share.
 C4_ID = "C4"
 C5_ID = "C5"
@@ -53,10 +63,13 @@ OVER_TIME_TABLE_ID = "elections-over-time-table"
 OVER_TIME_UNAVAILABLE_ID = "elections-over-time-unavailable"
 #: C4 and C5 stacked, C4 above C5, their table below (#593, D109, amending D102 and
 #: D103(c), which set them side by side): they share the election-year axis, so one
-#: column lets a reader read a year down both. Their one left and right margin, sized
-#: for C5's widest value ticks ("160,000,000" at 14 px) and its axis title, so the
-#: two plots start and end at the same x.
-OVER_TIME_MARGIN = {"l": 112, "r": 16}
+#: column lets a reader read a year down both. Their one left and right margin, so the
+#: two plots start and end at the same x, sized for the widest value tick either can
+#: write (C5's short ticks since #596, D110, at most "150M"; C4's "500") and the axis
+#: title, which plotly.js places by this margin: 72 px leaves each title 9 px from the
+#: chart's edge at 360 px (112 before #596, sized for "160,000,000").
+#: ``test_the_shared_margin_holds_every_value_tick_and_title`` (e2e) holds 8 px.
+OVER_TIME_MARGIN = {"l": 72, "r": 16}
 #: The companion table's columns, in display order, by public field name.
 OVER_TIME_FIELDS = ("year", "electoral_denominator", "national_pv_denominator")
 OVER_TIME_TABLE_HEADING = "Each election's electors appointed and total popular vote"
@@ -66,6 +79,9 @@ OVER_TIME_UNAVAILABLE = (
     "The charts and table of electors appointed and the total popular vote can't be "
     "shown right now. Please try again in a minute."
 )
+
+#: C5's value-axis format (#596, D110): d3's SI form, trailing zeros trimmed ("50M").
+C5_TICKFORMAT = "~s"
 
 #: Each C5 marker label's symbol, so no two marker series differ by color alone.
 _C5_SYMBOLS = {
@@ -88,6 +104,8 @@ dash.register_page(
     # N1, filled on first use (D096(c)): a literal (D074(ii)), never prefetched.
     on_miss=(api.SUMMARY_PATH,),
     success=PAGE_ID,
+    # The year filters (#596, D110): og:url names the filtered view.
+    query=elections_view.parse_filters,
     # The site navigation link this page marks (#448): the elections index's.
     nav="elections",
 )
@@ -201,6 +219,13 @@ def _c5_figure(
         # One key row per entry, the most rows the key can wrap to (#593's review).
         key_px=over_time.KEY_ROW_PX * len(marks),
     )
+    # Short value ticks, C5's exception to the chart rule (#596, D110; its CHARTS row's
+    # short_value_ticks); with no bar drawn the axis runs 0-1 and the SI form would
+    # write "200m", so it writes no value ticks at all.
+    if drawn:
+        layout["yaxis"]["tickformat"] = C5_TICKFORMAT
+    else:
+        layout["yaxis"]["showticklabels"] = False
     if bands.shapes:
         layout["shapes"] = bands.shapes
         layout["annotations"] = bands.annotations
@@ -222,10 +247,17 @@ def _c4_caption(c4: over_time.OverTime) -> str:
     return " ".join(parts)
 
 
+def c5_draws_a_bar(c5: over_time.OverTime) -> bool:
+    """Whether C5 draws a bar, so its value axis writes ticks (#596)."""
+    return any(trace.get("type") == "bar" for trace in c5.figure["data"])
+
+
 def _c5_caption(c5: over_time.OverTime, window: tuple[int, int]) -> str:
     """C5's caption: what the total counts, what a bar adds up, and what the band and
     the markers mean where drawn."""
     parts = [labels.C5_BASIS, labels.C5_ALL_STATES]
+    if c5_draws_a_bar(c5):
+        parts.append(labels.C5_SHORT_TICKS_NOTE)
     if c5.before:
         parts.append(labels.C5_BEFORE_NOTE.format(pv_year_min=window[0]))
     if c5.after:
@@ -247,19 +279,37 @@ def _over_time_row(point: over_time.Point) -> html.Tr:
     )
 
 
-def _over_time_section(index: dict[str, Any], summary: Any) -> list[Any]:
-    """C4 and C5's section (#436, D100): both charts and their one companion table,
-    or, when N1 could not be read (``summary`` is ``None``) or is malformed,
-    :data:`OVER_TIME_UNAVAILABLE` only. The ``try`` covers everything built from N1;
-    never ``components.chart``, which no page catches around (D095(f))."""
+def _over_time_section(
+    index: dict[str, Any],
+    summary: Any,
+    has_pv: dict[int, bool],
+    chosen: elections_view.Filters,
+    search: str,
+) -> tuple[list[Any], bool]:
+    """C4 and C5's section (#436, D100) and whether its filters rendered: the year
+    filters, then both charts and their one companion table over the years they show
+    (#596, D110), or :func:`explore.elections_view.no_match` when they show none; or,
+    when N1 could not be read (``summary`` is ``None``) or is malformed,
+    :data:`OVER_TIME_UNAVAILABLE` only, with no filters. N1 is checked over every
+    served year before the filters apply. The ``try`` covers everything built from
+    N1; never ``components.chart``, which no page catches around (D095(f))."""
     try:
         if summary is None:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
         coverage = index["meta"]["provenance"]["coverage"]
         window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
         items = elections_view.n1_items(index, summary)
-        years = sorted(items)
-        totals = national_pv(summary, years)
+        totals = national_pv(summary, sorted(items))
+        first, last = elections_view.span(coverage)
+        controls = elections_view.filter_controls(first, last, chosen)
+        years = [
+            year
+            for year in sorted(items)
+            if elections_view.shows(year, has_pv[year], chosen)
+        ]
+        if not years:
+            return [controls, elections_view.no_match()], True
+        items = {year: items[year] for year in years}
         rows: list[dict[str, Any]] = [
             {
                 "year": year,
@@ -275,7 +325,7 @@ def _over_time_section(index: dict[str, Any], summary: Any) -> list[Any]:
             filename="elections-electors-and-popular-vote-all-states.csv",
             name="electors appointed and the total popular vote, all states",
             provenance=summary["meta"]["provenance"],
-            view_url=export.view_url(CANONICAL_HOST, PATH, ""),
+            view_url=export.view_url(CANONICAL_HOST, PATH, search),
         )
         c4 = over_time.c4_figure(
             points,
@@ -313,8 +363,9 @@ def _over_time_section(index: dict[str, Any], summary: Any) -> list[Any]:
             html.P(
                 OVER_TIME_UNAVAILABLE, id=OVER_TIME_UNAVAILABLE_ID, className="note"
             )
-        ]
+        ], False
     return [
+        controls,
         components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, _c4_caption(c4)),
         components.chart(
             C5_ID, c5.figure, OVER_TIME_TABLE_ID, _c5_caption(c5, window)
@@ -322,23 +373,35 @@ def _over_time_section(index: dict[str, Any], summary: Any) -> list[Any]:
         html.H2(OVER_TIME_TABLE_HEADING),
         *table,
         labels.glossary(OVER_TIME_FIELDS),
-    ]
+    ], True
 
 
-def render(index: dict[str, Any], summary: Any) -> html.Div:
-    """The whole page for one ``/v1/elections`` response and N1's body (``None`` when
-    it could not be read): the heading and lede, then C4 and C5's section, then the
-    footer."""
+def render(
+    index: dict[str, Any], summary: Any, pairs: list[tuple[str, str]] | None = None
+) -> html.Div:
+    """The whole page for one ``/v1/elections`` response, N1's body (``None`` when it
+    could not be read) and the page's filter pairs
+    (:func:`explore.elections_view.parse_filters`; none, every year): the heading and
+    lede (with :data:`FILTER_SENTENCE` when the filters render), the section links
+    carrying the filters applied, then C4 and C5's section, then the footer."""
     provenance = index["meta"]["provenance"]
+    coverage = provenance["coverage"]
     # The index's rows are the page's, not a section's (cr.1): a defect there raises to
-    # the layout, which degrades the whole page.
+    # the layout, which degrades the whole page; so do its popular-vote flags, which
+    # the filter reads (#596).
     elections_view.served_years(index)
+    _, has_pv = elections_view.index_rule(index)
+    chosen = elections_view.filters(pairs or [], coverage)
+    first, last = elections_view.span(coverage)
+    search = elections_view.applied_search(chosen, first, last)
+    section, filtered = _over_time_section(index, summary, has_pv, chosen, search)
     return html.Div(
         [
             html.H1(HEADING),
-            html.P(LEDE, className="lede"),
-            elections_view.section_nav(elections_view.OVER_TIME),
-            *_over_time_section(index, summary),
+            html.P(f"{LEDE} {FILTER_SENTENCE}" if filtered else LEDE, className="lede"),
+            dcc.Location(id=elections_view.URL_ID, refresh="callback-nav"),
+            elections_view.section_nav(elections_view.OVER_TIME, search),
+            *section,
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
@@ -356,7 +419,7 @@ def layout(**query: Any) -> html.Div:
                 summary = view.get(api.SUMMARY_PATH)
             except api.ApiUnavailable:
                 summary = None
-        return render(body, summary)
+        return render(body, summary, elections_view.parse_filters(query))
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     return html.Div([html.H1(HEADING), html.P(LEDE, className="lede"), content])

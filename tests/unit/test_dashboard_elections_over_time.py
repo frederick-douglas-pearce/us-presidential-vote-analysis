@@ -17,7 +17,7 @@ from typing import Any
 import dash
 import pytest
 
-from explore import api, charts, components, labels, over_time
+from explore import api, charts, components, elections_view, labels, over_time
 from tests.unit.test_dashboard_app import (
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     route,
@@ -53,7 +53,8 @@ def test_the_page_is_registered_as_planned() -> None:
     # N1, C4 and C5's source: a literal filled on a miss (#436, D074(ii)); never N2.
     assert PAGE["on_miss"] == (api.SUMMARY_PATH,)
     assert PAGE["success"] == PAGE_ID
-    assert PAGE.get("query") is None  # no filter reaches C4 or C5 (#562, D107)
+    # The elections pages' one parser (#596, D110, amending D107's all-years scope).
+    assert PAGE["query"] is elections_view.parse_filters
     assert PAGE["nav"] == "elections"
 
 
@@ -148,11 +149,24 @@ def over_time_rows(tree: Any) -> list[list[str]]:
     ]
 
 
+def agreeing(index: dict[str, Any]) -> dict[str, Any]:
+    """``index`` with each row's ``has_popular_vote`` true exactly inside its coverage
+    window, as a snapshot serves it: the page checks the two agree (``index_rule``,
+    #596), so a test that moves the window moves the flags with it."""
+    coverage = index["meta"]["provenance"]["coverage"]
+    for row in index["data"]:
+        row["has_popular_vote"] = (
+            coverage["pv_year_min"] <= row["year"] <= coverage["pv_year_max"]
+        )
+    return index
+
+
 def after_2016() -> tuple[dict[str, Any], dict[str, Any]]:
     """The index with its popular-vote window ending in 2016, and N1 as such a snapshot
     serves it: no national total after the window."""
     moved = copy.deepcopy(BODY)
     moved["meta"]["provenance"]["coverage"]["pv_year_max"] = 2016
+    agreeing(moved)
     summary = copy.deepcopy(SUMMARY)
     for row in summary["data"]:
         if row["year"] > 2016:
@@ -196,7 +210,10 @@ class TestC4:
 
     def test_registered_on_their_page_beside_the_shared_table(self) -> None:
         assert charts.CHARTS["C4"] == charts.Chart("/elections/over-time", OVER_TIME)
-        assert charts.CHARTS["C5"] == charts.Chart("/elections/over-time", OVER_TIME)
+        # C5's value axis writes its numbers short, the one exception (#596, D110).
+        assert charts.CHARTS["C5"] == charts.Chart(
+            "/elections/over-time", OVER_TIME, short_value_ticks=True
+        )
         tree = render_over_time()
         assert type(find(tree, C4)).__name__ == "Figure"  # the #c4 fragment's target
         assert type(find(tree, C5)).__name__ == "Figure"
@@ -258,7 +275,7 @@ class TestC5:
         }
         assert {year: x for year, (x, _) in drawn.items()} == expected
         assert set(expected) == {y for y in YEARS if PV_MIN <= y <= PV_MAX}
-        assert charts.figure_problems(figure) == []
+        assert charts.figure_problems(figure, short_value_ticks=True) == []
 
     @pytest.mark.parametrize("year", [1976, 1988, 2004, 2016])
     def test_a_year_with_a_candidate_lacking_popular_votes_is_one_total(
@@ -285,6 +302,7 @@ class TestC5:
         assert band(BODY) == (FIRST - pad, (before + PV_MIN) / 2)
         moved = copy.deepcopy(BODY)
         moved["meta"]["provenance"]["coverage"]["pv_year_min"] = 1980
+        agreeing(moved)
         assert band(moved) == (FIRST - pad, (1976 + 1980) / 2)
         figure = chart_figure(render_over_time(index=moved), C5)
         # One label, inside the band at its top left (#593, D109).
@@ -575,9 +593,14 @@ class TestTimeSeriesAxis:
     @pytest.mark.parametrize(
         ("years", "ticks"),
         [
-            ([1964, 1968, 2000, 2024], [1964, 2024]),  # one multiple: both ends
+            # A shorter span takes a finer step, never a tick within a quarter step
+            # of either end (#596, D110).
+            ([1964, 1968, 2000, 2024], [1980, 2000]),
+            ([1976, 2024], [1980, 1990, 2000, 2010, 2020]),
+            ([1824, 1900], [1840, 1860, 1880]),
+            ([1960, 2000], [1968, 1976, 1984, 1992]),
+            # Fewer than two inside: both ends.
             ([2000, 2004], [2000, 2004]),
-            ([1960, 2000], [1960, 2000]),
             ([2024], [2024]),
         ],
     )
@@ -605,7 +628,10 @@ class TestTimeSeriesAxis:
         for key in ("data", "elections"):
             summary[key] = [r for r in summary[key] if r["year"] in years]
         figure = c2_figure(render_majority(summary, index))
-        assert figure["data"][0]["x"] == years
+        circles = next(
+            t for t in figure["data"] if t.get("name") == labels.LABELS["ec_share_full"]
+        )
+        assert circles["x"] == years
         assert figure["layout"]["xaxis"] == components.year_axis(years)
 
     @pytest.mark.parametrize("marked", [False, True])
@@ -727,7 +753,7 @@ class TestTimeSeriesAxis:
         tree = render_over_time()
         c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
         margin = MOD["OVER_TIME_MARGIN"]
-        assert margin == {"l": 112, "r": 16}
+        assert margin == {"l": 72, "r": 16}
         for figure in (c4, c5):
             assert {k: figure["layout"]["margin"][k] for k in "lr"} == margin
             assert figure["layout"]["yaxis"]["automargin"] is False
@@ -771,6 +797,7 @@ class TestTimeSeriesAxis:
         raised over the chart's key when the key is drawn."""
         moved, summary = after_2016()
         moved["meta"]["provenance"]["coverage"]["pv_year_max"] = 2020
+        agreeing(moved)
         for row in summary["data"]:
             if row["year"] == 2020:
                 (n1,) = [r for r in SUMMARY["data"] if r["year"] == 2020][:1]
@@ -808,7 +835,7 @@ class TestTimeSeriesAxis:
         # The before label is two short lines (#593's ba spec), naming no year.
         assert first_note["text"] == labels.C5_BEFORE_BAND
         assert first_note["text"].count("<br>") == 1
-        assert charts.figure_problems(figure) == []
+        assert charts.figure_problems(figure, short_value_ticks=True) == []
 
 
     @pytest.mark.parametrize(("doctored", "rows"), [(("x",), 1), (("x", None), 2)])
@@ -858,13 +885,15 @@ class TestWideLayout:
         c4, c5 = find(tree, C4), find(tree, C5)
         assert c4 in tree.children and c5 in tree.children
 
-    def test_the_heading_and_lede_open_the_page_with_no_control(self) -> None:
-        """No filter reaches the page (#562): no dropdown, slider or checklist."""
+    def test_the_heading_and_lede_open_the_page_with_the_year_filters(self) -> None:
+        """The year filters of ``/elections`` (#596, D110): one slider, one checklist
+        and the page-local location, and no state dropdown (#562)."""
         tree = render_over_time()
         kids = list(tree.children)
         assert type(kids[0]).__name__ == "H1" and kids[1].className == "lede"
-        for kind in ("Dropdown", "RangeSlider", "Checklist", "Location"):
-            assert of_type(tree, kind) == [], kind
+        assert of_type(tree, "Dropdown") == []
+        for kind in ("RangeSlider", "Checklist", "Location"):
+            assert len(of_type(tree, kind)) == 1, kind
 
     def test_an_unavailable_n1_builds_no_chart(self) -> None:
         tree = MOD["render"](copy.deepcopy(BODY), None)
@@ -908,3 +937,119 @@ class TestGuardsTheGateAdded:
         with pytest.raises(ValueError, match="all states only"):
             over_time.point_hover(point, "Georgia", total=True)
         assert over_time.point_hover(point, None, total=True).startswith("2016")
+
+
+# --- the year filters, C5's short ticks and the narrow band (#596, D110) -----------------
+
+
+def filtered_over_time(query: dict[str, str], summary: Any = None) -> Any:
+    """The page under ``query``, read through the page's own parser."""
+    return MOD["render"](
+        copy.deepcopy(BODY),
+        copy.deepcopy(SUMMARY) if summary is None else summary,
+        elections_view.parse_filters(query),
+    )
+
+
+class TestOverTimeFilters:
+    def test_the_filters_narrow_both_charts_and_the_table(self) -> None:
+        tree = filtered_over_time({"year_from": "1900", "year_to": "1990"})
+        shown = [y for y in YEARS if 1900 <= y <= 1990]
+        assert [int(r[0]) for r in over_time_rows(tree)] == shown
+        for dom in (C4, C5):
+            axis = chart_figure(tree, dom)["layout"]["xaxis"]
+            assert axis == components.year_axis(
+                shown, tick_px=components.YEAR_TICK_NARROW_PX
+            )
+
+    def test_popular_vote_only_draws_no_band(self) -> None:
+        figure = chart_figure(filtered_over_time({"pv": "1"}), C5)
+        assert not figure["layout"].get("shapes")
+        assert not figure["layout"].get("annotations")
+
+    def test_a_filter_leaving_no_year_shows_the_empty_note(self) -> None:
+        tree = filtered_over_time({"year_to": "1972", "pv": "1"})
+        assert tree.id == PAGE_ID
+        assert find(tree, elections_view.NO_MATCH_ID).children == (
+            labels.NO_ELECTIONS_MATCH
+        )
+        assert find(tree, C4) is None and find(tree, C5) is None
+        assert find(tree, MOD["OVER_TIME_TABLE_ID"]) is None
+        assert len(of_type(tree, "RangeSlider")) == 1
+
+    def test_a_failed_n1_shows_no_filters(self) -> None:
+        tree = MOD["render"](copy.deepcopy(BODY), None, [("pv", "1")])
+        assert of_type(tree, "RangeSlider") == []
+        (lede,) = [p for p in of_type(tree, "P") if p.className == "lede"]
+        assert lede.children == MOD["LEDE"]
+
+    def test_an_old_state_key_still_changes_nothing(self) -> None:
+        assert elections_view.parse_filters({"state": "GA"}) == []
+        assert PAGE["query"]({"state": "GA"}) == []
+
+
+class TestC5ShortTicks:
+    def test_c5_writes_short_ticks_and_c4_full_ones(self) -> None:
+        tree = render_over_time()
+        c4, c5 = chart_figure(tree, C4), chart_figure(tree, C5)
+        assert c5["layout"]["yaxis"]["tickformat"] == "~s"
+        assert "tickformat" not in c4["layout"]["yaxis"]
+        assert charts.figure_problems(c5, short_value_ticks=True) == []
+        # The hover and the table keep full numbers.
+        (bar,) = [t for t in c5["data"] if t.get("type") == "bar"]
+        assert any(re.search(r"\d{1,3}(,\d{3}){2,}", h) for h in bar["hovertext"])
+        assert any(
+            re.fullmatch(r"\d{1,3}(,\d{3}){2,}", r[2]) for r in over_time_rows(tree)
+        )
+
+    def test_the_caption_explains_them_while_a_bar_is_drawn(self) -> None:
+        tree = render_over_time()
+        (caption,) = of_type(find(tree, C5), "Figcaption")
+        assert labels.C5_SHORT_TICKS_NOTE in caption_text(caption)
+
+    def test_with_no_bar_drawn_c5_writes_no_value_ticks(self) -> None:
+        """ba spec (d)2 / architect Q2: before the window C5 draws no bar, its axis
+        runs 0-1, and the SI form would write "200m"; it writes no value ticks."""
+        tree = filtered_over_time({"year_to": "1972"})
+        c5 = chart_figure(tree, C5)
+        assert not [t for t in c5["data"] if t.get("type") == "bar"]
+        assert c5["layout"]["yaxis"]["showticklabels"] is False
+        assert "tickformat" not in c5["layout"]["yaxis"]
+        (caption,) = of_type(find(tree, C5), "Figcaption")
+        assert labels.C5_SHORT_TICKS_NOTE not in caption_text(caption)
+
+
+class TestNarrowBand:
+    def test_a_wide_before_band_keeps_its_label_inside(self) -> None:
+        bands = over_time.pv_bands(YEARS, (1976, 2024), "before", "after")
+        (note,) = bands.annotations
+        assert (note["yanchor"], note["yshift"]) == (
+            "top",
+            -over_time.BAND_LABEL_INSET_PX,
+        )
+        assert bands.top_px == 0
+
+    def test_a_narrow_before_band_puts_its_label_above_the_plot(self) -> None:
+        """#596 (D110): a filter can leave the before band an election or two wide;
+        under half of the axis, its label sits above the plot at its left edge."""
+        years = [y for y in YEARS if y >= 1968]
+        bands = over_time.pv_bands(years, (1976, 2024), "before", "after", key_px=24)
+        (note,) = bands.annotations
+        assert (note["xanchor"], note["yanchor"], note["yshift"]) == (
+            "left",
+            "bottom",
+            24,
+        )
+        assert "xshift" not in note
+        assert bands.top_px == over_time.TOP_PX + 24 + over_time.BAND_LABEL_PX
+
+    def test_two_labels_above_stack(self) -> None:
+        years = [y for y in YEARS if y >= 1968]
+        bands = over_time.pv_bands(years, (1976, 2016), "before", "after", key_px=24)
+        before, after = bands.annotations
+        assert after["yshift"] == 24
+        assert before["yshift"] == 24 + over_time.BAND_LABEL_PX
+        assert bands.top_px == over_time.TOP_PX + 24 + 2 * over_time.BAND_LABEL_PX
+
+    def test_the_rule_is_half_the_axis(self) -> None:
+        assert over_time.BAND_INSIDE_SHARE == 0.5

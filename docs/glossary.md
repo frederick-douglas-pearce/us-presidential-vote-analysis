@@ -393,56 +393,59 @@ articles and announcements). Every rule binds all three unless the rule states a
   it (on most charts the reader opens it with "About this chart"), and a link, always shown, to
   the table on the same page that holds its numbers. The tables are the record.
   A chart is another way to see it, and the page works without one.
-- **Precise:** Built only by `components.chart(chart_id, figure, table_id, caption)`. It is an
-  HTML `figure` element holding, in order, the **chart title**, the drawing, and a caption
+- **Precise:** Built only by `components.chart(chart_id, figure, table_id, caption)`. It is an HTML
+  `figure` element holding, in order, the **chart title**, the drawing, and a caption
   (`figcaption`). The title is written as page text (a paragraph, not a heading), so it shows and
-  wraps even when the drawing cannot load. The caption sits in a disclosure (`details`), closed
-  when the page loads and opened by its summary, `labels.CHART_CAPTION_SUMMARY`. The table
-  pointer, `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*, follows it
-  outside the disclosure and is always shown. C1's caption stays open, unfolded and with no
-  summary, because its bar-order sentence is its one cue apart from color (#593). The builder refuses a
-  chart with no title or no caption. Each series writes its own hover text or shows none. A figure
-  that breaks the chart rules `charts.figure_problems` checks (a series whose hover text would be
-  plotly's own, a color that is not a theme token, and the rest) is not drawn. The chart keeps its
-  title, its caption and the pointer, with nothing shown between them, as when plotly.js cannot
-  load. The page keeps its tables and its other charts, and the failure is logged at error level
-  for the developer. Readers see no message about it. The chart title is plain text and says what
-  the chart shows; the caption may state a finding (*A chart title describes; a caption may state
-  a finding*). For assistive technology, a drawn chart, and one still waiting for plotly.js or
-  whose load failed, is an image named by its chart title, and what is drawn inside it is skipped;
-  a chart that is not drawn is no image, only its title and caption as text. Either way the
-  companion table carries the numbers. Pointing at a mark shows only the hover text written for
-  that series, for the nearest point. Axis numbers are
-  written in full with thousands separators, as the tables write them, never shortened ("80M",
-  "1.2B"). The legend is only a key: clicking it hides nothing. A reader cannot zoom or drag a
-  chart, and no toolbar shows on it. Every chart has a **chart ID**, `C<n>`, issued in order of
-  story filing. An ID is never renumbered or reused, and a retired ID stays retired. The closed
-  registry `CHARTS` in `dashboard/explore/charts.py` maps each ID to its page and its companion
-  table. The chart's element id is the ID in lower case (`c1`), so `/elections/majority#c2` is a
-  link to that chart. The part after `#` never reaches the server and changes neither the canonical link
-  nor `og:url`. Readers meet the ID only in such a link, never in page text. Colors come from the
-  page's theme tokens and follow the *Theme in effect*. Each measure has one color on every chart
-  (#593, owner decision 2026-11-19): values derived from electoral votes (electoral share, electors
-  appointed) `--chart-ec`, red; values derived from popular votes (popular-vote share, total
-  popular vote) `--chart-pv`, blue; the hybrid score `--chart-hybrid`, purple. Switching the theme redraws every chart on
-  the page, with no reload and no request. Series always differ by more than color. The drawing
-  needs plotly.js, which the browser fetches from plotly's CDN when the page's first chart
-  mounts; a page with no chart fetches nothing from it. If the fetch fails, or the figure breaks
-  the chart rules, no drawing appears, and the title, the caption, the pointer and the page's
-  tables still show. A chart is never a page's success marker. A chart has no download of its
-  own: its companion table's CSV carries its numbers.
+  wraps even when the drawing cannot load. The caption sits in a disclosure (`details`), closed when
+  the page loads and opened by its summary, `labels.CHART_CAPTION_SUMMARY`. The table pointer,
+  `labels.CHART_TABLE_POINTER`, a link to the chart's *Companion table*, follows it outside the
+  disclosure and is always shown. C1's caption stays open, unfolded and with no summary, because its
+  bar-order sentence is its one cue apart from color (#593). The builder refuses a chart with no
+  title or no caption. Each series writes its own hover text or shows none. A figure that breaks the
+  chart rules `charts.figure_problems` checks (a series whose hover text would be plotly's own, a
+  color that is not a theme token, and the rest) is not drawn. The chart keeps its title, its
+  caption and the pointer, with nothing shown between them, as when plotly.js cannot load. The page
+  keeps its tables and its other charts, and the failure is logged at error level for the developer.
+  Readers see no message about it. The chart title is plain text and says what the chart shows; the
+  caption may state a finding (*A chart title describes; a caption may state a finding*). For
+  assistive technology, a drawn chart, and one still waiting for plotly.js or whose load failed, is
+  an image named by its chart title, and what is drawn inside it is skipped; a chart that is not
+  drawn is no image, only its title and caption as text. Either way the companion table carries the
+  numbers. Pointing at a mark shows only the hover text written for that series, for the nearest
+  point. Axis numbers are written in full with thousands separators, as the tables write them, never
+  shortened ("80M", "1.2B"), with one exception: C5's value axis (the total popular vote) writes its
+  numbers short, as "0, 50M, 100M, 150M" ("M" is millions), and its hover text and companion table
+  still write each total in full. The legend is only a key: clicking it hides nothing. A reader
+  cannot zoom or drag a chart, and no toolbar shows on it. Every chart has a **chart ID**, `C<n>`,
+  issued in order of story filing. An ID is never renumbered or reused, and a retired ID stays
+  retired. The closed registry `CHARTS` in `dashboard/explore/charts.py` maps each ID to its page
+  and its companion table. The chart's element id is the ID in lower case (`c1`), so
+  `/elections/majority#c2` is a link to that chart. The part after `#` never reaches the server and
+  changes neither the canonical link nor `og:url`. Readers meet the ID only in such a link, never in
+  page text. Colors come from the page's theme tokens and follow the *Theme in effect*. Each measure
+  has one color on every chart (#593, owner decision 2026-11-19): values derived from electoral
+  votes (electoral share, electors appointed) `--chart-ec`, red; values derived from popular votes
+  (popular-vote share, total popular vote) `--chart-pv`, blue; the hybrid score `--chart-hybrid`,
+  purple. Switching the theme redraws every chart on the page, with no reload and no request. Series
+  always differ by more than color. The drawing needs plotly.js, which the browser fetches from
+  plotly's CDN when the page's first chart mounts; a page with no chart fetches nothing from it. If
+  the fetch fails, or the figure breaks the chart rules, no drawing appears, and the title, the
+  caption, the pointer and the page's tables still show. A chart is never a page's success marker. A
+  chart has no download of its own: its companion table's CSV carries its numbers.
 - **Shown as:** `components.chart`, which writes each chart's title as page text above the drawing
   (`html.P`, class `chart-title`, id `<chart element id>-title`) and its caption below it;
-  `labels.CHART_TABLE_POINTER`; `labels.CHART_CAPTION_SUMMARY`; each chart's own wording (title, axis titles, trace names, legend
-  title, hover text, annotations, caption) in `labels.py`; the axis number format, the hover
-  behavior and the inert legend in `charts.TEMPLATE`, and the absent toolbar in
-  `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the election overview
-  (`/election/<year>`), is the first chart a page renders. C3 is on an election's People per
-  electoral vote page (`/election/<year>/per-capita`). The home page's lede (`pages/home.py`)
-  already says "Tables and charts". C2 is on `/elections/majority`, followed by its companion
-  table. C4 and C5 are on `/elections/over-time`, C4 above C5 with their year axes lined up, followed by the one companion
-  table they share. C7 is on a state's history page (`/state/<usps>`), before the filters, with
-  its own companion table.
+  `labels.CHART_TABLE_POINTER`; `labels.CHART_CAPTION_SUMMARY`; each chart's own wording (title,
+  axis titles, trace names, legend title, hover text, annotations, caption) in `labels.py`; the axis
+  number format, the hover behavior and the inert legend in `charts.TEMPLATE`, and C5's short
+  value-axis numbers, the one exception, named on C5's `CHARTS` row (`short_value_ticks`), and the
+  absent toolbar in `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the
+  election overview (`/election/<year>`), is the first chart a page renders. C3 is on an election's
+  People per electoral vote page (`/election/<year>/per-capita`). The home page's lede
+  (`pages/home.py`) already says "Tables and charts". C2 is on `/elections/majority`, after the
+  page's year filters and followed by its companion table. C4 and C5 are on `/elections/over-time`,
+  after the page's year filters, C4 above C5 with their year axes lined up, followed by the one
+  companion table they share. C7 is on a state's history page (`/state/<usps>`), before the filters,
+  with its own companion table.
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
   caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
@@ -453,7 +456,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `dashboard/explore/charts.py`; a figure that breaks the chart rules is not drawn, and its page
   keeps its tables: #467 acceptance criteria, recorded in D095; the collapsed caption, the
   measure colors and the summary's wording: #593 (D109, amending D102, D104, D108); `ba` spec for
-  #593.
+  #593; C5's short value-axis numbers: owner decision, 2026-11-20, #596 (D110, amending this rule).
 - **Not:** A *figure*: in this file and on the page, a figure is a number ("no popular-vote
   figure"), and Plotly's and HTML's word for a chart stays in code. Not a page's title (the
   browser tab, `og:title`): a chart has a chart title. Not a stand-in for its companion table.
@@ -466,14 +469,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   after its caption, goes to it, and its download is how to take those numbers away.
 - **Precise:** The table that each chart's registry row names by its element id. Two charts can
   share one companion table (C4 and C5). C4 and C5's table, on `/elections/over-time`, shows all
-  states, and no filter reaches it. On a state's history page, C7's companion table is its own;
-  the page's filters narrow T4 only.
-  `components.chart` refuses any other table. The table pointer links to `#<table id>`, the table
-  element itself, below the table's heading. Every chart's pointer has the same text; the caption
-  it ends tells the reader which chart it belongs to. Like every table, it is built by
-  `components.table` with its own CSV. A filter on the page can narrow the table without
-  narrowing the chart, so the pointer says only that the chart's numbers are in a table on the
-  page, never that the table shows "the same" or "all" of them.
+  states; the page's year filters narrow it and both charts alike, as they narrow C2 and its table
+  on `/elections/majority` (#596). On a state's history page, C7's companion table is its own; the
+  page's filters narrow T4 only. `components.chart` refuses any other table. The table pointer links
+  to `#<table id>`, the table element itself, below the table's heading. Every chart's pointer has
+  the same text; the caption it ends tells the reader which chart it belongs to. Like every table,
+  it is built by `components.table` with its own CSV. A filter on the page can narrow the table
+  without narrowing the chart, so the pointer says only that the chart's numbers are in a table on
+  the page, never that the table shows "the same" or "all" of them.
 - **Shown as:** `labels.CHART_TABLE_POINTER`, after each chart's caption, outside its collapsed
   part.
 - **Source:** #432 ("a pointer to the table on the page that holds the same values"); E9-S6
@@ -553,13 +556,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   the dataset does not serve, or whose election section the site does not have
   (`labels.ELECTION_NOT_FOUND_SENTENCE` for the election pages, `labels.STATE_NOT_FOUND_SENTENCE`
   for the two state pages, and `NOT_FOUND_SENTENCE` in `pages/candidate.py`). An empty filter result
-  (`components.NO_ROWS`). The panel's own unavailable state (`PANEL_UNAVAILABLE`). A chart that is
-  not drawn (*Chart*): its page still shows, with its tables. A chart section's own unavailable
-  state (`C2_UNAVAILABLE` in `pages/elections_majority.py`, id `elections-leader-unavailable`,
-  and `OVER_TIME_UNAVAILABLE` in `pages/elections_over_time.py`, when `/v1/elections/summary`
-  cannot be read): each is the only section on its page, and the page keeps its heading, lede and
-  section links. The averages' own unavailable state (`METRICS_UNAVAILABLE` in
-  `pages/elections.py`): the count of elections shown and the rest of the page still show.
+  (`components.NO_ROWS`; on the three elections pages, `labels.NO_ELECTIONS_MATCH`; *No elections
+  match*). The panel's own unavailable state (`PANEL_UNAVAILABLE`). A chart that is not drawn
+  (*Chart*): its page still shows, with its tables. A chart section's own unavailable state
+  (`C2_UNAVAILABLE` in `pages/elections_majority.py`, id `elections-leader-unavailable`, and
+  `OVER_TIME_UNAVAILABLE` in `pages/elections_over_time.py`, when `/v1/elections/summary` cannot be
+  read): each is the only section on its page, and the page keeps its heading, lede and section
+  links. The averages' own unavailable state (`METRICS_UNAVAILABLE` in `pages/elections.py`): the
+  count of elections shown and the rest of the page still show.
 - **Status:** settled
 
 ### Election pages (overview, results by state, people per electoral vote)
@@ -620,24 +624,24 @@ articles and announcements). Every rule binds all three unless the rule states a
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year axis of C2 on `/elections/majority`, of C4 and C5 on
-  `/elections/over-time` and of C7 on
-  `/state/<usps>`, a numeric axis with a tick every 40 years; the year-range slider
-  (`/elections`, `/state/<usps>`,
-  `/state/<usps>/per-capita`), which on both state pages is labeled "Years" and offered by each
-  page's `FILTER_SENTENCE`; the label of the year control on `/candidate/<slug>`, and the lede
-  sentence that offers it (`FILTER_SENTENCE` in `pages/candidate.py`); the election pages'
-  headings: `HEADING` on the overview (`pages/election.py`), `STATES_HEADING`
-  (`pages/election_states.py`) and `PER_CAPITA_HEADING` (`pages/election_per_capita.py`), each the
-  `H1` that page's `render` builds and the start of its title (`title`); on the degraded state, and
-  in the title before a year is checked, "Election" on the overview (a literal in both `layout`
-  and `title` there), `STATES_GENERIC_HEADING` and `PER_CAPITA_GENERIC_HEADING`; the earlier and
-  later links on every election page (`labels.EARLIER_LINK` and `labels.LATER_LINK`) and their
-  accessible names (`labels.ELECTION_NAV_LABEL` on the overview and
-  `labels.ELECTION_NAV_SECTION_LABEL` on the subpages, read by assistive technology, not shown).
-  The links sit in a bordered bar above the page heading, the earlier link at the left and the
-  later at the right, each with a chevron pointing its way (before the earlier link's text, after
-  the later's). The chevrons are drawn shapes with no text: they are not part of either link's
-  name and are never read aloud, so the words "Earlier" and "Later" carry the direction.
+  `/elections/over-time` and of C7 on `/state/<usps>`, a numeric axis with a tick every 40 years;
+  the year-range slider (`/elections`, `/elections/majority`, `/elections/over-time`,
+  `/state/<usps>`, `/state/<usps>/per-capita`), labeled "Years" on each (`labels.YEARS_FILTER`; a
+  literal on the two state pages) and offered by each page's `FILTER_SENTENCE`; the label of the
+  year control on `/candidate/<slug>`, and the lede sentence that offers it (`FILTER_SENTENCE` in
+  `pages/candidate.py`); the election pages' headings: `HEADING` on the overview
+  (`pages/election.py`), `STATES_HEADING` (`pages/election_states.py`) and `PER_CAPITA_HEADING`
+  (`pages/election_per_capita.py`), each the `H1` that page's `render` builds and the start of its
+  title (`title`); on the degraded state, and in the title before a year is checked, "Election" on
+  the overview (a literal in both `layout` and `title` there), `STATES_GENERIC_HEADING` and
+  `PER_CAPITA_GENERIC_HEADING`; the earlier and later links on every election page
+  (`labels.EARLIER_LINK` and `labels.LATER_LINK`) and their accessible names
+  (`labels.ELECTION_NAV_LABEL` on the overview and `labels.ELECTION_NAV_SECTION_LABEL` on the
+  subpages, read by assistive technology, not shown). The links sit in a bordered bar above the page
+  heading, the earlier link at the left and the later at the right, each with a chevron pointing its
+  way (before the earlier link's text, after the later's). The chevrons are drawn shapes with no
+  text: they are not part of either link's name and are never read aloud, so the words "Earlier" and
+  "Later" carry the direction.
 - **Source:** `EcPvRow.year`, `YearListItem.year`; `Coverage.year_min` and `year_max`; the
   earlier and later links: #324; their reader wording: owner decision, 2026-10-30, #324; the bar
   above the heading and its decorative chevrons: #464; the links keeping the page on the
@@ -708,22 +712,22 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Electoral College leader's share chart (C2)
 - **Plain:** A chart on the Electoral College majority page, one of the Elections pages, with
   election years running left to right, oldest at the left. Each year's marks are for that
-  election's Electoral College leader, the candidate with the most electoral votes counted. A
-  circle is their electoral share. For the years this dataset has popular-vote figures, a solid
-  triangle is their popular-vote share, a thin line joins it to the circle, and a short crossbar
-  on that line, halfway between the two, is their hybrid score, the project's own proposal and
-  not an official measure. Marks along the top of
-  the chart show a year in which a different candidate won the popular vote (an asterisk) or had
-  the highest hybrid score (a pentagon). Years before (or after) the popular-vote figures are
-  shaded; shading does not mean no popular vote was held. Hovering over or tapping a mark shows
-  its number as the table on the same page writes it. A dashed line across the chart marks half
-  of each election's electors appointed; it applies to the electoral share only. A leader whose
-  share is more than half had a majority of them. With half or less, no candidate had a
-  majority, and the election went to the House of Representatives. A popular-vote share under
-  half is not unusual: a candidate can win the popular vote with less than half. The leader did
-  not always take office: in 1824 the House chose John Quincy Adams. Its table also says whether
-  each leader took office. The chart and its table always show every election in this dataset;
-  no filter reaches them.
+  election's Electoral College leader, the candidate with the most electoral votes counted. A circle
+  is their electoral share. For the years this dataset has popular-vote figures, a solid triangle is
+  their popular-vote share, a thin line joins it to the circle, and a short crossbar on that line,
+  halfway between the two, is their hybrid score, the project's own proposal and not an official
+  measure. Marks along the top of the chart show a year in which a different candidate won the
+  popular vote (an asterisk) or had the highest hybrid score (a pentagon). Years before (or after)
+  the popular-vote figures are shaded; shading does not mean no popular vote was held. Hovering over
+  or tapping a mark shows its number as the table on the same page writes it. A dashed line across
+  the chart marks half of each election's electors appointed; it applies to the electoral share
+  only. A leader whose share is more than half had a majority of them. With half or less, no
+  candidate had a majority, and the election went to the House of Representatives. A popular-vote
+  share under half is not unusual: a candidate can win the popular vote with less than half. The
+  leader did not always take office: in 1824 the House chose John Quincy Adams. Its table also says
+  whether each leader took office. With no filter, the chart and its table show every election in
+  this dataset. A reader can narrow both to a range of years, or to only the years with a popular
+  vote in this dataset, which leaves no shaded years.
 - **Precise:**
   - Chart ID C2 in `CHARTS` (`dashboard/explore/charts.py`), on `/elections/majority`, element
     id `c2`.
@@ -736,8 +740,8 @@ articles and announcements). Every rule binds all three unless the rule states a
     it), `pv_winner`, `hybrid_winner` (`labels.winner` with the popular-vote window).
     `took_office` is in the table only, never drawn; it is there so `labels.C2_TOOK_OFFICE` can be
     checked.
-  - It sits after the lede and the section links, under the page's heading (`HEADING` in
-    `pages/elections_majority.py`).
+  - It sits after the lede, the section links and the page's year filters, under the page's heading
+    (`HEADING` in `pages/elections_majority.py`).
   - Data: built from `/v1/elections/summary`, filled on first use (declared in `on_miss`, D074(ii))
     and read in the same view as `/v1/elections`. Each year `/v1/elections` serves gets the
     marks of that year's single `data` row with `electoral_rank` 1 (its served `ec_share_full`,
@@ -752,10 +756,11 @@ articles and announcements). Every rule binds all three unless the rule states a
     cells: votes counted and electors appointed, never votes cast (1868: 214 and 294; 1872: 286
     and 366; 2016: 304 and 538).
   - The leader's `pv_share` (solid upward triangle, `triangle-up`) and `hybrid_score` (a short
-    horizontal crossbar, `line-ew`, on the connector at the midpoint of the circle and triangle)
-    are drawn wherever the cell is a share; a thin connector line joins the triangle to the
-    circle, with no hover and no key entry. Drawn in the order connector, triangles, crossbars,
-    circles.
+    horizontal crossbar, `line-ew`, on the connector at the midpoint of the circle and triangle) are
+    drawn wherever the cell is a share; a thin connector line joins the triangle to the circle, with
+    no hover and no key entry. The crossbar is 10 px wide, a little wider than the circle (7 px) and
+    the triangle (8 px), and is drawn last, over the circles, triangles, strip marks and markers, so
+    neither the circle nor the triangle can hide it; the chart's key keeps its order (#596, D110).
   - Colors by measure (#593, D109): circle `--chart-ec`, triangle `--chart-pv`, crossbar
     `--chart-hybrid`; the connector `--chart-axis`; the strip marks `--text`. Height 560 px. No
     gridline at 50%, where the majority line is the one dashed line; the 50% tick stays.
@@ -779,14 +784,19 @@ articles and announcements). Every rule binds all three unless the rule states a
     `labels.UNRECOGNIZED`), which the chart's key shows, and the caption adds
     `labels.C2_NO_SHARE_NOTE`. A year is never dropped.
   - The key is always shown, above the plot.
-  - Neither the chart nor its companion table is narrowed by a filter (D093(a); fork B, D096,
-    amending D093(c)).
+  - The page's year filters (`year_from`, `year_to`, `pv`, the list page's) narrow the chart, its
+    companion table and its download alike; with none, every served year shows (#596, D110,
+    reversing D096's "no filter"). The bands follow the years shown, so with only the years with a
+    popular vote none is drawn. When the filters leave no year, `labels.NO_ELECTIONS_MATCH` takes
+    the place of the chart and table, and the filters stay. A failed summary read still shows
+    `C2_UNAVAILABLE`.
   - If the summary read fails, the section shows `C2_UNAVAILABLE`, with no chart and no companion
     table, and the page keeps its heading, lede and section links.
 - **Shown as:**
   - Placed by `pages/elections_majority.py` through `components.chart`.
   - Chart text in `labels.py`: `labels.C2_TITLE`; the axes `LABELS["year"]` and
-    `labels.C2_VALUE_AXIS`; the line label `labels.C2_MAJORITY_LINE`; the band labels
+    `labels.C2_VALUE_AXIS` (`labels.C2_TITLE_NO_PV` and `labels.C2_VALUE_AXIS_NO_PV` when no year
+    shown has popular-vote figures); the line label `labels.C2_MAJORITY_LINE`; the band labels
     `labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`; the hovers `labels.C2_HOVER`,
     `labels.C2_PV_HOVER`, `labels.C2_HYBRID_HOVER`, `labels.C2_PV_DIFFERENT_HOVER` and
     `labels.C2_HYBRID_DIFFERENT_HOVER`; the key entries `LABELS["ec_share_full"]`,
@@ -809,10 +819,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   `electoral_rank`, `national_electoral_votes_counted` and `national_electoral_denominator`,
   `ElectionSummary.ec_determinative`, `pv_winner`, `hybrid_winner`, `pv_flip`, `hybrid_flip` and
   `AllElectionsSummaryResponse` in `src/usvote/api/models.py`; D041; D046 §4; D091; D093; D096;
-  #558; D104; #562; D107; D108; `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99
-  of 261, 37.9 percent; the House chose John Quincy Adams);
-  `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it happened"; the 1992
-  example (William J. Clinton, 43.0%) checked against served N1; reader wording: `ba` spec for
+  #558; D104; #562; D107; D108; #596 (owner decisions, 2026-11-20); D110; `ba` spec for #596;
+  `posts/2026-08-18-presidential-elections-are-messy.md` (Jackson 99 of 261, 37.9 percent; the House
+  chose John Quincy Adams); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one time it
+  happened"; the 1992 example (William J. Clinton, 43.0%) checked against served N1; reader wording:
+  `ba` spec for
   #434, approved at its plan gate (2026-11-11), with its historical claims, and `ba` spec for
   #564, approved at its plan gate (2026-11-19); #593; D109; `ba` spec for #593.
 - **Not:** A chart of winners: in 1824 the leader had no majority. The chart does not show who took
@@ -967,20 +978,23 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Electors appointed and total popular vote over time (charts C4 and C5)
-- **Plain:** Two charts on their own page, one of the Elections pages, with election years
-  running left to right, oldest at the left. Each bar is one election, for all states together.
-  The first chart shows the whole Electoral College's electors appointed, and the second the
-  national total popular vote. Where there is nothing to draw, a marker stands in the bar's place,
-  never a bar of zero length, and the chart's key says what each kind of marker means. In the
-  second chart, the shaded years are those before this dataset's popular-vote figures begin;
-  shading does not mean no popular vote was held. Hovering over or tapping a bar or marker shows
-  its numbers, and one table on the page holds both charts' numbers. No filter reaches them. A
-  state's own electors appointed are on that state's page (chart C7).
+- **Plain:** Two charts on their own page, one of the Elections pages, with election years running
+  left to right, oldest at the left. Each bar is one election, for all states together. The first
+  chart shows the whole Electoral College's electors appointed, and the second the national total
+  popular vote. Where there is nothing to draw, a marker stands in the bar's place, never a bar of
+  zero length, and the chart's key says what each kind of marker means. In the second chart, the
+  shaded years are those before this dataset's popular-vote figures begin; shading does not mean no
+  popular vote was held. Hovering over or tapping a bar or marker shows its numbers, and one table
+  on the page holds both charts' numbers. With no filter they show every election in this dataset; a
+  reader can narrow the charts and the table together to a range of years, or to the years with a
+  popular vote in this dataset. The second chart writes the numbers up its side short ("150M" is 150
+  million); its hover and the table give them in full. A state's own electors appointed are on that
+  state's page (chart C7).
 - **Precise:**
-  - C4 and C5 are in `CHARTS` on `/elections/over-time`, ids `c4` and `c5`, sharing one
-    companion table. They sit under the page's heading (`HEADING`), after the section links,
-    stacked, C4 above C5, with the same fixed left and right margins so their year axes line up,
-    and the table below.
+  - C4 and C5 are in `CHARTS` on `/elections/over-time`, ids `c4` and `c5`, sharing one companion
+    table. They sit under the page's heading (`HEADING`), after the section links and the page's
+    year filters, stacked, C4 above C5, with the same fixed left and right margins so their year
+    axes line up, and the table below.
   - C4 `--chart-ec` (red), C5 `--chart-pv` (blue) (#593, D109).
   - C7 draws one state's series of electors appointed on that state's history page
     (*State's electors appointed over time*).
@@ -993,9 +1007,12 @@ articles and announcements). Every rule binds all three unless the rule states a
     label (D104). In C5 the band alone marks a year outside the popular-vote window, which gets
     no marker; every other cause gets a marker wherever it falls, inside the band included.
   - Both charts put election year on one numeric axis along the bottom (D100(a) as amended by D104
-    and D107), with a tick every 40 years. The value axis runs up the side with full-number ticks.
-    C5's band is vertical, spanning the years outside the window, and its label sits inside the
-    band at its top, beginning "Shaded:"; the after band's label, where drawn, sits above the
+    and D107), with a tick every 40 years. The value axis runs up the side: C4's ticks are full
+    numbers; C5's are short (d3's SI form with trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"),
+    the one exception to the chart rule (C5's `CHARTS` row, `short_value_ticks`, #596, D110), and
+    with no bar drawn C5 writes no value ticks. Their shared left margin is sized for C5's short
+    ticks. C5's band is vertical, spanning the years outside the window, and its label sits inside
+    the band at its top, beginning "Shaded:"; the after band's label, where drawn, sits above the
     plot. The key sits above the plot.
   - The band's bounds come from `meta.provenance.coverage`. Hover text is the table's cells.
   - If `/v1/elections/summary` cannot be read or is malformed, the section shows
@@ -1004,13 +1021,15 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `HEADING`, `LEDE`, `OVER_TIME_TABLE_HEADING`, `OVER_TIME_UNAVAILABLE` and the
   download "electors appointed and the total popular vote, all states"
   (`elections-electors-and-popular-vote-all-states.csv`) in `pages/elections_over_time.py`; the
-  section link `labels.SECTION_OVER_TIME`;
-  `C4_*`, `C5_*` and `NO_NATIONAL_TOTAL` in `labels.py`; `LABELS["year"]` (the year axis); then
-  `labels.CHART_TABLE_POINTER`.
+  section link `labels.SECTION_OVER_TIME`; `FILTER_SENTENCE` (success only, after `LEDE`); the
+  filters' `labels.YEARS_FILTER` and `labels.PV_ONLY_FILTER`; `labels.NO_ELECTIONS_MATCH`;
+  `labels.C5_SHORT_TICKS_NOTE`; `C4_*`, `C5_*` and `NO_NATIONAL_TOTAL` in `labels.py`;
+  `LABELS["year"]` (the year axis); then `labels.CHART_TABLE_POINTER`.
 - **Source:**
   - #436 ACs (owner, 2026-11-05);
   - decisions D091, D093, D096, D100 and D107;
   - #593; D109;
+  - #596 (owner decisions, 2026-11-20); D110; the ba spec for #596;
   - #558; D104; #562;
   - `ElectionSummary.electoral_denominator` and `NationalSummaryRow.national_pv_denominator`;
   - posts 2026-08-18 (messy), 2026-08-25 (270 of what) and 2026-08-06 (222 votes away);
@@ -1020,7 +1039,6 @@ articles and announcements). Every rule binds all three unless the rule states a
   - electoral votes cast or counted;
   - turnout;
   - a candidate's popular votes;
-  - anything narrowed by a filter;
   - one state's figures (C7, on the state's page, has its electors appointed);
   - "no popular vote", which the band is not;
   - a missing figure, which a C4 zero-allotment marker is not;
@@ -1206,6 +1224,25 @@ articles and announcements). Every rule binds all three unless the rule states a
   D097's rule for a sum, whose reader wording a later spec sets.
 - **Status:** settled
 
+### No elections match (an empty filter result)
+- **Plain:** What a page for all elections says when the filters leave no election, for example
+  only the years with a popular vote in this dataset together with a range of years that ends
+  before those years begin. It is about the filters, not the data: widening the years, or
+  clearing the popular-vote checkbox, brings elections back.
+- **Precise:** On `/elections`, it stands in T1's place; the count line reads 0 of all elections
+  and each average reads `labels.METRIC_NO_AVERAGE_FILTERS`. On `/elections/majority` and
+  `/elections/over-time`, it is one note in place of the chart or charts, their companion table
+  and its download; the heading, lede, filter sentence, section links, filters and provenance
+  footer stay, and the page keeps its success marker. A failed summary read shows that section's
+  unavailable sentence instead.
+- **Shown as:** `labels.NO_ELECTIONS_MATCH` (T1's empty text in `pages/elections.py`, and the note
+  on the two chart pages).
+- **Source:** #596 acceptance criteria (owner, 2026-11-20); D110; `ba` spec for #596; T1's empty
+  text since #306.
+- **Not:** *Degraded state*. *Not-found state*. `components.NO_ROWS`, which other tables show
+  ("rows"). *No average*. "No data": the elections are in this dataset; the filters leave none shown.
+- **Status:** settled
+
 ### No popular-vote figure in this dataset (inside the window)
 - **Plain:** A state held a popular vote in a year this dataset covers, but the dataset has no
   figure for this candidate there, or, for a total, no total for that state or election.
@@ -1299,7 +1336,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `dashboard/CLAUDE.md`, `pages/`; the heading and title: #325;
   their reader wording: owner decision, 2026-11-01, #325; the state pages' shared sentence: #559.
 - **Not:** *Degraded state*; *Page not found*, a link that matches no page at all; an empty filter
-  result (`components.NO_ROWS`).
+  result (`components.NO_ROWS`; on the three elections pages, `labels.NO_ELECTIONS_MATCH`; *No
+  elections match*).
 - **Status:** settled
 
 ### Outside the popular-vote window
@@ -1345,34 +1383,44 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Pages for all elections (list of elections, Electoral College majority, electors appointed and total popular vote)
-- **Plain:** The Elections part of the site has three pages: the list of elections, with filters
-  and the average margins; the Electoral College majority page, a chart and table of whether each
-  election's Electoral College leader won more than half of the electors appointed; and the
-  electors appointed and total popular vote page, two charts and a table of those totals in every
-  election, for all states together. Links near the top of each page go between the three, and
-  the page being read is marked. The majority page also shows, where this dataset has popular-vote figures, the leader's popular-vote share and the hybrid score the project proposes.
+- **Plain:** The Elections part of the site has three pages: the list of elections, with filters and
+  the average margins; the Electoral College majority page, a chart and table of whether each
+  election's Electoral College leader won more than half of the electors appointed; and the electors
+  appointed and total popular vote page, two charts and a table of those totals in every election,
+  for all states together. Links near the top of each page go between the three, and the page being
+  read is marked. On each of the three, a reader can narrow the years shown, or show only the years
+  with a popular vote in this dataset, and the links between the pages keep that choice. The
+  majority page also shows, where this dataset has popular-vote figures, the leader's popular-vote
+  share and the hybrid score the project proposes.
 - **Precise:** Three registered pages. `/elections` (`pages/elections.py`): T1, its year-range and
-  popular-vote filters, the count of elections shown and the averages; it reads `/v1/elections`
-  and N1. `/elections/majority` (`pages/elections_majority.py`): C2 and `elections-leader-table`;
-  it reads N1 and has no filter. `/elections/over-time` (`pages/elections_over_time.py`): C4, C5
-  and their one table, all states only; it reads N1 and has no filter. On a successful render each
-  page carries the section links, a landmark named `labels.ELECTIONS_SECTIONS_LABEL`; the page
-  being read is text marked `aria-current="page"`, and the others are links that open without
-  reloading the page and carry no filter. A failed N1 degrades only the sections that read it. An
-  old `/elections?state=<usps>` link answers 302 to `/state/<usps>` when the state roster in
-  memory accepts the code; otherwise `/elections` is served with the key ignored. An old
-  `/elections#c2`, `#c4` or `#c5` link lands on `/elections`, without its chart, because the part
-  after `#` never reaches the server.
+  popular-vote filters, the count of elections shown and the averages; it reads `/v1/elections` and
+  N1. `/elections/majority` (`pages/elections_majority.py`): C2 and `elections-leader-table`; it
+  reads N1 and has the same year-range and popular-vote filters as `/elections`.
+  `/elections/over-time` (`pages/elections_over_time.py`): C4, C5 and their one table, all states
+  only; it reads N1 and has the same filters. On a successful render each page carries the section
+  links, a landmark named `labels.ELECTIONS_SECTIONS_LABEL`; the page being read is text marked
+  `aria-current="page"`, and the others are links that open without reloading the page and carry the
+  filters the render applied (`year_from`, `year_to`, `pv`), as a state's two pages carry the year
+  range (D105). The three pages share one filter parser and one filter callback
+  (`elections_view.py`). When the filters leave no election, `/elections` shows
+  `labels.NO_ELECTIONS_MATCH` in T1's place and each chart page shows it in place of its charts and
+  table; the filters and section links stay. A failed N1 degrades only the sections that read it. An
+  old `/elections?state=<usps>` link answers 302 to `/state/<usps>` when the state roster in memory
+  accepts the code; otherwise `/elections` is served with the key ignored. An old `/elections#c2`,
+  `#c4` or `#c5` link lands on `/elections`, without its chart, because the part after `#` never
+  reaches the server.
 - **Shown as:** the section links `labels.SECTION_ELECTIONS_LIST`, `labels.SECTION_MAJORITY`,
   `labels.SECTION_OVER_TIME` and the landmark name `labels.ELECTIONS_SECTIONS_LABEL` (read by
   assistive technology, not shown); on `/elections`, the H1 "Elections" (a literal), `LEDE`,
   `FILTER_SENTENCE` (success only), `LIST_HEADING`, the title and description; on
-  `/elections/majority` and `/elections/over-time`, `HEADING`, `LEDE`, the title and description
-  in each page's module. `elections_view.py` ships no wording of its own.
+  `/elections/majority` and `/elections/over-time`, `HEADING`, `LEDE`, `FILTER_SENTENCE` (success
+  only), the title and description in each page's module; on all three, the filters'
+  `labels.YEARS_FILTER` and `labels.PV_ONLY_FILTER` and the empty note `labels.NO_ELECTIONS_MATCH`.
+  `elections_view.py` ships no wording of its own.
 - **Source:** #562 (owner agreement at the 2026-11-17 review); D092 (the subpage pattern); D107;
-  reader wording: `ba` spec for #562, approved at its plan gate (2026-11-19); `LEDE` and description on `/elections/majority`: `ba` spec for #564, approved at its plan gate (2026-11-19).
+  reader wording: `ba` spec for #562, approved at its plan gate (2026-11-19); `LEDE` and description on `/elections/majority`: `ba` spec for #564, approved at its plan gate (2026-11-19); #596 (owner decisions, 2026-11-20); D110; reader wording: `ba` spec for #596.
 - **Not:** *Election pages* (one election's three pages). *Site navigation*. A filter: the section
-  links change the page, not the rows.
+  links change the page, not the rows; the filters they carry are the reader's own.
 - **Status:** settled
 
 ### Party
@@ -1520,7 +1568,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   surface. False for every year outside the popular-vote window. It says nothing about whether a
   popular vote was held.
 - **Shown as:** `LABELS["has_popular_vote"]`; `labels.has_popular_vote`;
-  `labels.HAS_POPULAR_VOTE_NOTE`; the T1 popular-vote checkbox.
+  `labels.HAS_POPULAR_VOTE_NOTE`; the popular-vote checkbox on the three elections pages,
+  `labels.PV_ONLY_FILTER`, which `labels.METRIC_SAME_ELECTIONS` names by its text.
 - **Source:** `YearListItem.has_popular_vote`; `NationalSummaryRow` docstring.
 - **Not:** *Popular vote held in this state.*
 - **Status:** settled

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Page, expect
 
-from explore import charts, components, labels
+from explore import charts, components, elections_view, labels
 from tests.e2e.dashboard_pages import (
     C4,
     C5,
@@ -283,3 +283,100 @@ def test_the_plots_stay_aligned_across_resizes(page: Page) -> None:
 def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> None:
     open_at(page, width)
     assert_layout_holds(page, OVER_TIME_SUCCESS, ("#elections-over-time-table",), width)
+
+
+# --- the year filters, C5's short ticks and the shared margin (#596, D110) ---------------
+
+#: The views whose value ticks and bands differ: the default, the popular-vote years, a
+#: narrow before band, no bar on C5 (no value ticks), and a short span inside the window.
+FILTERED_VIEWS = (
+    "",
+    "?pv=1",
+    "?year_from=1968",
+    "?year_to=1972",
+    "?year_from=1976&year_to=1980",
+)
+#: The least room, in px, left of each value-axis text inside its chart's SVG: the
+#: shared margin's slack (architect Q6, #596).
+MARGIN_SLACK_PX = 8
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("query", FILTERED_VIEWS)
+def test_the_shared_margin_holds_every_value_tick_and_title(
+    page: Page, query: str
+) -> None:
+    """#596 (D110): with the value axes' own margins off, nothing pushes the shared
+    left margin, so every value tick and axis title of C4 and C5 must start inside its
+    chart's SVG, with slack, under every filter; and C5's ticks are short ("50M")."""
+    width = 360
+    page.set_viewport_size({"width": width, "height": 844})
+    open_over_time(page, query, width=width)
+    for chart in (C4, C5):
+        page.locator(f"{chart} .main-svg").first.wait_for()
+        (svg,) = boxes(page, f"{chart} .main-svg >> nth=0")
+        texts_ = [
+            b
+            for b in boxes(page, f"{chart} .ytick text, {chart} .g-ytitle text")
+            if b["w"] > 0
+        ]
+        assert texts_, (chart, query)
+        for b in texts_:
+            assert b["x"] - svg["x"] >= MARGIN_SLACK_PX, (chart, query, b)
+            assert b["x"] + b["w"] <= width, (chart, query, b)
+    c5_ticks = [b["text"] for b in boxes(page, f"{C5} .ytick text") if b["w"] > 0]
+    if query == "?year_to=1972":
+        assert c5_ticks == []  # no bar drawn: no value ticks
+    else:
+        assert c5_ticks[0] == "0" and all(
+            t == "0" or t.endswith("M") for t in c5_ticks
+        ), c5_ticks
+    assert_plots_align(page)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("query", FILTERED_VIEWS[1:])
+def test_filtered_c4_and_c5_are_readable_at_360(page: Page, query: str) -> None:
+    """#596 (D110): under a filter every text C4 and C5 draw stays inside 360 px with
+    none over another, and a band's label is over no bar or marker."""
+    width = 360
+    page.set_viewport_size({"width": width, "height": 844})
+    open_over_time(page, query, width=width)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    for chart in (C4, C5):
+        page.locator(f"{chart} .xtick text").first.wait_for()
+        texts_ = [
+            b
+            for b in boxes(
+                page,
+                ", ".join(
+                    f"{chart} {part}"
+                    for part in (
+                        ".xtick text",
+                        ".ytick text",
+                        ".g-xtitle text",
+                        ".g-ytitle text",
+                        ".annotation-text",
+                        ".legendtext",
+                    )
+                ),
+            )
+            if b["w"] > 0
+        ]
+        for i, a in enumerate(texts_):
+            assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, query, a)
+            for b in texts_[i + 1 :]:
+                assert not overlaps(a, b), (chart, query, a, b)
+        for note in boxes(page, f"{chart} .annotation-text"):
+            for mark in boxes(page, f"{chart} .barlayer path, {chart} .points path"):
+                assert not overlaps(note, mark), (chart, query, note, mark)
+
+
+@pytest.mark.plotlyjs_fetches(0)
+def test_a_filter_leaving_no_year_shows_the_note(page: Page) -> None:
+    page.goto("/elections/over-time?year_to=1972&pv=1")
+    assert_rendered(page, OVER_TIME_SUCCESS)
+    expect(page.locator(f"#{elections_view.NO_MATCH_ID}")).to_have_text(
+        labels.NO_ELECTIONS_MATCH
+    )
+    expect(page.locator(f"{C4}, {C5}, #elections-over-time-table")).to_have_count(0)

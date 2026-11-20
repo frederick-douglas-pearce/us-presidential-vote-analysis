@@ -466,21 +466,21 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({"year": "1864"}, "state=GA", "filtered"),
         ({"year": "1864"}, "state=ZZ", "absent"),
     ],
-    # #562: C2's own page reads no filter (no ``query=``), so the list's old keys and
-    # the retired state key change nothing on it, as the overview's moved keys do. They
-    # are "filtered" queries, as the overview's are: a page with no parser lists one,
-    # and with no FILTERED_TABLES or SERIES_KEYS entry each must equal the unfiltered
-    # render.
+    # #596 (D110): the elections pages' year filters narrow C2, C4 and C5 and their
+    # tables (NARROWED_CHARTS). A span across the window's start, the popular-vote
+    # years alone, and an out-of-span year, which falls back to every year. A filter
+    # leaving no year shows the empty note instead (its own tests, not listed here).
     "/elections/majority": [
-        ({}, "year_from=1824&year_to=1900&pv=1", "filtered"),
-        ({}, "state=GA", "filtered"),
+        ({}, "year_from=1900&year_to=1990", "filtered"),
+        ({}, "pv=1", "filtered"),
+        ({}, "year_to=1972", "filtered"),
+        ({}, "year_from=1700", "absent"),
     ],
-    # #562: C4 and C5's own page reads no filter either; the old state key, which
-    # switched their series before (D100), now changes nothing on it.
     "/elections/over-time": [
-        ({}, "year_from=1824&year_to=1900&pv=1", "filtered"),
-        ({}, "state=GA", "filtered"),
-        ({}, "state=ZZ", "absent"),
+        ({}, "year_from=1900&year_to=1990", "filtered"),
+        ({}, "pv=1", "filtered"),
+        ({}, "year_to=1972", "filtered"),
+        ({}, "year_from=1700", "absent"),
     ],
     # #560, D106: the state page's filters narrow T4 only, never C7 or its companion
     # table. Georgia from 1824, with 1864's zero allotment.
@@ -510,6 +510,13 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     # ``/elections`` has no chart since #562 (D107), so it is listed again when #563
     # brings C9 there; T1's narrowing is checked by ``TestFilters`` in
     # ``test_dashboard_elections.py``.
+    # #596 (D110): the elections pages' year filters narrow each chart's table.
+    "/elections/majority": {
+        "elections-leader-table": ("year_from", "year_to", "pv"),
+    },
+    "/elections/over-time": {
+        "elections-over-time-table": ("year_from", "year_to", "pv"),
+    },
     # #560: T4 alone; C7's companion table is unlisted, so it equals the unfiltered
     # render under every query.
     "/state/<usps>": {
@@ -528,6 +535,18 @@ SERIES_KEYS: dict[str, tuple[str, ...]] = {
     # series again.
 }
 
+
+#: The charts a filter narrows, by DOM id, and the query keys that narrow each (#596,
+#: D110, amending D093(a) for the elections pages): under a ``filtered`` query keeping
+#: one, the chart differs from the unfiltered render, its year axis is the one
+#: ``components.year_axis`` builds over the years its companion table shows, and every
+#: point sits inside that axis; under any other query it equals the unfiltered render.
+#: Hand-written.
+NARROWED_CHARTS: dict[str, tuple[str, ...]] = {
+    charts.dom_id("C2"): ("year_from", "year_to", "pv"),
+    charts.dom_id("C4"): ("year_from", "year_to", "pv"),
+    charts.dom_id("C5"): ("year_from", "year_to", "pv"),
+}
 
 #: Each chart's selected-item trace, by the chart's DOM id and the trace's name (#435,
 #: D093(b)): the one trace a filter may add. Hand-written; a chart story that marks a
@@ -655,6 +674,37 @@ class TestEveryChart:
         for dom, figure in filtered.items():
             name = SELECTION_TRACES.get(dom)
             default = unfiltered[dom]
+            if dom in NARROWED_CHARTS:
+                narrowing = kept_keys & set(NARROWED_CHARTS[dom])
+                if not (selects and narrowing):
+                    assert figure == default, (key, query, dom)
+                    continue
+                # Not vacuous: the filter narrowed the chart's years (#596, D110). C5's
+                # bars can be unchanged under pv=1 (it draws none before 1976); its
+                # axis and bands are not.
+                assert figure["layout"]["xaxis"] != default["layout"]["xaxis"], (
+                    key,
+                    query,
+                    dom,
+                )
+                (table,) = FILTERED_TABLES[key]
+                csv_text = table_csv(tree, table)
+                assert csv_text is not None, (key, query, dom)
+                years = sorted(
+                    {int(next(iter(row.values()))) for row in Csv(csv_text).rows}
+                )
+                axis = figure["layout"]["xaxis"]
+                assert axis == components.year_axis(
+                    years, tick_px=axis["tickfont"]["size"]
+                ), (key, query, dom)
+                low, high = axis["range"]
+                for trace in figure["data"]:
+                    if "marker" not in trace and trace.get("type") != "bar":
+                        continue
+                    xs = [x for x in trace.get("x", []) if x is not None]
+                    assert all(x in years for x in xs), (key, query, dom)
+                    assert all(low < x < high for x in xs), (key, query, dom)
+                continue
             series = SERIES_KEYS.get(dom, ())
             reduced_pairs = [
                 (k, v)

@@ -457,6 +457,15 @@ C2_VALUE_AXIS = "Leader's shares<br>and hybrid score"
 #: (never a fixed number such as 270). Three lines since #564, so it ends before the
 #: first popular-vote year at 360 px in CI's wider font (the words are unchanged).
 C2_MAJORITY_LINE = "Majority line: half of<br>each election's<br>electors appointed"
+#: The dashed line's entry in C2's key (#596, D110: the owner's choice at #596's plan
+#: gate, replacing the label below the line, which a filter set among the marks): the
+#: words of :data:`C2_MAJORITY_LINE`, on two lines so the entry fits 360 px.
+C2_MAJORITY_KEY = "Majority line: half of each<br>election's electors appointed"
+#: C2's title and value axis when no year shown has popular-vote figures (#596, D110;
+#: ba spec for #596, option B, the owner's choice): only the electoral share is drawn,
+#: as :data:`C1_TITLE_NO_PV` for one election.
+C2_TITLE_NO_PV = "The Electoral College leader's electoral share in each election"
+C2_VALUE_AXIS_NO_PV = "Leader's electoral share"
 #: The circle's hover, filled with strings the page writes: the year as written, the
 #: name as served, the companion table's cells, and the majority line every year.
 C2_HOVER = (
@@ -841,6 +850,12 @@ C5_BASIS = (
 )
 #: Reworded at #562, as :data:`C4_ALL_STATES`.
 C5_ALL_STATES = "Each bar is the national total: every state's total, added up."
+#: C5's value axis writes its numbers short (#596, D110, the one exception to the chart
+#: rule); said in its caption only when a bar is drawn (ba spec for #596).
+C5_SHORT_TICKS_NOTE = (
+    "The numbers up the side are written short: 50M is 50,000,000. Each bar's hover "
+    "and the table give the total in full."
+)
 C5_BEFORE_NOTE = (
     "The shaded years come before {pv_year_min}, when this dataset's popular-vote "
     "figures begin. Shading means this dataset has no total for those years, not that "
@@ -1421,3 +1436,12 @@ def share_cell(value: object) -> str:
     (``ec_share_full``, ``pv_coverage``): a null names no cause, as :func:`share` reads
     one."""
     return share(value)
+
+
+#: The year filters on the three elections pages (#596, D110; ba spec for #596): the
+#: slider's label, the popular-vote checkbox's text (which
+#: :data:`METRIC_SAME_ELECTIONS` names by its text; the control adds a leading space),
+#: and what each page shows when the filters leave no election.
+YEARS_FILTER = "Years"
+PV_ONLY_FILTER = "Only years with a popular vote in this dataset"
+NO_ELECTIONS_MATCH = "No elections match these filters."

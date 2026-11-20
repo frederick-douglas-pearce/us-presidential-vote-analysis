@@ -2,9 +2,11 @@
 D107; extended by #564, D108): ``/elections/majority``, each served year's Electoral
 College leader's electoral share, popular-vote share and hybrid score against the
 majority line, from N1 (``api.SUMMARY_PATH``, filled on first use) read in the same
-view as the index. No filter reaches the page: it has no ``query=`` parser.
-A failed or malformed N1 degrades the chart's section only (D096(d)): the heading,
-lede and success marker stay.
+view as the index. The year filters of ``/elections`` narrow the chart, its table and
+its download (#596, D110, reversing D096's "no filter"): the page's ``query=`` parser
+is :func:`explore.elections_view.parse_filters`, and the controls sit in the chart's
+section. A failed or malformed N1 degrades the chart's section only (D096(d)): the
+heading, lede and success marker stay.
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ from explore import (
     export,
     labels,
     over_time,
-    query,
 )
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
@@ -42,7 +43,15 @@ LEDE = (
     "popular-vote share and the hybrid score the project proposes."
 )
 
-#: Chart C2 (#434, D096) and its companion table, never narrowed by a filter.
+#: Page-level wording (ba spec for #596, approved at #596's plan gate, 2026-11-20):
+#: shown after :data:`LEDE` only when the filter controls render.
+FILTER_SENTENCE = (
+    "Narrow the chart and table by year, or to the years with a popular vote in this "
+    "dataset."
+)
+
+#: Chart C2 (#434, D096) and its companion table, narrowed by the year filters since
+#: #596 (D110).
 C2_ID = "C2"
 LEADER_TABLE_ID = "elections-leader-table"
 LEADER_UNAVAILABLE_ID = "elections-leader-unavailable"
@@ -83,8 +92,6 @@ C2_UNAVAILABLE = (
 #: 60%, stand apart). Its title is page text (``components.chart`` takes it out of the
 #: figure).
 _C2_HEIGHT_PX = 560
-#: How far below the majority line its label starts: more than C2's point radius.
-_C2_LINE_LABEL_SHIFT_PX = 6
 #: The value axis runs past 100% to hold the strip of disagreement marks (#564, D108),
 #: which sit at :data:`_C2_STRIP_Y`, above every share; its ticks stop at 100%.
 _C2_Y_TOP = 1.12
@@ -106,6 +113,12 @@ _C2_PV_SYMBOL = "triangle-up"
 #: triangle nearly meet. ``line-ew`` and ``asterisk`` are line-only symbols, drawn
 #: by their outline (:data:`_C2_LINE_PX`).
 _C2_HYBRID_SYMBOL = "line-ew"
+#: The crossbar's width (#596, D110: 16 px touched its neighbors at 360 px, where the
+#: years after 1976 sit about 9 px apart): a little wider than the circle and the
+#: triangle, :data:`_C2_EC_PX` and :data:`_C2_PV_PX`.
+_C2_HYBRID_PX = 10
+_C2_EC_PX = 7
+_C2_PV_PX = 8
 _C2_PV_DIFFERENT_SYMBOL = "asterisk"
 _C2_HYBRID_DIFFERENT_SYMBOL = "pentagon"
 #: The crossbar's and the asterisk's stroke width.
@@ -114,6 +127,29 @@ _C2_SYMBOLS = {
     labels.C2_NO_FIGURE: "circle-open",
     labels.UNRECOGNIZED: "square-open",
 }
+#: Each C2 series' stable identity, by series name (#596): the connector, which shares
+#: the triangle's name, gets its own.
+_C2_UIDS = {
+    labels.C2_MAJORITY_KEY: "c2line",
+    labels.LABELS["pv_share"]: "c2pv",
+    labels.LABELS["ec_share_full"]: "c2ec",
+    labels.C2_HYBRID_KEY: "c2hybrid",
+    labels.C2_PV_DIFFERENT_KEY: "c2pvstrip",
+    labels.C2_HYBRID_DIFFERENT_KEY: "c2hybridstrip",
+    labels.C2_NO_FIGURE: "c2nofigure",
+    labels.UNRECOGNIZED: "c2unrecognized",
+}
+#: The key's order, by series name (#596, D110): the drawing order puts the crossbar
+#: last, so each keyed trace's ``legendrank`` is its place here, plus one.
+_C2_KEY_ORDER = (
+    labels.LABELS["pv_share"],
+    labels.C2_HYBRID_KEY,
+    labels.LABELS["ec_share_full"],
+    labels.C2_PV_DIFFERENT_KEY,
+    labels.C2_HYBRID_DIFFERENT_KEY,
+    *_C2_SYMBOLS,
+    labels.C2_MAJORITY_KEY,
+)
 
 
 dash.register_page(
@@ -129,6 +165,8 @@ dash.register_page(
     # N1, filled on first use (D096(c)): a literal (D074(ii)), never prefetched.
     on_miss=(api.SUMMARY_PATH,),
     success=PAGE_ID,
+    # The year filters (#596, D110): og:url names the filtered view.
+    query=elections_view.parse_filters,
     # The site navigation link this page marks (#448): the elections index's.
     nav="elections",
 )
@@ -215,27 +253,9 @@ def leaders(
     return result
 
 
-def index_rule(index: dict[str, Any]) -> tuple[tuple[int, int], dict[int, bool]]:
-    """The index's popular-vote window and each served year's ``has_popular_vote``,
-    checked as the page's, never a section's (#562's cr.1; #564's review, cr.3 and
-    cr.8): the window through ``query.year_span``, each flag a ``bool``, one flag per
-    year, and each flag true exactly inside the window, so C2's marks (T3's rule) and
-    its bands and caption (the window) follow one agreed rule. Pure; raises
-    ``KeyError`` or ``TypeError``, which :func:`layout` shows as the degraded page."""
-    coverage = index["meta"]["provenance"]["coverage"]
-    window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
-    has_pv: dict[int, bool] = {}
-    for row in index["data"]:
-        year = election_view.row_year(row)
-        flag = row["has_popular_vote"]
-        if year is None or type(flag) is not bool:
-            raise TypeError("/v1/elections: has_popular_vote is not a bool")
-        if has_pv.get(year, flag) is not flag:
-            raise TypeError("/v1/elections: one year, two has_popular_vote")
-        if flag is not (window[0] <= year <= window[1]):
-            raise TypeError("/v1/elections: has_popular_vote disagrees with coverage")
-        has_pv[year] = flag
-    return window, has_pv
+#: The index's popular-vote window and flags, checked as the page's: shared with the
+#: over-time page since #596, so both filter on one rule.
+index_rule = elections_view.index_rule
 
 
 def _leader_cells(row: dict[str, Any], coverage: dict[str, Any]) -> dict[str, str]:
@@ -294,6 +314,9 @@ class C2(NamedTuple):
     """C2's figure and what its caption needs to say (#564)."""
 
     figure: dict[str, Any]
+    #: Whether any year shown has popular-vote figures (#596): if none does, only the
+    #: electoral share is drawn and the title, axis and caption say so.
+    pv_shown: bool
     marked: bool
     before: bool
     after: bool
@@ -320,8 +343,14 @@ def _c2_figure(
     of its own per label (:data:`explore.labels.C2_NO_FIGURE` for no figure in this
     dataset, else :data:`explore.labels.UNRECOGNIZED`), each with its own symbol and
     named in the chart's key; a popular-vote cell that reads
-    :data:`explore.labels.NOT_APPLICABLE` draws nothing, and the band says why. Drawn
-    in the order connector, triangles, crossbars, circles, so the circle is on top.
+    :data:`explore.labels.NOT_APPLICABLE` draws nothing, and the band says why. The
+    majority line is a trace under every mark, named in the key (#596, D110: a label
+    in the plot sat among the marks once a filter narrowed the years). Drawn in the
+    order line, connector, triangles, circles, strip marks, markers, crossbars, so the
+    crossbar is on top (#596, D110); each keyed trace's ``legendrank``
+    (:data:`_C2_KEY_ORDER`) keeps the key's order: triangle, crossbar, circle, strip
+    marks, markers, line. ``rows`` are the years shown; with none inside the
+    popular-vote window, the title and value axis name the electoral share alone.
     """
     years = [row["year"] for row in rows]
     ec: list[tuple[int, float, str]] = []
@@ -427,16 +456,22 @@ def _c2_figure(
     series: tuple[
         tuple[str, str, str, int, float | None, list[tuple[int, float, str]]], ...
     ] = (
-        (labels.LABELS["pv_share"], _C2_PV_SYMBOL, charts.PV_COLOR, 8, None, pv),
         (
-            labels.C2_HYBRID_KEY,
-            _C2_HYBRID_SYMBOL,
-            charts.HYBRID_COLOR,
-            16,
-            _C2_LINE_PX,
-            hybrid,
+            labels.LABELS["pv_share"],
+            _C2_PV_SYMBOL,
+            charts.PV_COLOR,
+            _C2_PV_PX,
+            None,
+            pv,
         ),
-        (labels.LABELS["ec_share_full"], _C2_EC_SYMBOL, charts.EC_COLOR, 7, None, ec),
+        (
+            labels.LABELS["ec_share_full"],
+            _C2_EC_SYMBOL,
+            charts.EC_COLOR,
+            _C2_EC_PX,
+            None,
+            ec,
+        ),
         (
             labels.C2_PV_DIFFERENT_KEY,
             _C2_PV_DIFFERENT_SYMBOL,
@@ -479,15 +514,61 @@ def _c2_figure(
                     ["<br>".join(by_year[year]) for year in sorted(by_year)],
                 )
             )
+    # The crossbar last, so neither the circle nor the triangle can hide it (#596).
+    if hybrid:
+        data.append(
+            over_time.marker_trace(
+                labels.C2_HYBRID_KEY,
+                _C2_HYBRID_SYMBOL,
+                [year for year, _, _ in hybrid],
+                [hover for _, _, hover in hybrid],
+                y=[y for _, y, _ in hybrid],
+                size=_C2_HYBRID_PX,
+                color=charts.HYBRID_COLOR,
+                line_width=_C2_LINE_PX,
+            )
+        )
+    axis = components.year_axis(years)
+    # The majority line, under every mark and named in the key (#596, D110): drawn
+    # across the axis's range, with no hover of its own.
+    data.insert(
+        0,
+        {
+            "type": "scatter",
+            "mode": "lines",
+            "name": labels.C2_MAJORITY_KEY,
+            "showlegend": True,
+            "x": list(axis["range"]),
+            "y": [_C2_MAJORITY, _C2_MAJORITY],
+            "cliponaxis": False,
+            "line": {"dash": "dash", "width": 2, "color": "var(--chart-reference)"},
+            "hoverinfo": "skip",
+        },
+    )
+    for trace in data:
+        if trace.get("showlegend"):
+            trace["legendrank"] = _C2_KEY_ORDER.index(trace["name"]) + 1
+    # A stable identity per trace (#596's architect review), which plotly.js writes
+    # into each trace's class (``trace<uid>``), so a test finds a series by what it
+    # is, never by its place in the drawing order, which a filter changes.
+    connector = data[1] if connector_x else None
+    for trace in data:
+        uid = _C2_UIDS.get(trace["name"])
+        if trace is connector:
+            uid = "c2connector"
+        if uid is not None:
+            trace["uid"] = uid
     pv_min, pv_max = window
     bands = over_time.pv_bands(
         years,
         window,
         labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
         labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
-        # One key row per entry the key shows, the most rows it can wrap to, counted
-        # from the traces built above (#593's review).
-        key_px=over_time.KEY_ROW_PX * sum(1 for t in data if t.get("showlegend")),
+        # One key row per line of each entry the key shows, the most rows it can wrap
+        # to, counted from the traces built above (#593's review; the majority line's
+        # entry is two lines, #596).
+        key_px=over_time.KEY_ROW_PX
+        * sum(1 + t["name"].count("<br>") for t in data if t.get("showlegend")),
     )
     # The value axis draws no gridlines of its own (#593, D109): its 50% gridline
     # showed through the majority line's dashes, so it read as a doubled line. The
@@ -507,64 +588,30 @@ def _c2_figure(
         for tick in _C2_TICKS
         if tick not in (0, _C2_MAJORITY)
     ]
+    pv_shown = any(row["has_popular_vote"] is True for row in rows)
     layout: dict[str, Any] = {
-        "title": {"text": labels.C2_TITLE},
+        "title": {"text": labels.C2_TITLE if pv_shown else labels.C2_TITLE_NO_PV},
         "height": _C2_HEIGHT_PX,
         "showlegend": True,
         "legend": components.TIME_SERIES_LEGEND,
-        "xaxis": components.year_axis(years),
+        "xaxis": axis,
         "yaxis": {
             "range": [0, _C2_Y_TOP],
             "tickformat": ".0%",
             "tickvals": list(_C2_TICKS),
             "showgrid": False,
-            "title": {"text": labels.C2_VALUE_AXIS},
+            "title": {
+                "text": labels.C2_VALUE_AXIS if pv_shown else labels.C2_VALUE_AXIS_NO_PV
+            },
         },
-        "shapes": [
-            *bands.shapes,
-            *gridlines,
-            {
-                "type": "line",
-                "xref": "paper",
-                "x0": 0,
-                "x1": 1,
-                "yref": "y",
-                "y0": _C2_MAJORITY,
-                "y1": _C2_MAJORITY,
-                "layer": "below",
-                "line": {
-                    "dash": "dash",
-                    "width": 2,
-                    "color": "var(--chart-reference)",
-                },
-            },
-        ],
-        # The line's label just below it at the left (owner, #564's plan gate, D108,
-        # amending D104(e)): the popular-vote shares at the right now sit just under
-        # the line. It starts at the second served year, clear of the first (1824's
-        # leader, the one share below the line at the left); shifted down by more than
-        # a marker's radius.
-        "annotations": [
-            *bands.annotations,
-            {
-                "text": labels.C2_MAJORITY_LINE,
-                "xref": "x",
-                "x": years[1] if len(years) > 1 else years[0],
-                "xanchor": "left",
-                "yref": "y",
-                "y": _C2_MAJORITY,
-                "yanchor": "top",
-                "yshift": -_C2_LINE_LABEL_SHIFT_PX,
-                "align": "left",
-                "showarrow": False,
-                "font": {"color": "var(--text)", "size": 12},
-            },
-        ],
+        "shapes": [*bands.shapes, *gridlines],
+        "annotations": bands.annotations,
     }
     if bands.top_px:
         layout["margin"] = {"t": bands.top_px}
     return C2(
         {"data": data, "layout": layout},
+        pv_shown,
         bool(marks),
         bands.before,
         bands.after,
@@ -578,19 +625,29 @@ def _c2_caption(c2: C2, window: tuple[int, int]) -> str:
     the line marks, that a plurality under half is ordinary, that the leader did not
     always take office, and, only where each is drawn, the bands, the strip marks and
     the markers. It names no served text (D095(a)); ``components.chart`` adds the
-    table pointer."""
+    table pointer. With no year shown inside the popular-vote window it drops the
+    popular-vote and hybrid sentences, as C1's caption does (#596, D110)."""
     pv_min, pv_max = window
-    parts = [
-        labels.C2_LEADER_POINT,
-        labels.C2_EC_MARK,
-        labels.C1_EC_BASIS,
-        labels.C2_PV_MARK,
-        labels.C2_HYBRID_MARK,
-        labels.C2_MAJORITY_NOTE,
-        labels.C1_LINE_EC_ONLY,
-        labels.C2_PLURALITY_NOTE,
-        labels.C2_TOOK_OFFICE,
-    ]
+    if c2.pv_shown:
+        parts = [
+            labels.C2_LEADER_POINT,
+            labels.C2_EC_MARK,
+            labels.C1_EC_BASIS,
+            labels.C2_PV_MARK,
+            labels.C2_HYBRID_MARK,
+            labels.C2_MAJORITY_NOTE,
+            labels.C1_LINE_EC_ONLY,
+            labels.C2_PLURALITY_NOTE,
+            labels.C2_TOOK_OFFICE,
+        ]
+    else:
+        parts = [
+            labels.C2_LEADER_POINT,
+            labels.C2_EC_MARK,
+            labels.C1_EC_BASIS,
+            labels.C2_MAJORITY_NOTE,
+            labels.C2_TOOK_OFFICE,
+        ]
     if c2.before:
         parts.append(labels.C2_BEFORE_NOTE.format(pv_year_min=pv_min))
     if c2.after:
@@ -609,9 +666,16 @@ def _leader_section(
     summary: Any,
     window: tuple[int, int],
     has_pv: dict[int, bool],
-) -> list[Any]:
-    """C2's section (#434, D096): the chart and its companion table, or, when N1 could
-    not be read (``summary`` is ``None``) or is malformed, :data:`C2_UNAVAILABLE` only.
+    chosen: elections_view.Filters,
+    search: str,
+) -> tuple[list[Any], bool]:
+    """C2's section (#434, D096) and whether its filters rendered: the year filters,
+    then the chart and its companion table over the years they show (#596, D110), or
+    :func:`explore.elections_view.no_match` when they show none; or, when N1 could not
+    be read (``summary`` is ``None``) or is malformed, :data:`C2_UNAVAILABLE` only, with
+    no filters (they would narrow nothing). N1 is checked over every served year
+    before the filters apply, so a filtered view never shows what the default view
+    would refuse.
     The page's heading is the section's (#562). The index's popular-vote window and
     flags (``window``, ``has_pv``) are checked by :func:`render` as the page's. The
     ``try`` covers everything built from N1 (the validation, the figure, the cells, and
@@ -622,15 +686,23 @@ def _leader_section(
         if summary is None:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
         coverage = index["meta"]["provenance"]["coverage"]
-        rows = leaders(index, summary, has_pv)
+        first, last = elections_view.span(coverage)
+        rows = [
+            row
+            for row in leaders(index, summary, has_pv)
+            if elections_view.shows(row["year"], row["has_popular_vote"], chosen)
+        ]
+        controls = elections_view.filter_controls(first, last, chosen)
+        if not rows:
+            return [controls, elections_view.no_match()], True
         cells = [_leader_cells(row, coverage) for row in rows]
         c2 = _c2_figure(rows, cells, window)
         download = export.Download(
             filename="elections-electoral-college-leaders.csv",
             name="the Electoral College leaders",
             provenance=summary["meta"]["provenance"],
-            # No filter reaches this table, so its view names none.
-            view_url=export.view_url(CANONICAL_HOST, PATH, ""),
+            # The view the filters left (#596).
+            view_url=export.view_url(CANONICAL_HOST, PATH, search),
         )
         by_row = {id(row): cell for row, cell in zip(rows, cells, strict=True)}
         # Inside the try: the table and its CSV read N1 too (each row's slug, the
@@ -653,29 +725,41 @@ def _leader_section(
     except (KeyError, TypeError):
         return [
             html.P(C2_UNAVAILABLE, id=LEADER_UNAVAILABLE_ID, className="note"),
-        ]
+        ], False
     return [
+        controls,
         components.chart(C2_ID, c2.figure, LEADER_TABLE_ID, _c2_caption(c2, window)),
         html.H2(C2_TABLE_HEADING),
         *table,
         labels.glossary(LEADER_FIELDS),
-    ]
+    ], True
 
 
-def render(index: dict[str, Any], summary: Any) -> html.Div:
-    """The whole page for one ``/v1/elections`` response and N1's body (``None`` when
-    it could not be read): the heading and lede, then C2's section, then the footer."""
+def render(
+    index: dict[str, Any], summary: Any, pairs: list[tuple[str, str]] | None = None
+) -> html.Div:
+    """The whole page for one ``/v1/elections`` response, N1's body (``None`` when it
+    could not be read) and the page's filter pairs
+    (:func:`explore.elections_view.parse_filters`; none, every year): the heading and
+    lede (with :data:`FILTER_SENTENCE` when the filters render), the section links
+    carrying the filters applied, then C2's section, then the footer."""
     provenance = index["meta"]["provenance"]
+    coverage = provenance["coverage"]
     # The index's rows are the page's, not a section's (cr.1): a defect there raises to
     # the layout, which degrades the whole page.
     elections_view.served_years(index)
     window, has_pv = index_rule(index)
+    chosen = elections_view.filters(pairs or [], coverage)
+    first, last = elections_view.span(coverage)
+    search = elections_view.applied_search(chosen, first, last)
+    section, filtered = _leader_section(index, summary, window, has_pv, chosen, search)
     return html.Div(
         [
             html.H1(HEADING),
-            html.P(LEDE, className="lede"),
-            elections_view.section_nav(elections_view.MAJORITY),
-            *_leader_section(index, summary, window, has_pv),
+            html.P(f"{LEDE} {FILTER_SENTENCE}" if filtered else LEDE, className="lede"),
+            dcc.Location(id=elections_view.URL_ID, refresh="callback-nav"),
+            elections_view.section_nav(elections_view.MAJORITY, search),
+            *section,
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
@@ -692,7 +776,7 @@ def layout(**query: Any) -> html.Div:
                 summary = view.get(api.SUMMARY_PATH)
             except api.ApiUnavailable:
                 summary = None
-        return render(body, summary)
+        return render(body, summary, elections_view.parse_filters(query))
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     return html.Div([html.H1(HEADING), html.P(LEDE, className="lede"), content])

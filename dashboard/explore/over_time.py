@@ -227,15 +227,22 @@ KEY_ROW_PX = 24
 
 
 def _band(
-    years: list[int], first: int, last: int, label: str, *, after: bool, raised: int
+    years: list[int],
+    first: int,
+    last: int,
+    label: str,
+    *,
+    after: bool,
+    raised: int,
+    above: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """A shaded band over the served years ``first`` to ``last`` of ``years``
     (:func:`explore.components.year_edges`), the whole height of the plot, and its
-    label (#558, D104, as amended by D109 for #593). The band before the window's
-    label sits inside it, at its top left; that band spans every year before the
-    popular-vote window, so it is wide. The band after it (``after``) can be one
-    election wide, so its label sits above the plot at the band's right edge,
-    ``raised`` pixels higher to clear the chart's key there."""
+    label (#558, D104, as amended by D109 for #593 and D110 for #596). A label
+    ``above`` the plot sits at the band's outer edge (the before band's left, the after
+    band's right), ``raised`` pixels higher to clear the chart's key there; otherwise
+    it sits inside the band, at its top left (only the before band's, when the band is
+    wide: :func:`pv_bands`)."""
     low, high = components.year_edges(years, first, last)
     shape = {
         "type": "rect",
@@ -259,10 +266,10 @@ def _band(
         "align": "right" if after else "left",
         "yref": "paper",
         "y": 1,
-        "yanchor": "bottom" if after else "top",
-        "yshift": raised if after else -BAND_LABEL_INSET_PX,
+        "yanchor": "bottom" if above else "top",
+        "yshift": raised if above else -BAND_LABEL_INSET_PX,
     }
-    if not after:
+    if not above:
         note["xshift"] = BAND_LABEL_INSET_PX
     return shape, note
 
@@ -279,6 +286,12 @@ class Bands(NamedTuple):
     after: bool
 
 
+#: The share of the year axis a before band must span for its label to sit inside it
+#: (#596, D110): a narrower band, which only a filter leaves, has its label above the
+#: plot instead.
+BAND_INSIDE_SHARE = 0.5
+
+
 def pv_bands(
     years: list[int],
     window: tuple[int, int],
@@ -291,8 +304,12 @@ def pv_bands(
     ``window`` (read from ``coverage`` by the page) (#436, D100; #558, D104; #593,
     D109): the before band's label inside it, the after band's above the plot,
     raised by ``key_px``, the room the chart reserves for its key above the plot.
-    ``top_px`` is the top margin the after band's label needs (the key's room, the
-    label's and the template's), or 0 when no after band is drawn: plotly.js then
+    Since #596 (D110) a filter can leave the before band only an election or two
+    wide, so its label sits inside it only when the band spans at least half of the
+    axis (:data:`BAND_INSIDE_SHARE`), and otherwise above the plot at its left edge,
+    raised one label's room above the after band's when both are there.
+    ``top_px`` is the top margin the labels above the plot need (the key's room, a
+    label's room for each, and the template's), or 0 when none is: plotly.js then
     pushes the top margin for the key alone. C5 and C2 (#564) draw them; the labels
     are the page's."""
     pv_min, pv_max = window
@@ -300,19 +317,39 @@ def pv_bands(
     after = [year for year in years if year > pv_max]
     shapes: list[dict[str, Any]] = []
     annotations: list[dict[str, Any]] = []
-    if before:
-        shape, note = _band(
-            years, before[0], before[-1], before_label, after=False, raised=0
-        )
-        shapes.append(shape)
-        annotations.append(note)
+    above = 0
     if after:
         shape, note = _band(
-            years, after[0], after[-1], after_label, after=True, raised=key_px
+            years,
+            after[0],
+            after[-1],
+            after_label,
+            after=True,
+            raised=key_px,
+            above=True,
         )
         shapes.append(shape)
         annotations.append(note)
-    top = TOP_PX + key_px + BAND_LABEL_PX if after else 0
+        above += 1
+    if before:
+        low, high = components.year_edges(years, before[0], before[-1])
+        axis_low = min(years) - components.YEAR_PAD
+        axis_high = max(years) + components.YEAR_PAD
+        wide = (high - low) >= BAND_INSIDE_SHARE * (axis_high - axis_low)
+        shape, note = _band(
+            years,
+            before[0],
+            before[-1],
+            before_label,
+            after=False,
+            raised=key_px + BAND_LABEL_PX * above,
+            above=not wide,
+        )
+        # The before band first, as before #596, so its shape and label lead.
+        shapes.insert(0, shape)
+        annotations.insert(0, note)
+        above += 0 if wide else 1
+    top = TOP_PX + key_px + BAND_LABEL_PX * above if above else 0
     return Bands(shapes, annotations, top, bool(before), bool(after))
 
 

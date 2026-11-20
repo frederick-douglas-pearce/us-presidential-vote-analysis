@@ -40,17 +40,17 @@ from tests.unit.test_dashboard_theme import (
 )
 
 #: Every chart ID ever issued, live and retired, with its whole row (page, companion
-#: table, retired): written by hand, never derived from the registry, so a renumbered,
+#: table, retired, short value ticks — #596, D110): written by hand, never derived from the registry, so a renumbered,
 #: reused, un-retired or deleted ID fails. An ID is issued when its chart story
 #: registers it: C1 by #433 and C3 by #435; C2, C4 and C5 are assigned to #434 and
 #: #436 by their issues, and C7 to #560 by its own (C6, #550's, is not yet registered).
-ISSUED: dict[str, tuple[str, str, bool]] = {
-    "C1": ("/election/<year>", "election-nation", False),
-    "C3": ("/election/<year>/per-capita", "election-per-capita", False),
-    "C2": ("/elections/majority", "elections-leader-table", False),
-    "C4": ("/elections/over-time", "elections-over-time-table", False),
-    "C5": ("/elections/over-time", "elections-over-time-table", False),
-    "C7": ("/state/<usps>", "state-electors", False),
+ISSUED: dict[str, tuple[str, str, bool, bool]] = {
+    "C1": ("/election/<year>", "election-nation", False, False),
+    "C3": ("/election/<year>/per-capita", "election-per-capita", False, False),
+    "C2": ("/elections/majority", "elections-leader-table", False, False),
+    "C4": ("/elections/over-time", "elections-over-time-table", False, False),
+    "C5": ("/elections/over-time", "elections-over-time-table", False, True),
+    "C7": ("/state/<usps>", "state-electors", False, False),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.
@@ -61,12 +61,15 @@ REGISTRY = {
 
 
 def issued_problems(
-    literal: dict[str, tuple[str, str, bool]], registry: Any
+    literal: dict[str, tuple[str, str, bool, bool]], registry: Any
 ) -> list[str]:
     """How ``registry`` differs from the hand-written ``literal`` of issued IDs: an ID
-    missing from either, or a row whose page, table or retired flag changed."""
+    missing from either, or a row whose page, table, retired flag or short value
+    ticks changed."""
     problems = [f"{c}: issued but not registered" for c in literal if c not in registry]
-    problems += [f"{c}: registered but not issued" for c in registry if c not in literal]
+    problems += [
+        f"{c}: registered but not issued" for c in registry if c not in literal
+    ]
     problems += [
         f"{c}: row {tuple(registry[c])} is not {row}"
         for c, row in literal.items()
@@ -108,8 +111,8 @@ class TestChartRegistry:
 
     def test_the_comparison_fails_every_drift(self) -> None:
         literal = {
-            "C1": ("/elections", "elections-table", False),
-            "C2": ("/elections", "elections-table", True),
+            "C1": ("/elections", "elections-table", False, False),
+            "C2": ("/elections", "elections-table", True, False),
         }
         assert issued_problems(literal, REGISTRY) == []
         assert issued_problems(literal, {"C1": REGISTRY["C1"]}) == [
@@ -120,17 +123,26 @@ class TestChartRegistry:
         ]
         moved = {**REGISTRY, "C1": charts.Chart("/states", "elections-table")}
         assert issued_problems(literal, moved) == [
-            "C1: row ('/states', 'elections-table', False) is not "
-            "('/elections', 'elections-table', False)"
+            "C1: row ('/states', 'elections-table', False, False) is not "
+            "('/elections', 'elections-table', False, False)"
         ]
         # A retired ID brought back, or an ID reused for another table.
         revived = {**REGISTRY, "C2": charts.Chart("/elections", "elections-table")}
         assert issued_problems(literal, revived) == [
-            "C2: row ('/elections', 'elections-table', False) is not "
-            "('/elections', 'elections-table', True)"
+            "C2: row ('/elections', 'elections-table', False, False) is not "
+            "('/elections', 'elections-table', True, False)"
         ]
         reused = {**REGISTRY, "C1": charts.Chart("/elections", "another-table")}
         assert len(issued_problems(literal, reused)) == 1
+        # Short value ticks granted to a chart the literal does not grant (#596).
+        shortened = {
+            **REGISTRY,
+            "C1": charts.Chart("/elections", "elections-table", short_value_ticks=True),
+        }
+        assert issued_problems(literal, shortened) == [
+            "C1: row ('/elections', 'elections-table', False, True) is not "
+            "('/elections', 'elections-table', False, False)"
+        ]
 
     def test_the_literal_is_written_by_hand(self) -> None:
         tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
@@ -288,7 +300,10 @@ class TestChartBuilder:
     @pytest.mark.parametrize(
         ("change", "message"),
         [
-            (lambda f: f["data"][0]["marker"].update(color="#fff"), "not a color token"),
+            (
+                lambda f: f["data"][0]["marker"].update(color="#fff"),
+                "not a color token",
+            ),
             (lambda f: f["data"][0].pop("hovertemplate"), "no hovertemplate"),
             (lambda f: f["layout"].update(template={}), "the template is the found"),
             (lambda f: f["layout"].update(hovermode="x unified"), "fixed by the templ"),
@@ -296,7 +311,15 @@ class TestChartBuilder:
             (lambda f: f["data"][0]["marker"].update(symbol=0), "a number, not a name"),
             (lambda f: f["data"][1]["marker"].pop("pattern"), "differ by color alone"),
         ],
-        ids=["color", "hover", "template", "override", "markup", "number", "color-only"],
+        ids=[
+            "color",
+            "hover",
+            "template",
+            "override",
+            "markup",
+            "number",
+            "color-only",
+        ],
     )
     @pytest.mark.expected_chart_failure("C1")
     def test_a_figure_with_problems_is_not_drawn_and_is_logged(
@@ -365,7 +388,11 @@ class TestColorAllowlist:
             ({"data": [{"marker": {"color": [1, 2]}}]}, "data[0].marker.color"),
             # A list of tokens colors points one by one: only colorway takes a list.
             (
-                {"data": [{"marker": {"color": ["var(--chart-ec)", "var(--chart-pv)"]}}]},
+                {
+                    "data": [
+                        {"marker": {"color": ["var(--chart-ec)", "var(--chart-pv)"]}}
+                    ]
+                },
                 "data[0].marker.color",
             ),
             ({"data": [{"marker": {"color": 3}}]}, "data[0].marker.color"),
@@ -894,7 +921,10 @@ class TestChartCallback:
         assert appmod.server.test_client().get("/").status_code == 200
         spec = appmod.app.callback_map[self.KEY]
         assert spec["inputs"] == [
-            {"id": '{"chart":["MATCH"],"type":"explore-chart-source"}', "property": "data"},
+            {
+                "id": '{"chart":["MATCH"],"type":"explore-chart-source"}',
+                "property": "data",
+            },
             {"id": components.THEME_STORE_ID, "property": "data"},
         ]
         assert spec["state"] == []
@@ -1075,7 +1105,10 @@ class TestMountCallback:
             # #452's review: an alias, a partial, an indexed reference, a subclass,
             # getattr, and a graph returned as component JSON.
             ("from dash import dcc\nmake = dcc.Graph\nmake(id=1)\n", True),
-            ("import functools\nfrom dash import dcc\nfunctools.partial(dcc.Graph)()\n", True),
+            (
+                "import functools\nfrom dash import dcc\nfunctools.partial(dcc.Graph)()\n",
+                True,
+            ),
             ("from dash import dcc\n[dcc.Graph][0]()\n", True),
             ("from dash import dcc\nclass G(dcc.Graph):\n    pass\n", True),
             ("from dash import dcc\ngetattr(dcc, 'Graph')()\n", True),
@@ -1100,7 +1133,10 @@ class TestMountCallback:
         assert appmod.server.test_client().get("/").status_code == 200
         spec = appmod.app.callback_map[self.KEY]
         assert spec["inputs"] == [
-            {"id": '{"chart":["MATCH"],"type":"explore-chart-source"}', "property": "data"}
+            {
+                "id": '{"chart":["MATCH"],"type":"explore-chart-source"}',
+                "property": "data",
+            }
         ]
         assert spec["state"] == [
             {"id": '{"chart":["MATCH"],"type":"explore-chart-mount"}', "property": "id"}
@@ -1139,7 +1175,10 @@ class TestMountCallback:
         ("source", "found"),
         [
             ("import dash\ndef cb():\n    dash.set_props('s', {})\n", ["cb"]),
-            ("from dash import set_props as s\ndef cb():\n    s('s', {})\n", ["line 1"]),
+            (
+                "from dash import set_props as s\ndef cb():\n    s('s', {})\n",
+                ["line 1"],
+            ),
             ("JS = 'window.dash_clientside.set_props(id, {});'\n", ["JS"]),
             ("from dash import set_props\n", ["line 1"]),
             ("# set_props in a comment\nx = 1\n", []),
@@ -1322,7 +1361,9 @@ class TestNotDrawnLogCheck:
     def test_the_check_passes_what_its_markers_declare(self) -> None:
         from tests.unit.conftest import chart_log_check
 
-        with chart_log_check(self.UNIT, [pytest.mark.expected_chart_failure("C1").mark]):
+        with chart_log_check(
+            self.UNIT, [pytest.mark.expected_chart_failure("C1").mark]
+        ):
             self.log("C1")
         with (
             pytest.raises(pytest.fail.Exception, match="C1: 0 not-drawn record"),
@@ -1797,7 +1838,10 @@ class Reads(dict[str, Any]):
 def recording(value: Any, path: str, log: set[str]) -> Any:
     if isinstance(value, dict):
         return Reads(
-            {k: recording(v, f"{path}.{k}" if path else k, log) for k, v in value.items()},
+            {
+                k: recording(v, f"{path}.{k}" if path else k, log)
+                for k, v in value.items()
+            },
             path,
             log,
         )
@@ -1832,7 +1876,9 @@ class TestSlotKinds:
         } == EXPECTED_ANCHOR_KINDS
 
     def test_every_kind_is_sampled(self) -> None:
-        named = {k for t in EXPECTED_KINDS.values() for kinds in t.values() for k in kinds}
+        named = {
+            k for t in EXPECTED_KINDS.values() for kinds in t.values() for k in kinds
+        }
         assert named <= set(SAMPLES)
 
     @pytest.mark.parametrize(
@@ -1910,9 +1956,7 @@ class TestPlaceholderScan:
                 spans = [m.span() for m in self.PATTERN.finditer(text)]
                 assert list(charts._placeholder_spans(text)) == spans, text
                 assert charts._placeholders(text) == self.PATTERN.findall(text)
-                assert charts._without_placeholders(text) == self.PATTERN.sub(
-                    "", text
-                )
+                assert charts._without_placeholders(text) == self.PATTERN.sub("", text)
 
 
 class TestTotalityGuards:
@@ -1966,3 +2010,65 @@ class TestTotalityGuards:
         for figure in (deep, odd):
             assert of_type(build(figure), "Store") == []  # not drawn
             assert figure["layout"]["title"] == TEST_FIGURE["layout"]["title"]
+
+
+# --- C5's short value ticks, the one exception (#596, D110) ----------------------------
+
+
+def short_figure(axis: str = "yaxis", tickformat: str = "~s") -> dict[str, Any]:
+    figure = copy.deepcopy(TEST_FIGURE)
+    figure.setdefault("layout", {})[axis] = {"tickformat": tickformat}
+    return figure
+
+
+class TestShortValueTicks:
+    def test_only_c5_s_row_grants_them(self) -> None:
+        granted = {c for c, row in charts.CHARTS.items() if row.short_value_ticks}
+        assert granted == {"C5"}
+
+    def test_the_flag_admits_the_one_format_on_the_value_axis(self) -> None:
+        assert charts.figure_problems(short_figure(), short_value_ticks=True) == []
+
+    def test_without_the_flag_it_is_refused(self) -> None:
+        """Every other chart, C4 and the test charts among them, still refuses it."""
+        problem = "layout.yaxis.tickformat: '~s' shortens numbers"
+        assert problem in charts.figure_problems(short_figure())
+        assert problem in charts.override_problems(short_figure())
+
+    @pytest.mark.parametrize(
+        ("axis", "tickformat"),
+        [
+            ("xaxis", "~s"),
+            ("yaxis2", "~s"),
+            ("yaxis", "s"),
+            ("yaxis", ".2s"),
+            ("yaxis", "~g"),
+        ],
+    )
+    def test_the_flag_admits_nothing_else(self, axis: str, tickformat: str) -> None:
+        problems = charts.figure_problems(
+            short_figure(axis, tickformat), short_value_ticks=True
+        )
+        assert f"layout.{axis}.tickformat: {tickformat!r} shortens numbers" in problems
+
+    @pytest.mark.parametrize("flag", [1, "yes", None])
+    def test_only_true_admits_it(self, flag: Any) -> None:
+        assert charts.override_problems(short_figure(), short_value_ticks=flag) != []
+
+    def test_components_chart_reads_the_row(self, caplog: Any) -> None:
+        """C5 is drawn with its short ticks; the same figure under C4 is not drawn."""
+        figure = short_figure()
+        table = "elections-over-time-table"
+        drawn = components.chart("C5", figure, table, "A caption.")
+        assert not [r for r in caplog.records if "C5" in r.getMessage()]
+        assert drawn is not None
+
+    @pytest.mark.expected_chart_failure("C4", count=1)
+    def test_c4_with_c5_s_ticks_is_not_drawn(self) -> None:
+        components.chart(
+            "C4", short_figure(), "elections-over-time-table", "A caption."
+        )
+
+    def test_the_registry_check_wants_a_bool(self) -> None:
+        row = charts.Chart("/elections", "elections-table", short_value_ticks=1)  # type: ignore[arg-type]
+        assert charts.registry_problems({"C1": row}) == ["'C1': not a chart row"]
