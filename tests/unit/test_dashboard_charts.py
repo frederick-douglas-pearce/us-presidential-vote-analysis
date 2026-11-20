@@ -28,7 +28,7 @@ from explore import app as appmod
 from explore import charts, components, labels
 from tests.chart_log import LOGGER, Records, chart_log_checked, chart_log_problems
 from tests.unit.test_dashboard_elections import of_type
-from tests.unit.test_dashboard_export import TEST_FIGURE, render
+from tests.unit.test_dashboard_export import TEST_FIGURE, mount_points, render
 from tests.unit.test_dashboard_guards import RUNTIME_MODULES
 from tests.unit.test_dashboard_theme import (
     EXPLICIT_DARK,
@@ -2061,7 +2061,7 @@ class TestShortValueTicks:
         table = "elections-over-time-table"
         drawn = components.chart("C5", figure, table, "A caption.")
         assert not [r for r in caplog.records if "C5" in r.getMessage()]
-        assert drawn is not None
+        assert mount_points(drawn)
 
     @pytest.mark.expected_chart_failure("C4", count=1)
     def test_c4_with_c5_s_ticks_is_not_drawn(self) -> None:

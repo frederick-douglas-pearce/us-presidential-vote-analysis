@@ -191,9 +191,11 @@ def time_layout(
     tick_px: int = components.YEAR_TICK_FONT_PX,
 ) -> dict[str, Any]:
     """C4, C5 and C7's shared layout (#558, D104): election year along the bottom, the
-    served years' axis in every mode (:func:`explore.components.year_axis`), so a
-    state's years before its first election keep their place; the value up the side
-    from zero, with a few full-number ticks; and the chart's key where a marker is
+    axis of the years the chart shows (:func:`explore.components.year_axis`: every
+    served year, or on the elections pages what the year filters leave, #596, D110),
+    so a state's years before its first election keep their place; the value up the
+    side from zero, with a few full-number ticks (C5 writes its own short, #596); and
+    the chart's key where a marker is
     drawn (``marked``). ``tick_px`` is the year ticks' size (#593: C4 and C5 pass
     :data:`explore.components.YEAR_TICK_NARROW_PX`; C7 takes the default)."""
     layout: dict[str, Any] = {
@@ -213,16 +215,19 @@ def time_layout(
     return layout
 
 
-#: Room for the after band's label above the plot: two lines of 12 px text at
-#: plotly's 1.3 line height (2 × 16 px) and 8 px below it (#558, D104; shared since
-#: #564). The before band's label sits inside its band since #593 and takes none.
+#: Room for a band label above the plot: two lines of 12 px text at plotly's 1.3 line
+#: height (2 × 16 px) and 8 px below it (#558, D104; shared since #564). The after
+#: band's label takes it; the before band's sits inside its band (#593) and takes none,
+#: unless a filter leaves the band under half the axis, when its label sits above the
+#: plot too and takes one more (#596, D110, :func:`pv_bands`).
 BAND_LABEL_PX = 40
 #: How far below the plot's top edge the before band's label sits inside its band
 #: (#593, D109): clear of the band's own edge line.
 BAND_LABEL_INSET_PX = 2
 #: One row of a chart's key above the plot: 14 px text at plotly's 1.3 line height,
 #: rounded up with its padding (#593). A chart reserves whole rows for its key only
-#: where the after band's label must sit above it (:func:`pv_bands`' ``key_px``).
+#: where a band's label must sit above it (:func:`pv_bands`' ``key_px``): the after
+#: band's, or a narrow before band's (#596).
 KEY_ROW_PX = 24
 
 
@@ -361,6 +366,9 @@ class OverTime(NamedTuple):
     missing: bool
     before: bool
     after: bool
+    #: Whether a bar is drawn (#596): C5 writes its short value ticks, and its caption
+    #: explains them, only then. C4 leaves it unset.
+    bars: bool = False
 
 
 def c4_figure(

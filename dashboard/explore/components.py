@@ -149,9 +149,10 @@ YEAR_PAD = 2
 #: this size passes ``tick_px`` to :func:`year_axis`.
 YEAR_TICK_FONT_PX = 14
 #: The year ticks' size on a chart whose plot is narrowed by wide value ticks: C4 and
-#: C5, whose fixed left margin holds C5's "160,000,000" (#593: at 14 px their ticks sat
-#: 4 px apart at 360 px in the browser check, under its 6 px; the owner's fallback at
-#: the plan gate).
+#: C5, whose shared fixed left margin narrows their plots (#593: at 14 px their ticks
+#: sat 4 px apart at 360 px in the browser check, under its 6 px, with that margin at
+#: 112 px; the owner's fallback at the plan gate. #596 narrowed it to 72 px and kept
+#: 12 px).
 YEAR_TICK_NARROW_PX = 12
 
 

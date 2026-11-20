@@ -8,10 +8,12 @@ year's one ``national_pv_denominator`` across N1's rows (:func:`national_pv`).
 The year filters of ``/elections`` narrow both charts, the table and its download
 (#596, D110, amending D107's all-years scope): the page's ``query=`` parser is
 :func:`explore.elections_view.parse_filters`, which drops an old ``state`` key, so it
-still changes nothing. The one-state mode (D100(a),
-(c), (e), (f)) retired with #562: a state's electors appointed are chart C7, on its
-own page. A failed or malformed N1 degrades the section only; the heading, lede and
-success marker stay.
+still changes nothing. The index's popular-vote window and flags are checked as the
+page's (:func:`explore.elections_view.index_rule`, which the filter reads), so a
+disagreement degrades the whole page, as on the majority page. The one-state mode
+(D100(a), (c), (e), (f)) retired with #562: a state's electors appointed are chart
+C7, on its own page. A failed or malformed N1 degrades the section only; the heading,
+lede and success marker stay.
 """
 
 from __future__ import annotations
@@ -31,7 +33,6 @@ from explore import (
     export,
     labels,
     over_time,
-    query,
 )
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
@@ -81,7 +82,7 @@ OVER_TIME_UNAVAILABLE = (
 )
 
 #: C5's value-axis format (#596, D110): d3's SI form, trailing zeros trimmed ("50M").
-C5_TICKFORMAT = "~s"
+C5_TICKFORMAT = charts.SHORT_TICKFORMAT
 
 #: Each C5 marker label's symbol, so no two marker series differ by color alone.
 _C5_SYMBOLS = {
@@ -173,7 +174,8 @@ def _c5_figure(
     """C5's figure (#436, D100): the total popular vote of each row with one, as a bar
     at its year. The years before and after the popular-vote window (``window``, read
     from ``coverage``) are a shaded band, labeled inside it at its top (the band after
-    the window above the plot, #593, D109), which alone marks a held popular vote
+    the window, and a before band under half the axis, above the plot: #593, D109;
+    #596, D110), which alone marks a held popular vote
     outside it; every other row with nothing to draw is a marker, one
     series per label (:data:`explore.labels.C5_MARKER_LABELS`), named in the chart's
     key (#558, D104), wherever it falls, inside the band included. All states only
@@ -232,7 +234,12 @@ def _c5_figure(
     if bands.top_px:
         layout["margin"] = {"t": bands.top_px}
     return over_time.OverTime(
-        {"data": data, "layout": layout}, False, bool(marks), bands.before, bands.after
+        {"data": data, "layout": layout},
+        False,
+        bool(marks),
+        bands.before,
+        bands.after,
+        bool(drawn),
     )
 
 
@@ -247,16 +254,11 @@ def _c4_caption(c4: over_time.OverTime) -> str:
     return " ".join(parts)
 
 
-def c5_draws_a_bar(c5: over_time.OverTime) -> bool:
-    """Whether C5 draws a bar, so its value axis writes ticks (#596)."""
-    return any(trace.get("type") == "bar" for trace in c5.figure["data"])
-
-
 def _c5_caption(c5: over_time.OverTime, window: tuple[int, int]) -> str:
     """C5's caption: what the total counts, what a bar adds up, and what the band and
     the markers mean where drawn."""
     parts = [labels.C5_BASIS, labels.C5_ALL_STATES]
-    if c5_draws_a_bar(c5):
+    if c5.bars:
         parts.append(labels.C5_SHORT_TICKS_NOTE)
     if c5.before:
         parts.append(labels.C5_BEFORE_NOTE.format(pv_year_min=window[0]))
@@ -285,42 +287,44 @@ def _over_time_section(
     has_pv: dict[int, bool],
     chosen: elections_view.Filters,
     search: str,
+    window: tuple[int, int],
+    served_span: tuple[int, int],
 ) -> tuple[list[Any], bool]:
     """C4 and C5's section (#436, D100) and whether its filters rendered: the year
     filters, then both charts and their one companion table over the years they show
     (#596, D110), or :func:`explore.elections_view.no_match` when they show none; or,
     when N1 could not be read (``summary`` is ``None``) or is malformed,
-    :data:`OVER_TIME_UNAVAILABLE` only, with no filters. N1 is checked over every
-    served year before the filters apply. The ``try`` covers everything built from
+    :data:`OVER_TIME_UNAVAILABLE` only, with no filters. Every served year's
+    allotment, total and cells are read before the filters apply (#596's review,
+    cr.1), so a filtered view never shows what the default view would refuse. The
+    ``try`` covers everything built from
     N1; never ``components.chart``, which no page catches around (D095(f))."""
     try:
         if summary is None:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
         coverage = index["meta"]["provenance"]["coverage"]
-        window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
         items = elections_view.n1_items(index, summary)
         totals = national_pv(summary, sorted(items))
-        first, last = elections_view.span(coverage)
-        controls = elections_view.filter_controls(first, last, chosen)
-        years = [
-            year
-            for year in sorted(items)
-            if elections_view.shows(year, has_pv[year], chosen)
+        every = _all_states_points(items, totals, coverage)
+        controls = elections_view.filter_controls(*served_span, chosen)
+        for point in every:
+            _over_time_row(point)
+        points = [
+            point
+            for point in every
+            if elections_view.shows(point.year, has_pv[point.year], chosen)
         ]
-        if not years:
+        if not points:
             return [controls, elections_view.no_match()], True
-        items = {year: items[year] for year in years}
+        years = [point.year for point in points]
         rows: list[dict[str, Any]] = [
             {
-                "year": year,
-                "electoral_denominator": items[year]["electoral_denominator"],
-                "national_pv_denominator": totals[year],
+                "year": point.year,
+                "electoral_denominator": point.appointed,
+                "national_pv_denominator": point.total,
             }
-            for year in years
+            for point in points
         ]
-        if not rows:
-            raise TypeError("the over-time table has no rows")
-        points = _all_states_points(items, totals, coverage)
         download = export.Download(
             filename="elections-electors-and-popular-vote-all-states.csv",
             name="electors appointed and the total popular vote, all states",
@@ -390,11 +394,13 @@ def render(
     # the layout, which degrades the whole page; so do its popular-vote flags, which
     # the filter reads (#596).
     elections_view.served_years(index)
-    _, has_pv = elections_view.index_rule(index)
+    window, has_pv = elections_view.index_rule(index)
     chosen = elections_view.filters(pairs or [], coverage)
     first, last = elections_view.span(coverage)
     search = elections_view.applied_search(chosen, first, last)
-    section, filtered = _over_time_section(index, summary, has_pv, chosen, search)
+    section, filtered = _over_time_section(
+        index, summary, has_pv, chosen, search, window, (first, last)
+    )
     return html.Div(
         [
             html.H1(HEADING),

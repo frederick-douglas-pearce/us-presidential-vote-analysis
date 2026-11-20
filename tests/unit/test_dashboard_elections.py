@@ -599,6 +599,21 @@ class TestRequestBudget:
         assert len(bucket.waits) == 1
 
     @pytest.mark.parametrize(
+        "path", [elections_view.MAJORITY, elections_view.OVER_TIME]
+    )
+    def test_a_chart_page_s_filter_changes_make_no_api_request(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        """#596 (D110), the AC on the two chart pages: only the first render fills N1,
+        on a miss; every filtered render after it is answered from the cache."""
+        _, calls, bucket = cached_client(monkeypatch)
+        for search in ("", "?pv=1", "?year_from=1900", "?year_from=1900&year_to=1950"):
+            response = route(path, search)
+            assert response.status_code == 200, search
+            assert calls == FILLS, (path, search)
+            assert len(bucket.waits) == 1, (path, search)
+
+    @pytest.mark.parametrize(
         ("changed", "years", "pv", "current", "written"),
         [
             (YEARS_ID, [1900, LAST], [], "", "?year_from=1900"),
@@ -2601,6 +2616,38 @@ class TestSharedFilters:
         note: Any = elections_view.no_match()
         assert (note.id, note.className) == (elections_view.NO_MATCH_ID, "empty")
         assert note.children == labels.NO_ELECTIONS_MATCH
+
+    @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
+    def test_no_page_defines_its_own_copy_of_a_shared_helper(self, path: str) -> None:
+        """#596's guard-efficacy review: the AC says shared, not copied. No elections
+        page module defines a function or class of these names; any it holds is
+        ``elections_view``'s own object."""
+        names = {
+            "parse_filters",
+            "Filters",
+            "filters",
+            "span",
+            "shows",
+            "applied_search",
+            "filter_controls",
+            "no_match",
+            "merged_search",
+            "next_search",
+            "on_filter_change",
+            "index_rule",
+        }
+        page = dash.page_registry[ELECTIONS_PAGES[path]]
+        module = page["module"].removeprefix("pages.")
+        tree = ast.parse((PACKAGE / "pages" / f"{module}.py").read_text("utf-8"))
+        defined = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        }
+        assert not defined & names, defined & names
+        own = page["layout"].__globals__
+        for name in names & set(own):
+            assert own[name] is getattr(elections_view, name), (path, name)
 
     def test_the_list_page_shares_the_helpers(self) -> None:
         own = PAGE["layout"].__globals__

@@ -1051,5 +1051,47 @@ class TestNarrowBand:
         assert before["yshift"] == 24 + over_time.BAND_LABEL_PX
         assert bands.top_px == over_time.TOP_PX + 24 + 2 * over_time.BAND_LABEL_PX
 
-    def test_the_rule_is_half_the_axis(self) -> None:
+    @staticmethod
+    def share(years: list[int], pv_min: int) -> float:
+        before = [y for y in years if y < pv_min]
+        low, high = components.year_edges(years, before[0], before[-1])
+        pad = components.YEAR_PAD
+        return (high - low) / (max(years) + pad - (min(years) - pad))
+
+    @pytest.mark.parametrize(
+        ("years", "pv_min", "inside"),
+        [
+            # A band just over half of the padded axis (0.545) keeps its label inside.
+            ([1900, 1904, 1908, 1912, 1916, 1920, 1924, 1928, 1932, 1936, 1940], 1924, True),
+            # Exactly half: inside (the rule is "at least").
+            ([1900, 1904, 1908, 1912, 1916, 1920], 1912, True),
+            # Just under half (0.455): above the plot.
+            ([1900, 1904, 1908, 1912, 1916, 1920, 1924, 1928, 1932, 1936, 1940], 1920, False),
+        ],
+    )
+    def test_the_rule_is_at_least_half_the_padded_axis(
+        self, years: list[int], pv_min: int, inside: bool
+    ) -> None:
+        """guard-efficacy .3: the threshold at its boundary, measured on the padded
+        axis by the band's edges, never by its year count."""
+        share = self.share(years, pv_min)
+        assert (share >= over_time.BAND_INSIDE_SHARE) is inside, share
+        bands = over_time.pv_bands(years, (pv_min, 2024), "before", "after", key_px=24)
+        (note,) = bands.annotations
+        assert note["yanchor"] == ("top" if inside else "bottom"), share
+        assert bands.top_px == (
+            0 if inside else over_time.TOP_PX + 24 + over_time.BAND_LABEL_PX
+        )
+
+    def test_the_cases_sit_at_the_boundary(self) -> None:
+        """The cases above straddle 0.5 closely, so a threshold anywhere else, a strict
+        comparison, or the unpadded span would flip one of them."""
+        years = [1900, 1904, 1908, 1912, 1916, 1920, 1924, 1928, 1932, 1936, 1940]
+        shares = [
+            self.share(years, 1924),
+            self.share([1900, 1904, 1908, 1912, 1916, 1920], 1912),
+            self.share(years, 1920),
+        ]
+        assert shares[0] > 0.5 and shares[1] == 0.5 and shares[2] < 0.5
+        assert all(abs(x - 0.5) < 0.1 for x in shares), shares
         assert over_time.BAND_INSIDE_SHARE == 0.5

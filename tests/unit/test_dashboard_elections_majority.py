@@ -945,7 +945,7 @@ class TestC2Methods:
 
     def test_c2_paints_only_measured_tokens(self) -> None:
         """g.8: every color C2's figure paints is one the theme tests hold to its ratio
-        on the page and on the band's fill; the majority label is in the text color."""
+        on the page and on the band's fill; the band labels are in the text color."""
         from tests.unit.test_dashboard_theme import CHART_MARKS
 
         figure = c2_figure(
@@ -1447,3 +1447,38 @@ class TestC2Crossbar:
         sizes = {t["name"]: t["marker"]["size"] for t in data if "marker" in t}
         assert sizes[labels.LABELS["ec_share_full"]] == 7
         assert sizes[labels.LABELS["pv_share"]] == 8
+
+
+class TestC2ReviewGuards:
+    """Guards #596's round-1 review found missing."""
+
+    def test_a_hidden_year_s_row_defect_degrades_the_filtered_view_too(self) -> None:
+        """cr.1: every served year's cells are built before the filters apply, so a
+        filtered view never shows what the default view refuses (D110(a))."""
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r
+            for r in summary["data"]
+            if r["year"] == 1828 and r["electoral_rank"] == 1
+        ]
+        del row["took_office"]
+        for pairs in ([], [("year_from", "1900")]):
+            tree = MOD["render"](copy.deepcopy(BODY), copy.deepcopy(summary), pairs)
+            assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None, pairs
+            assert find(tree, C2) is None, pairs
+
+    def test_every_trace_carries_its_stable_uid(self) -> None:
+        """guard-efficacy .4: the e2e tests select traces by ``uid``; each trace has
+        one, none twice, and the four the e2e tests name sit on the right series."""
+        data = c2_figure(render_c2())["data"]
+        uids = [t.get("uid") for t in data]
+        assert None not in uids and len(set(uids)) == len(uids)
+        by_uid = {t["uid"]: t for t in data}
+        assert by_uid["c2pv"]["name"] == labels.LABELS["pv_share"]
+        assert "marker" in by_uid["c2pv"]
+        assert by_uid["c2connector"]["name"] == labels.LABELS["pv_share"]
+        assert "marker" not in by_uid["c2connector"]
+        assert by_uid["c2hybrid"]["name"] == labels.C2_HYBRID_KEY
+        assert by_uid["c2ec"]["name"] == labels.LABELS["ec_share_full"]
+        assert by_uid["c2pvstrip"]["name"] == labels.C2_PV_DIFFERENT_KEY
+        assert by_uid["c2line"]["name"] == labels.C2_MAJORITY_KEY

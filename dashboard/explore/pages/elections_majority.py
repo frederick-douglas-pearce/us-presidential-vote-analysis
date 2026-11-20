@@ -668,14 +668,15 @@ def _leader_section(
     has_pv: dict[int, bool],
     chosen: elections_view.Filters,
     search: str,
+    served_span: tuple[int, int],
 ) -> tuple[list[Any], bool]:
     """C2's section (#434, D096) and whether its filters rendered: the year filters,
     then the chart and its companion table over the years they show (#596, D110), or
     :func:`explore.elections_view.no_match` when they show none; or, when N1 could not
     be read (``summary`` is ``None``) or is malformed, :data:`C2_UNAVAILABLE` only, with
-    no filters (they would narrow nothing). N1 is checked over every served year
-    before the filters apply, so a filtered view never shows what the default view
-    would refuse.
+    no filters (they would narrow nothing). Every served year's leader is read and its
+    cells and table row built before the filters apply (#596's review, cr.1), so a
+    filtered view never shows what the default view would refuse.
     The page's heading is the section's (#562). The index's popular-vote window and
     flags (``window``, ``has_pv``) are checked by :func:`render` as the page's. The
     ``try`` covers everything built from N1 (the validation, the figure, the cells, and
@@ -686,16 +687,20 @@ def _leader_section(
         if summary is None:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
         coverage = index["meta"]["provenance"]["coverage"]
-        first, last = elections_view.span(coverage)
-        rows = [
-            row
-            for row in leaders(index, summary, has_pv)
+        every = leaders(index, summary, has_pv)
+        every_cells = [_leader_cells(row, coverage) for row in every]
+        for row, cell in zip(every, every_cells, strict=True):
+            _leader_row(row, cell)
+        kept = [
+            (row, cell)
+            for row, cell in zip(every, every_cells, strict=True)
             if elections_view.shows(row["year"], row["has_popular_vote"], chosen)
         ]
-        controls = elections_view.filter_controls(first, last, chosen)
-        if not rows:
+        controls = elections_view.filter_controls(*served_span, chosen)
+        if not kept:
             return [controls, elections_view.no_match()], True
-        cells = [_leader_cells(row, coverage) for row in rows]
+        rows = [row for row, _ in kept]
+        cells = [cell for _, cell in kept]
         c2 = _c2_figure(rows, cells, window)
         download = export.Download(
             filename="elections-electoral-college-leaders.csv",
@@ -752,7 +757,9 @@ def render(
     chosen = elections_view.filters(pairs or [], coverage)
     first, last = elections_view.span(coverage)
     search = elections_view.applied_search(chosen, first, last)
-    section, filtered = _leader_section(index, summary, window, has_pv, chosen, search)
+    section, filtered = _leader_section(
+        index, summary, window, has_pv, chosen, search, (first, last)
+    )
     return html.Div(
         [
             html.H1(HEADING),

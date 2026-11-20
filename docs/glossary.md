@@ -625,18 +625,19 @@ articles and announcements). Every rule binds all three unless the rule states a
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year axis of C2 on `/elections/majority`, of C4 and C5 on
-  `/elections/over-time` and of C7 on `/state/<usps>`, a numeric axis with a tick every 40 years;
-  the year-range slider (`/elections`, `/elections/majority`, `/elections/over-time`,
-  `/state/<usps>`, `/state/<usps>/per-capita`), labeled "Years" on each (`labels.YEARS_FILTER`; a
-  literal on the two state pages) and offered by each page's `FILTER_SENTENCE`; the label of the
-  year control on `/candidate/<slug>`, and the lede sentence that offers it (`FILTER_SENTENCE` in
-  `pages/candidate.py`); the election pages' headings: `HEADING` on the overview
-  (`pages/election.py`), `STATES_HEADING` (`pages/election_states.py`) and `PER_CAPITA_HEADING`
-  (`pages/election_per_capita.py`), each the `H1` that page's `render` builds and the start of its
-  title (`title`); on the degraded state, and in the title before a year is checked, "Election" on
-  the overview (a literal in both `layout` and `title` there), `STATES_GENERIC_HEADING` and
-  `PER_CAPITA_GENERIC_HEADING`; the earlier and later links on every election page
-  (`labels.EARLIER_LINK` and `labels.LATER_LINK`) and their accessible names
+  `/elections/over-time` and of C7 on `/state/<usps>`, a numeric axis with a tick every 40 years
+  over every served year, and, when a year filter leaves a shorter span, every 4, 8, 10 or 20 years
+  (the smallest that writes at most five ticks); the year-range slider (`/elections`,
+  `/elections/majority`, `/elections/over-time`, `/state/<usps>`, `/state/<usps>/per-capita`),
+  labeled "Years" on each (`labels.YEARS_FILTER`; a literal on the two state pages) and offered by
+  each page's `FILTER_SENTENCE`; the label of the year control on `/candidate/<slug>`, and the lede
+  sentence that offers it (`FILTER_SENTENCE` in `pages/candidate.py`); the election pages' headings:
+  `HEADING` on the overview (`pages/election.py`), `STATES_HEADING` (`pages/election_states.py`) and
+  `PER_CAPITA_HEADING` (`pages/election_per_capita.py`), each the `H1` that page's `render` builds
+  and the start of its title (`title`); on the degraded state, and in the title before a year is
+  checked, "Election" on the overview (a literal in both `layout` and `title` there),
+  `STATES_GENERIC_HEADING` and `PER_CAPITA_GENERIC_HEADING`; the earlier and later links on every
+  election page (`labels.EARLIER_LINK` and `labels.LATER_LINK`) and their accessible names
   (`labels.ELECTION_NAV_LABEL` on the overview and `labels.ELECTION_NAV_SECTION_LABEL` on the
   subpages, read by assistive technology, not shown). The links sit in a bordered bar above the page
   heading, the earlier link at the left and the later at the right, each with a chevron pointing its
@@ -771,15 +772,18 @@ articles and announcements). Every rule binds all three unless the rule states a
   - The solid upward triangle is C2's alone; C4's open upward triangle means no electors
     appointed (D104(d) as D108 extends it).
   - Bands over the years outside the popular-vote window, from the index's `coverage`
-    (`over_time.pv_bands`, shared with C5); the before band's label sits inside the band at its
-    top; the after band's above the plot.
+    (`over_time.pv_bands`, shared with C5); the before band's label sits inside the band at its top
+    when the band spans at least half the year axis, and otherwise above the plot at the band's left
+    edge (only a year filter leaves it that narrow; #596, D110); the after band's above the plot.
   - Election year runs along the bottom as a number, so a gap between served elections is drawn at
-    its true width, with a tick every 40 years. The value axis runs up the side, with ticks from 0
-    to 100% (it runs to 112% to hold the strip). The line is horizontal at 0.5 and the test is
-    strict, so a point on the line is not a majority. It is drawn under every mark, across the year
-    axis's whole range, with no hover. It has no label in the plot: on every view it is the last
-    entry in the chart's key, `labels.C2_MAJORITY_KEY`, so a year filter cannot set its words among
-    the marks (#596, D110, replacing the in-plot label of D104(e) as D108 amended it).
+    its true width, with a tick every 40 years over every served year, and, when a year filter
+    leaves a shorter span, every 4, 8, 10 or 20 years (the smallest that writes at most five ticks).
+    The value axis runs up the side, with ticks from 0 to 100% (it runs to 112% to hold the strip).
+    The line is horizontal at 0.5 and the test is strict, so a point on the line is not a majority.
+    It is drawn under every mark, across the year axis's whole range, with no hover. It has no label
+    in the plot: on every view it is the last entry in the chart's key, `labels.C2_MAJORITY_KEY`, so
+    a year filter cannot set its words among the marks (#596, D110, replacing the in-plot label of
+    D104(e) as D108 amended it).
   - A share or score that is not a finite number draws a marker at zero with no text label, one
     point per label and year (two missing marks of one label in one year share it, their hovers
     joined), in a
@@ -1011,13 +1015,16 @@ articles and announcements). Every rule binds all three unless the rule states a
     label (D104). In C5 the band alone marks a year outside the popular-vote window, which gets
     no marker; every other cause gets a marker wherever it falls, inside the band included.
   - Both charts put election year on one numeric axis along the bottom (D100(a) as amended by D104
-    and D107), with a tick every 40 years. The value axis runs up the side: C4's ticks are full
-    numbers; C5's are short (d3's SI form with trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"),
-    the one exception to the chart rule (C5's `CHARTS` row, `short_value_ticks`, #596, D110), and
-    with no bar drawn C5 writes no value ticks. Their shared left margin is sized for C5's short
-    ticks. C5's band is vertical, spanning the years outside the window, and its label sits inside
-    the band at its top, beginning "Shaded:"; the after band's label, where drawn, sits above the
-    plot. The key sits above the plot.
+    and D107), with a tick every 40 years over every served year, and, when a year filter leaves a
+    shorter span, every 4, 8, 10 or 20 years (the smallest that writes at most five ticks). The
+    value axis runs up the side: C4's ticks are full numbers; C5's are short (d3's SI form with
+    trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"), the one exception to the chart rule (C5's
+    `CHARTS` row, `short_value_ticks`, #596, D110), and with no bar drawn C5 writes no value ticks.
+    Their shared left margin is sized for C5's short ticks. C5's band is vertical, spanning the
+    years outside the window, and its label sits inside the band at its top when the band spans at
+    least half the year axis, and otherwise above the plot at the band's left edge (only a year
+    filter leaves it that narrow; #596, D110), beginning "Shaded:"; the after band's label, where
+    drawn, sits above the plot. The key sits above the plot.
   - The band's bounds come from `meta.provenance.coverage`. Hover text is the table's cells.
   - If `/v1/elections/summary` cannot be read or is malformed, the section shows
     `OVER_TIME_UNAVAILABLE` only; the section links, heading and lede still show.
@@ -1355,12 +1362,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   it reads *Not in this dataset* with `labels.PARTY_NULL_NOTE`. T2 and T4 name the window's side
   (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`). C2's leader table follows T3's rule (`has_popular_vote`, #564).
 - **Shown as:** `labels.NOT_APPLICABLE` (panel; T3 and C2's leader table through
-  `labels.national_pv`, called from `pages/election.py` and `pages/elections_majority.py`); `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no
-  popular-vote bar is drawn, the title `labels.C1_TITLE_NO_PV` and the caption sentence
-  `labels.C1_NO_PV_CAPTION`; `labels.NOT_APPLICABLE` as the national total's cell outside the
-  window (the C4/C5 table); C5's band (vertical, over the years outside the window) and its labels
-  `labels.C5_BEFORE_BAND`, inside the band at its top, and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE`
-  and `labels.C5_AFTER_NOTE`. In C2 (#564): the bands (`labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`, reused), `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, and `labels.NOT_APPLICABLE` in its four appended columns.
+  `labels.national_pv`, called from `pages/election.py` and `pages/elections_majority.py`);
+  `NO_PV_SENTENCE` in `pages/election.py` above T3; in C1, where no popular-vote bar is drawn, the
+  title `labels.C1_TITLE_NO_PV` and the caption sentence `labels.C1_NO_PV_CAPTION`;
+  `labels.NOT_APPLICABLE` as the national total's cell outside the window (the C4/C5 table); C5's
+  band (vertical, over the years outside the window) and its labels `labels.C5_BEFORE_BAND`, inside
+  the band at its top (above the plot when a year filter leaves the band under half the axis, #596),
+  and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE` and
+  `labels.C5_AFTER_NOTE`. In C2 (#564): the bands (`labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`,
+  reused), `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, and `labels.NOT_APPLICABLE` in its four
+  appended columns.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,
   E9-S3, "Election panel"; wording: owner decision, 2026-10-10, #348.
 - **Not:** "No" (a false flip). A null inside the window, which names no cause.

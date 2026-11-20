@@ -179,6 +179,24 @@ def test_filtered_c2_is_readable_at_360(page: Page, query: str) -> None:
     for note in boxes(page, f"{C2} .annotation-text"):
         for mark in boxes(page, C2_MARKS):
             assert not overlaps(note, mark), (note, mark)
+    # Each band's label inside its band, or above the plot (#596, D110): the bands are
+    # the shapes the plot's full height.
+    bands = [
+        b
+        for b in boxes(page, f"{C2} .layer-below .shapelayer path")
+        if abs(b["h"] - plot["h"]) < 2
+    ]
+    for note in boxes(page, f"{C2} .annotation-text"):
+        above = note["y"] + note["h"] <= plot["y"] + 1
+        inside = any(
+            band["x"] - 1 <= note["x"]
+            and note["x"] + note["w"] <= band["x"] + band["w"] + 1
+            and note["y"] >= plot["y"] - 1
+            for band in bands
+        )
+        assert above or inside, (query, note, bands)
+        if query == "?year_from=1968":
+            assert above, note  # a band two elections wide: its label above the plot
 
 
 @pytest.mark.plotlyjs_fetches(1)
