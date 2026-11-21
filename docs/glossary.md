@@ -507,7 +507,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `EcPvRow.electoral_count_status` and `electoral_count_status_reason`; D043; D044; D047; D048 §4;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "When the record itself won't say" (the
   reader wording for not counted and disputed).
-- **Not:** Appointed electors who never voted, a different gap (`ELECTORAL_VOTE_SHORTFALLS`).
+- **Not:** Appointed electors who never voted, a different gap (`ELECTORAL_VOTE_SHORTFALLS`); and
+  *Electors without a counted vote*, which adds votes never cast to the votes not counted or
+  disputed.
 - **Status:** settled
 
 ### Data version
@@ -1008,6 +1010,27 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** *Electoral votes cast.*
 - **Status:** settled
 
+### Electoral votes outside the top two (`electoral_votes_outside_top_two`)
+- **Plain:** In one election, how many electoral votes were cast for candidates who finished
+  below second place.
+- **Precise:** `electoral_votes_outside_top_two` on `ElectionSummary`: the sum of
+  `national_electoral_votes` (cast) over the year's candidates whose `electoral_rank` is 3 or
+  more. Rank is ordered by votes counted and candidates with equal counted totals share a rank, so
+  a tie at second leaves every tied candidate inside the top two, and a tie at first makes the next
+  candidate second. The sum adds votes cast: 1872 is 24, including Greeley's 3 cast and 0
+  counted (he ranks below second). Computed when the data file is built, never by the API at
+  request time. A whole number for every year served; 0 is a real value.
+- **Shown as:** on the API's `/docs` page, the `ElectionSummary.electoral_votes_outside_top_two`
+  field description in `src/usvote/api/models.py`; served on each `elections` item of
+  `/v1/elections/summary` and in `election` on `/v1/elections/{year}` and
+  `/v1/elections/{year}/summary`. Not shown on the dashboard until #563 adds a `LABELS` key.
+- **Source:** #570 (figure approved by the owner, 2026-11-17); `ElectionSummary` in
+  `src/usvote/api/models.py`; the build in `src/usvote/snapshot.py`; D046 §4; D094(iv); reader
+  wording: `ba` spec for #570, approved at its plan gate.
+- **Not:** A sum of votes counted. A ranking by votes cast. "Third-party votes": rank, not party,
+  decides who is outside. The candidates' number (*Candidates with electoral votes*).
+- **Status:** settled
+
 ### Electors appointed and total popular vote over time (charts C4 and C5)
 - **Plain:** Two charts on their own page, one of the Elections pages, with election years running
   left to right, oldest at the left. Each bar is one election, for all states together. The first
@@ -1078,6 +1101,26 @@ articles and announcements). Every rule binds all three unless the rule states a
   - "no popular vote", which the band is not;
   - a missing figure, which a C4 zero-allotment marker is not;
   - a zero, which a C5 marker is not.
+- **Status:** settled
+
+### Electors without a counted vote (`electors_without_a_counted_vote`)
+- **Plain:** In one election, how many of the electors appointed have no vote in Congress's
+  final count, either because they never voted or because their vote was cast but not counted.
+- **Precise:** `electors_without_a_counted_vote` on `ElectionSummary`: `electoral_denominator`
+  minus the year's electoral votes counted, added up over its candidates. It spans both gaps of
+  the ladder appointed ≥ cast ≥ counted: votes never cast (`ELECTORAL_VOTE_SHORTFALLS`: 1832
+  Maryland 2, 1864 Nevada 1, 2000 District of Columbia 1) and votes cast whose count status is
+  `not_counted` or `disputed` (1868: 9, Georgia, disputed; 1872: 17, not counted). A state with
+  no electors appointed (1864, 1868) adds nothing. Computed when the data file is built; a whole
+  number for every year served; 0 is a real value.
+- **Shown as:** on the API's `/docs` page, the `ElectionSummary.electors_without_a_counted_vote`
+  field description in `src/usvote/api/models.py`; served where *Electoral votes outside the top
+  two* is. Not shown on the dashboard until #563 adds a `LABELS` key.
+- **Source:** #570 (figure approved by the owner, 2026-11-17); `ElectionSummary`;
+  `ELECTORAL_VOTE_SHORTFALLS` and the count-status overrides in `src/usvote/transform.py`; D041;
+  D044; D046; reader wording and the name: `ba` spec for #570, approved at its plan gate.
+- **Not:** The `not_counted` count status, which is only part of the second gap. "Electors not
+  counted": electors are appointed, votes are counted. Faithless votes, which are cast and counted.
 - **Status:** settled
 
 ### Faithless vote (faithless elector)
@@ -1975,11 +2018,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   College, the popular vote and the hybrid), whether the popular vote or the hybrid would
   have picked someone other than the Electoral College's winner or leader, each method's
   margin, whether any candidate won a majority of the electors appointed, and the share of
-  electors from states that held a popular vote.
+  electors from states that held a popular vote. It also gives how many electoral votes were
+  cast for candidates below second place, and how many electors appointed have no vote in
+  Congress's count.
 - **Precise:** One object per election year (`ElectionSummary`): `year`,
   `electoral_denominator`, `ec_winner`, `pv_winner`, `hybrid_winner` and their `_slug`
   fields, `ec_determinative`, `pv_coverage`, `pv_flip`, `hybrid_flip`, `ec_margin`,
-  `pv_margin`, `hybrid_margin`. Served as `election` on `/v1/elections/{year}` and
+  `pv_margin`, `hybrid_margin`, `electoral_votes_outside_top_two`,
+  `electors_without_a_counted_vote`. Two electoral-vote tallies ride on the same object:
+  `electoral_votes_outside_top_two` and `electors_without_a_counted_vote` (see their entries);
+  they are not part of the comparison. Served as `election` on `/v1/elections/{year}` and
   `/v1/elections/{year}/summary`, where it is null if the data has no comparison for a
   served year, and as each item of `elections` on `/v1/elections/summary`, one per election
   year, oldest first. Outside the popular-vote window the popular-vote and hybrid fields are

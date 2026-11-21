@@ -82,28 +82,33 @@ def test_schema_version_mismatch_fails_loud_at_open(
 def test_an_older_schema_snapshot_reports_the_version_not_a_missing_table(
     snapshot_path: str, tmp_path: Path
 ) -> None:
-    """A v4 snapshot under a v5 server must say "schema_version 4 != 5" (#245, #386).
+    """A v5 snapshot under a v6 server must say "schema_version 5 != 6" (#245, #570).
 
-    A v4 ``snapshot_meta`` lacks the ``usgov_*`` columns, so a reader that fetched the
-    full row before comparing versions would fail on a missing column and report "not a
+    A v5 ``hybrid_summary`` lacks #570's two tally columns, so a reader that touched the
+    table before comparing versions would fail on a missing column and report "not a
     valid usvote snapshot" — the wrong diagnosis at exactly the snapshot↔image cutover
     (D034) where a mismatch is expected. This builds that older shape by dropping the
-    two columns and writing the old version number.
+    two columns and writing the old version number. (Until #570 the same test built a
+    v4 shape by dropping the ``usgov_*`` meta columns, #386.)
     """
     import shutil
     import sqlite3
 
-    old = tmp_path / "v4.sqlite"
+    old = tmp_path / "v5.sqlite"
     shutil.copy(snapshot_path, old)
     conn = sqlite3.connect(old)
     try:
-        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN usgov_source")
-        conn.execute("ALTER TABLE snapshot_meta DROP COLUMN usgov_license")
-        conn.execute("UPDATE snapshot_meta SET schema_version = 4")
+        conn.execute(
+            "ALTER TABLE hybrid_summary DROP COLUMN electoral_votes_outside_top_two"
+        )
+        conn.execute(
+            "ALTER TABLE hybrid_summary DROP COLUMN electors_without_a_counted_vote"
+        )
+        conn.execute("UPDATE snapshot_meta SET schema_version = 5")
         conn.commit()
     finally:
         conn.close()
-    with pytest.raises(SnapshotError, match=r"schema_version 4 != this server's 5"):
+    with pytest.raises(SnapshotError, match=r"schema_version 5 != this server's 6"):
         SnapshotRepository.open(str(old))
 
 

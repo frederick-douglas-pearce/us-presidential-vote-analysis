@@ -105,7 +105,15 @@ def _run(
 
 def _body(years_in_data: list[int], years_in_elections: list[int]) -> str:
     data = [{"year": y, "candidate_slug": f"c-{i}"} for i, y in enumerate(years_in_data)]
-    elections = [{"year": y} for y in years_in_elections]
+    # Since #570 every item carries both electoral-vote tallies as whole numbers.
+    elections = [
+        {
+            "year": y,
+            "electoral_votes_outside_top_two": 0,
+            "electors_without_a_counted_vote": 0,
+        }
+        for y in years_in_elections
+    ]
     return json.dumps(
         {"data": data, "elections": elections, "meta": {"count": len(data)}}
     )
@@ -126,7 +134,7 @@ def test_the_block_is_found_in_the_workflow() -> None:
 def test_a_consistent_body_passes(tmp_path: Path) -> None:
     result = _run(tmp_path, _body([2016, 2016, 2020], [2016, 2020]))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "✓ /v1/elections/summary: 200, this snapshot, 3 rows over 2 elections" in (
+    assert "✓ /v1/elections/summary: 200, this snapshot, 3 rows over 2 elections, 0 without both tallies" in (
         result.stdout
     )
     assert "END REACHED" in result.stdout
@@ -138,8 +146,9 @@ def test_an_inconsistent_body_fails_with_its_own_message(tmp_path: Path) -> None
     result = _run(tmp_path, _body([2016, 2020], [2016]))
     assert result.returncode == 1
     assert (
-        "::error::/v1/elections/summary is inconsistent ('2 rows over 1 elections') — "
-        "meta.count, data and elections disagree" in result.stdout
+        "::error::/v1/elections/summary is inconsistent ('2 rows over 1 elections, 0 without both tallies') — "
+        "meta.count, data and elections disagree, or an election lacks a tally"
+        in result.stdout
     )
     assert "END REACHED" not in result.stdout
     # It fails at once: a bad body is a real answer, never retried.
@@ -150,13 +159,13 @@ def test_an_inconsistent_body_fails_with_its_own_message(tmp_path: Path) -> None
 def test_an_empty_body_is_inconsistent(tmp_path: Path) -> None:
     result = _run(tmp_path, _body([], []))
     assert result.returncode == 1
-    assert "is inconsistent ('0 rows over 0 elections')" in result.stdout
+    assert "is inconsistent ('0 rows over 0 elections, 0 without both tallies')" in result.stdout
 
 
 def test_a_year_twice_in_elections_is_inconsistent(tmp_path: Path) -> None:
     result = _run(tmp_path, _body([2016], [2016, 2016]))
     assert result.returncode == 1
-    assert "is inconsistent ('1 rows over 2 elections')" in result.stdout
+    assert "is inconsistent ('1 rows over 2 elections, 0 without both tallies')" in result.stdout
 
 
 def test_a_count_that_disagrees_with_data_is_inconsistent(tmp_path: Path) -> None:
@@ -164,7 +173,31 @@ def test_a_count_that_disagrees_with_data_is_inconsistent(tmp_path: Path) -> Non
     body["meta"]["count"] = 5
     result = _run(tmp_path, json.dumps(body))
     assert result.returncode == 1
-    assert "is inconsistent ('2 rows over 2 elections')" in result.stdout
+    assert "is inconsistent ('2 rows over 2 elections, 0 without both tallies')" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, -1, True, 1.0, "3"],
+    ids=["missing", "negative", "bool", "float", "string"],
+)
+@pytest.mark.parametrize(
+    "key", ["electoral_votes_outside_top_two", "electors_without_a_counted_vote"]
+)
+def test_an_election_without_a_whole_tally_is_inconsistent(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    """#570: each item must carry both tallies as ints >= 0 (a bool is not an int)."""
+    body = json.loads(_body([2016, 2020], [2016, 2020]))
+    if value is None:
+        del body["elections"][1][key]
+    else:
+        body["elections"][1][key] = value
+    result = _run(tmp_path, json.dumps(body))
+    assert result.returncode == 1
+    assert "is inconsistent ('2 rows over 2 elections, 1 without both tallies')" in (
+        result.stdout
+    )
 
 
 def test_a_hostile_body_is_unparseable_and_never_printed(tmp_path: Path) -> None:
