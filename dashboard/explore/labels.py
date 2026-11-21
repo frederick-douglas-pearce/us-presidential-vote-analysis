@@ -703,6 +703,12 @@ METRIC_LABELS: dict[str, str] = {
     "elections_shown": "Showing {shown} of {total} elections",
     "ec_margin_mean": "Average electoral margin",
     "pv_margin_mean": "Average popular-vote margin",
+    # The counts on /elections/majority (#569, D112; ba spec, approved by the owner at
+    # #569's plan gate, 2026-11-21).
+    "ec_no_majority_count": (
+        "Elections in which the Electoral College leader had no majority"
+    ),
+    "pv_flip_count": "Elections in which a different candidate won the popular vote",
 }
 #: An average over two or more elections; ``{margin}`` is :func:`margin`'s cell, the
 #: years the earliest and latest whose margin entered it (:func:`metric_mean`).
@@ -730,6 +736,35 @@ METRIC_NO_AVERAGE_NULL = (
 METRIC_DIFFERENT_ELECTIONS = (
     "The two averages do not cover the same elections: this dataset's popular-vote "
     "figures cover {first}–{last}."
+)
+#: A count of elections over two or more elections (#569, D112; ba spec, approved at
+#: #569's plan gate): two counts, never a percentage; the years are the earliest and
+#: latest whose flag entered N, never the filter's bounds (:func:`metric_count`).
+METRIC_COUNT_OF = "{count} of {n} elections ({first}–{last})"
+#: A count of elections over one election: the one year, never "2000–2000".
+METRIC_COUNT_OF_ONE = "{count} of 1 election ({year})"
+#: Under the counts on ``/elections/majority``, whenever the popular-vote count shows a
+#: number; the years come from ``coverage``, never a literal.
+METRIC_PV_WINDOW_NOTE = (
+    "This dataset's popular-vote figures cover {first}–{last}, so the number of "
+    "elections in which a different candidate won the popular vote includes only "
+    "elections in those years."
+)
+#: No popular-vote count, because no year shown lies inside the popular-vote window.
+METRIC_NO_COUNT_PV_YEARS = (
+    "No figure: this dataset's popular-vote figures cover {first}–{last}, "
+    "not the years shown"
+)
+#: No count of elections with no Electoral College majority, because every flag among
+#: the elections shown is null (no served year reaches it).
+METRIC_NO_COUNT_NULL_EC = (
+    "No figure: this dataset does not say whether any candidate had a majority in "
+    "the elections shown"
+)
+#: No count of elections with a different popular-vote winner, because every flip
+#: among the elections shown is null (no served year in the window reaches it).
+METRIC_NO_COUNT_NULL_PV = (
+    "No figure: this dataset has no popular-vote winner for the elections shown"
 )
 #: Follows :data:`METRIC_DIFFERENT_ELECTIONS` while the popular-vote filter is off; it
 #: names the elections page's checkbox by its own text.
@@ -1402,6 +1437,42 @@ def metric_mean(
     else:
         whole = METRIC_OVER.format(
             margin=text, n=mean.n, first=mean.first, last=mean.last
+        )
+    return text, whole.removeprefix(text)
+
+
+def metric_count(
+    result: Any,
+    years: Sequence[int],
+    no_figure: str,
+    pv_window: tuple[int, int] | None = None,
+) -> tuple[str, str | None]:
+    """A count of elections on ``/elections/majority`` (#569, D112), as ``(value,
+    rest)``: the value text, and the text after it naming its N and years, or ``None``
+    where there is none to name. ``result`` is an ``explore.metrics.FlagCount`` (this
+    module imports no ``metrics``, which imports it); ``years`` the distinct years
+    shown; ``no_figure`` the count's own wording for every flag null; ``pv_window`` the
+    popular-vote window, given for the popular-vote count only.
+
+    Checked in order: an unrecognized count (:data:`UNRECOGNIZED`, with no N or years);
+    no contributing election, worded by its cause (a popular-vote count with no year
+    shown inside the window, then every flag null); else the count, with N and years.
+    """
+    if result.unrecognized:
+        return UNRECOGNIZED, None
+    if result.n == 0:
+        if pv_window is not None and not any(
+            pv_window[0] <= year <= pv_window[1] for year in years
+        ):
+            first, last = pv_window
+            return METRIC_NO_COUNT_PV_YEARS.format(first=first, last=last), None
+        return no_figure, None
+    text = str(result.count)
+    if result.n == 1:
+        whole = METRIC_COUNT_OF_ONE.format(count=text, year=result.first)
+    else:
+        whole = METRIC_COUNT_OF.format(
+            count=text, n=result.n, first=result.first, last=result.last
         )
     return text, whole.removeprefix(text)
 

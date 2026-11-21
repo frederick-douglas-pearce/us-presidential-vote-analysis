@@ -306,3 +306,37 @@ def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> N
     page.set_viewport_size({"width": width, "height": 900})
     open_c2(page, width=width)
     assert_layout_holds(page, MAJORITY_SUCCESS, ("#elections-leader-table",), width)
+
+
+# --- the headline counts (#569, D112) -------------------------------------------------
+
+#: The block and the two values, by the page's stable ids.
+COUNTS = "#majority-metrics"
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_the_counts_read_inside_phone_width(page: Page, width: int, scheme: str) -> None:
+    """AC 360 px (#569): the two counts, their labels and the window note each sit
+    inside the width with no sideways scroll, in either device scheme, and read the
+    recording's hand counts."""
+    page.emulate_media(color_scheme=scheme)  # type: ignore[arg-type]
+    page.set_viewport_size({"width": width, "height": 844})
+    open_c2(page, width=width)
+    expect(page.locator("#majority-ec-no-majority-count")).to_have_text(
+        "1 of 51 elections (1824–2024)"
+    )
+    expect(page.locator("#majority-pv-flip-count")).to_have_text(
+        "2 of 13 elections (1976–2024)"
+    )
+    parts = page.locator(f"{COUNTS} dt, {COUNTS} dd, {COUNTS} p")
+    assert parts.count() == 5
+    for i in range(parts.count()):
+        box = parts.nth(i).bounding_box()
+        assert box is not None
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width + 0.5, (i, box)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    # The block sits between the filters and the chart.
+    counts, chart = rect(page, COUNTS), rect(page, C2)
+    assert counts["bottom"] <= chart["top"], (counts, chart)

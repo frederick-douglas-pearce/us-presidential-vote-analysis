@@ -684,6 +684,22 @@ articles and announcements). Every rule binds all three unless the rule states a
   the count line above a table on another page, which counts that table's rows.
 - **Status:** settled
 
+### Elections with a different popular-vote winner (count)
+- **Plain:** On the Electoral College majority page: how many of the elections shown had a popular-vote winner other than the Electoral College leader. It is out of the elections shown that this dataset has popular-vote figures for, and names the earliest and latest of those years. This dataset's popular-vote figures begin later than its Electoral College results, so this number usually covers fewer elections than the count beside it. It says nothing about elections outside those years.
+- **Precise:** `metrics.flag_count` over (year, `pv_flip`) pairs for the years C2's companion table shows under the parsed `year_from`/`year_to`/`pv` filters (D110), counting true. N is the number of those years whose flag is true or false. A null (outside the popular-vote window, or no winner) is never counted as false and is left out of N. First and last are the earliest and latest of the N years, not the filter bounds (D112, ruling 5). It is never a percentage (D097(a)). While the figure shows a number, a note under the block names the popular-vote window from `meta.provenance.coverage` (`pv_year_min`–`pv_year_max`), never a literal. With no shown year inside the window, or every flag inside it null, it reads *No figure*. A `pv_flip` that is neither true, false nor null fails C2's own check first, so the section reads `C2_UNAVAILABLE`; the figure's *Unrecognized value* reading is defensive. It reads the same checked summary rows as C2, so a failed or malformed read removes the section, figure included. When the filters leave no year, *No elections match* shows and no figure does.
+- **Shown as:** `labels.METRIC_LABELS["pv_flip_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); the note `labels.METRIC_PV_WINDOW_NOTE`; `labels.METRIC_NO_COUNT_PV_YEARS`, `labels.METRIC_NO_COUNT_NULL_PV`. On `/elections/majority`, in the `dl.metrics` block `majority-metrics` inside C2's card, after the filters and before the chart; the value `majority-pv-flip-count` (`pages/elections_majority.py`).
+- **Source:** #569 (figure set approved by the owner, 2026-11-18); D097; D112; `ElectionSummary.pv_flip` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #569, approved at its plan gate.
+- **Not:** A percentage or share. A claim that no different popular-vote winner occurred before the popular-vote window. The hybrid's flip. *Flip* for one election. A popular-vote "leader".
+- **Status:** settled
+
+### Elections with no Electoral College majority (count)
+- **Plain:** On the Electoral College majority page: how many of the elections shown had an Electoral College leader with no majority of the electors appointed. It is out of the elections shown for which this dataset says whether there was one, and names the earliest and latest of those years.
+- **Precise:** `metrics.flag_count` over (year, `ec_determinative`) pairs for the years C2's companion table shows under the parsed `year_from`/`year_to`/`pv` filters (D110), counting false. N is the number of those years whose flag is true or false. A null is never counted as false and is left out of N. First and last are the earliest and latest of the N years, not the filter bounds (D112, ruling 5). It is never a share compared with one half and never a percentage (D097(a)). A value other than true, false or null among the years shown makes this figure alone read *Unrecognized value*, with no N or years; the other figure, the chart and the table stay. With every flag null it reads *No figure*. Failure and empty-filter behavior are the same as for *Elections with a different popular-vote winner*.
+- **Shown as:** `labels.METRIC_LABELS["ec_no_majority_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); `labels.METRIC_NO_COUNT_NULL_EC`; `labels.UNRECOGNIZED`. In `majority-metrics` on `/elections/majority`, the value `majority-ec-no-majority-count`.
+- **Source:** #569; D097; D112; `ElectionSummary.ec_determinative`; `METRICS`; reader wording: `ba` spec for #569, approved at its plan gate.
+- **Not:** *Electoral College majority*, the yes or no for one election. The leader's electoral share. A count of elections decided by the House. A percentage.
+- **Status:** settled
+
 ### Electoral College winner, or leader with no majority (`ec_winner`)
 - **Plain:** The candidate with the most electoral votes counted. When that candidate has a
   majority of the electors appointed, they are the Electoral College winner. When no one has a
@@ -745,6 +761,8 @@ articles and announcements). Every rule binds all three unless the rule states a
     checked.
   - It sits after the lede, the section links and the page's year filters, under the page's heading
     (`HEADING` in `pages/elections_majority.py`).
+  - Inside its card, between the filters and the chart, the block `majority-metrics` shows the two
+    counts (#569).
   - Data: built from `/v1/elections/summary`, filled on first use (declared in `on_miss`, D074(ii))
     and read in the same view as `/v1/elections`. Each year `/v1/elections` serves gets the
     marks of that year's single `data` row with `electoral_rank` 1 (its served `ec_share_full`,
@@ -819,7 +837,8 @@ articles and announcements). Every rule binds all three unless the rule states a
     `labels.CHART_TABLE_POINTER`.
   - In `pages/elections_majority.py`: `HEADING` (the page's, formerly C2's section heading), `LEDE`,
     `FILTER_SENTENCE` (success only, after `LEDE`), the filters' `labels.YEARS_FILTER` and
-    `labels.PV_ONLY_FILTER`, `labels.NO_ELECTIONS_MATCH`, `C2_TABLE_HEADING`, the companion table's
+    `labels.PV_ONLY_FILTER`, `labels.NO_ELECTIONS_MATCH`, `labels.METRIC_PV_WINDOW_NOTE`,
+    `C2_TABLE_HEADING`, the companion table's
     columns (existing `LABELS` keys), the table notes `labels.C2_LEADER_ROW`,
     `labels.C2_TOOK_OFFICE`, `labels.C2_TABLE_METHODS_NOTE`, `labels.HYBRID_NOTE` and
     `labels.C2_HYBRID_TABLE_NOTE`, the download "the Electoral College leaders"
@@ -857,7 +876,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   by `labels.C2_MAJORITY_KEY` (#596, D110), the caption sentence `labels.C2_MAJORITY_NOTE`, the
   hover's last line (`labels.ec_majority`), the companion table's column, the Electoral College
   majority page's heading (`HEADING` in `pages/elections_majority.py`) and its section link
-  `labels.SECTION_MAJORITY`; `labels.C1_LINE_EC_ONLY` in C2's caption.
+  `labels.SECTION_MAJORITY`; `labels.C1_LINE_EC_ONLY` in C2's caption; on the same page, the count
+  *Elections with no Electoral College majority* (`labels.METRIC_LABELS["ec_no_majority_count"]`).
 - **Source:** `ElectionSummary.ec_determinative`; D041; D046 §4;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Appointed, not cast".
 - **Not:** A majority of the votes cast or counted; the base is the electors appointed. A null,
@@ -1092,7 +1112,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   reader wording names the Electoral College side the same way `ec_winner` does.
 - **Shown as:** `LABELS["pv_flip"]`, `LABELS["hybrid_flip"]`; the cell `labels.flip`, given
   `ec_determinative`, which fills `labels.FLIP_YES` with the Electoral College's role by the same
-  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader). In C2 (#564), a strip series per method above the data, from the served flag: `asterisk`, `labels.C2_PV_DIFFERENT_KEY`; `pentagon`, `labels.C2_HYBRID_DIFFERENT_KEY`; their hovers and `labels.C2_PV_DIFFERENT_NOTE` / `labels.C2_HYBRID_DIFFERENT_NOTE`.
+  test as `labels.ec_winner_label` (winner only on a true majority, otherwise leader). In C2 (#564), a strip series per method above the data, from the served flag: `asterisk`, `labels.C2_PV_DIFFERENT_KEY`; `pentagon`, `labels.C2_HYBRID_DIFFERENT_KEY`; their hovers and `labels.C2_PV_DIFFERENT_NOTE` / `labels.C2_HYBRID_DIFFERENT_NOTE`. On `/elections/majority`, the count *Elections with a different popular-vote winner* (`labels.METRIC_LABELS["pv_flip_count"]`).
 - **Source:** `ElectionSummary.pv_flip`, `hybrid_flip` and the class docstring; owner decision,
   2026-10-10, #348 (consistency with `ec_winner`).
 - **Not:** "No", which is a recorded agreement. *Outside the popular-vote window*, which is no
@@ -1235,8 +1255,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** #437 acceptance criteria ("An empty selection shows 'no figure', never zero or NaN");
   D097; reader wording: `ba` spec for #437, approved at its plan gate.
 - **Not:** Zero, or a margin of zero. *Not in this dataset* for one value. *No popular-vote figure in
-  this dataset*, a candidate's missing popular-vote count. *Unrecognized value*. The "no figure" of
-  D097's rule for a sum, whose reader wording a later spec sets.
+  this dataset*, a candidate's missing popular-vote count. *Unrecognized value*. *No figure*, a
+  count's. The "no figure" of D097's rule for a sum, whose reader wording a later spec sets.
 - **Status:** settled
 
 ### No elections match (an empty filter result)
@@ -1256,6 +1276,14 @@ articles and announcements). Every rule binds all three unless the rule states a
   text since #306.
 - **Not:** *Degraded state*. *Not-found state*. `components.NO_ROWS`, which other tables show
   ("rows"). *No average*. "No data": the elections are in this dataset; the filters leave none shown.
+- **Status:** settled
+
+### No figure (a count with no election to include)
+- **Plain:** The page shows no number because none of the elections shown can enter it. Either all of them fall in years this dataset has no popular-vote figures for, or this dataset has no answer for any of them. It is not zero: a count of zero shows 0.
+- **Precise:** `labels.metric_count` with N = 0 and no unrecognized value. Causes are checked in order. First, for the popular-vote count, no year shown lies inside the popular-vote window of `meta.provenance.coverage` (`labels.METRIC_NO_COUNT_PV_YEARS`). Otherwise, every flag among the years shown is null (`labels.METRIC_NO_COUNT_NULL_EC`, `labels.METRIC_NO_COUNT_NULL_PV`; no year in the current data triggers either). No year shown is not a cause here: the page shows *No elections match* and no figure. It is never 0, "nan" or an empty cell.
+- **Shown as:** `labels.METRIC_NO_COUNT_PV_YEARS`, `labels.METRIC_NO_COUNT_NULL_EC`, `labels.METRIC_NO_COUNT_NULL_PV`, through `labels.metric_count`.
+- **Source:** #569 acceptance criteria; D097; reader wording: `ba` spec for #569.
+- **Not:** Zero. *No average* (a mean). *No popular-vote figure in this dataset* (a cell). *Unrecognized value*. The "no figure" of D097's rule for a sum with a null, which slice B words; if it reuses these words, this entry is extended to cover it.
 - **Status:** settled
 
 ### No popular-vote figure in this dataset (inside the window)
@@ -2055,7 +2083,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   served year reaches this cell; it is defensive. On `/elections`, an average margin reads it too
   when a margin among the years shown is of the wrong type or not finite, or when the average is a
   number no margin cell could show; it then names no number of elections or years (*Average
-  margin*). In a CSV download the field is written as the API
+  margin*). On `/elections/majority`, a count of elections reads it too when a flag among the years
+  shown is neither yes, no nor null; it then names no number of elections or years. In a CSV download the field is written as the API
   served it; for a null figure with an unrecognized cause, the figure's column is empty and the
   cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
@@ -2074,7 +2103,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   shows it, without `labels.UNRECOGNIZED_NOTE`: in T6 that note is the cell's help text, not part of
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
-  value's help text (set by `labels.cell`). In C2, C4, C5 and C7, `labels.UNRECOGNIZED`
+  value's help text (set by `labels.cell`). `labels.metric_count` writes it for a count on
+  `/elections/majority`. In C2, C4, C5 and C7, `labels.UNRECOGNIZED`
   names, in the chart's key, the series of markers drawn in place of a point or bar for such a
   value (C5 through `labels.C5_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER` and `labels.C5_HOVER` write
@@ -2102,7 +2132,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`; the CSV
   preamble; `labels.BEFORE_WINDOW`; `NO_PV_SENTENCE` in `pages/election.py`; C1's caption sentence
   `labels.C1_NO_PV_CAPTION`, and on `/elections` `labels.METRIC_NO_AVERAGE_PV_YEARS` and
-  `labels.METRIC_DIFFERENT_ELECTIONS`, each of which names the years the popular-vote figures
+  `labels.METRIC_DIFFERENT_ELECTIONS`, and on `/elections/majority` `labels.METRIC_PV_WINDOW_NOTE`
+  and `labels.METRIC_NO_COUNT_PV_YEARS`, each of which names the years the popular-vote figures
   cover; `labels.C5_BEFORE_BAND`, `labels.C5_AFTER_BAND`, `labels.C5_BEFORE_NOTE`,
   `labels.C5_AFTER_NOTE` and `labels.OVER_TIME_WINDOW_NOTE`.
 - **Source:** `Coverage` in `src/usvote/api/models.py`; D048 §1;
@@ -2162,7 +2193,8 @@ Every `LABELS` key and the entry that defines it.
 
 Metric keys (`labels.METRIC_LABELS`) are not `LABELS` keys; each is named under its entry's
 **Shown as**: `elections_shown` (*Elections shown*), `ec_margin_mean` and `pv_margin_mean`
-(*Average margin*).
+(*Average margin*), `ec_no_majority_count` (*Elections with no Electoral College majority*),
+`pv_flip_count` (*Elections with a different popular-vote winner*).
 
 ---
 
@@ -2178,7 +2210,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "leading candidate" or "winner" for every year's rank-1 candidate | Electoral College leader | `labels.C2_*`, `C2_TABLE_HEADING` and the download name (`pages/elections_majority.py`) | "Leading" alone can mean the popular vote's leader, and "winner" is false for 1824. |
 | "not applicable" for a year outside the popular-vote window | that this dataset has no popular-vote figures for the year | `labels.NOT_APPLICABLE`; `NO_PV_SENTENCE` in `pages/election.py` | "Not applicable" reads as a claim that the method had no result at the time. |
 | "no figure" without "in this dataset" | no figure in this dataset | `labels.NO_FIGURE`, `labels.NO_NATIONAL_FIGURE`, `labels.C1_NO_FIGURE` | Without it, a reader can take the cell as zero votes. |
-| "popular-vote leader" | Popular-vote winner | `LABELS["pv_winner"]`, `labels.C2_PV_DIFFERENT_KEY` | In this glossary "leader" means the Electoral College's rank-1 candidate. |
+| "popular-vote leader", "led the popular vote" | Popular-vote winner | `LABELS["pv_winner"]`, `labels.C2_PV_DIFFERENT_KEY`, `labels.METRIC_LABELS["pv_flip_count"]` | In this glossary "leader" means the Electoral College's rank-1 candidate. |
 | an unlabeled "hybrid score" in a chart, or "hybrid result" | Hybrid score (the project's proposal) | `labels.C2_HYBRID_KEY`, `labels.C2_HYBRID_HOVER` | It is not an official measure. |
 | a raw field name, a status code, or anything with an underscore | the plain label | `LABELS`; `labels.PV_STATUS`, `labels.COUNT_STATUS`, `labels.BOUNDARY_BASIS`, `labels.PER_CAPITA_COVERAGE` | Allowed only where the page presents it as a field name (owner decision, 2026-10-10). In the API's published text a public `/v1` name is written as served, and an internal name never appears (owner decision, 2026-10-15, #374). |
 | "null" | no value in this dataset | `labels.NOT_IN_DATASET`; the CSV preamble's last line, `export.NULL_LINE`, still uses the word (#375 decides whether it stays) | Engineering term. In the API's published text, null is the JSON value and is written "null", never "None" (owner decision, 2026-10-15, #374). |
@@ -2191,7 +2223,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
-| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`); on `/elections/majority`, a count with no election to include reads *No figure* (`labels.METRIC_NO_COUNT_PV_YEARS`, `labels.METRIC_NO_COUNT_NULL_EC`, `labels.METRIC_NO_COUNT_NULL_PV`) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
 | "the state you chose" for a filter's state | Selected state | `labels.C3_SELECTED`, `labels.C3_SELECTED_NOTE` | A shared link carries the filter; the reader who opens it chose nothing. |
 | a party code with underscores or in capitals | the party's display form | `labels.NOMINATING_PARTY` | Owner decision, 2026-10-10; closed table since #389. |
 | "party" alone where both are meant | name which: the party (the nominating party); the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |

@@ -12,11 +12,11 @@ The dashboard's tests sit in the same tree: `tests/unit/test_dashboard_app.py` (
 offline through a fake fetch), `tests/unit/test_dashboard_elections.py` (the elections
 index and the shared table conventions, #306, the headline metrics, #437, in
 `TestMetrics`, `TestMetricsDegraded`, `TestMetricsFilters`, `TestMetricLabels`,
-`TestMetricsModule` and `TestN1Items`, the section links between the three elections pages,
+`TestMetricsModule` (with #569's `flag_count`) and `TestN1Items`, the section links between the three elections pages,
 #562, in `TestSectionLinks`, the year filters the three pages share, #596, in `TestSharedFilters`, and the list's wide layout, #553, in `TestWideLayout`, with
 `components.pair`, which refuses a table, in `TestPair`), `tests/unit/test_dashboard_elections_majority.py`
 (chart C2's page, #434, #562: `TestC2`, `TestC2Validation`, `TestC2Degraded`, the three methods
-and the strip, #564, in `TestC2Methods`, the year filters and the empty note, #596, in `TestC2Filters`, the 10 px crossbar drawn last in `TestC2Crossbar` and, for its N1 recording, `TestN1Fixture`), `tests/unit/test_dashboard_elections_over_time.py` (charts C4 and
+and the strip, #564, in `TestC2Methods`, the year filters and the empty note, #596, in `TestC2Filters`, the 10 px crossbar drawn last in `TestC2Crossbar`, the headline counts, #569 (D112), in `TestMajorityCounts` and `labels.metric_count` in `TestMetricCountWording`, and, for its N1 recording, `TestN1Fixture`), `tests/unit/test_dashboard_elections_over_time.py` (charts C4 and
 C5's page, #436, #562, all states only: `TestC4`, `TestC5`, `TestOverTimeTable`,
 `TestOverTimeValidation`, `TestOverTimeDegraded`, `TestOverTimeMechanisms`,
 `TestOverTimeCaptions`, the time-series year axis and its rules, #558, in
