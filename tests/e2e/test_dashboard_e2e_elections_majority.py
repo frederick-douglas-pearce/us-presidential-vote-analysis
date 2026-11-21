@@ -319,9 +319,11 @@ COUNTS = "#majority-metrics"
 def test_the_counts_read_inside_phone_width(page: Page, width: int) -> None:
     """AC 360 px (#569): the two counts, their labels and the window note each sit
     inside the width with no sideways scroll, and read the recording's hand counts.
-    Layout only: the counts add no color token (their text and the note take the
-    shared tokens the theme tests hold in Light, Dark and System; #602's review, ge.6),
-    so a theme changes nothing this test reads."""
+    Layout only: the counts add no color token. Their text and the note take the shared
+    tokens ``TestThemeContrast`` (``tests/unit/test_dashboard_theme.py``) holds to AA in
+    both palettes, the device's dark block being identical to the chosen one
+    (``test_the_two_dark_blocks_are_identical``); #602's review, ge.6 and r2.recheck.1.
+    So a theme changes nothing this test reads."""
     page.set_viewport_size({"width": width, "height": 844})
     open_c2(page, width=width)
     expect(page.locator("#majority-ec-no-majority-count")).to_have_text(
