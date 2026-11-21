@@ -315,13 +315,13 @@ COUNTS = "#majority-metrics"
 
 
 @pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize("width", PHONE_WIDTHS)
-def test_the_counts_read_inside_phone_width(page: Page, width: int, scheme: str) -> None:
+def test_the_counts_read_inside_phone_width(page: Page, width: int) -> None:
     """AC 360 px (#569): the two counts, their labels and the window note each sit
-    inside the width with no sideways scroll, in either device scheme, and read the
-    recording's hand counts."""
-    page.emulate_media(color_scheme=scheme)  # type: ignore[arg-type]
+    inside the width with no sideways scroll, and read the recording's hand counts.
+    Layout only: the counts add no color token (their text and the note take the
+    shared tokens the theme tests hold in Light, Dark and System; #602's review, ge.6),
+    so a theme changes nothing this test reads."""
     page.set_viewport_size({"width": width, "height": 844})
     open_c2(page, width=width)
     expect(page.locator("#majority-ec-no-majority-count")).to_have_text(

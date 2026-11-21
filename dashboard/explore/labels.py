@@ -744,11 +744,13 @@ METRIC_COUNT_OF = "{count} of {n} elections ({first}–{last})"
 #: A count of elections over one election: the one year, never "2000–2000".
 METRIC_COUNT_OF_ONE = "{count} of 1 election ({year})"
 #: Under the counts on ``/elections/majority``, whenever the popular-vote count shows a
-#: number; the years come from ``coverage``, never a literal.
+#: number; the years come from ``coverage``, never a literal. True by construction: C2's
+#: check makes a flip a value exactly when its year has a popular-vote winner, and the
+#: note never says the counted years lie inside the window (#602's review, cr.3; ba).
 METRIC_PV_WINDOW_NOTE = (
-    "This dataset's popular-vote figures cover {first}–{last}, so the number of "
+    "This dataset's popular-vote figures cover {first}–{last}. The number of "
     "elections in which a different candidate won the popular vote includes only "
-    "elections in those years."
+    "elections with a popular-vote winner in this dataset."
 )
 #: No popular-vote count, because no year shown lies inside the popular-vote window.
 METRIC_NO_COUNT_PV_YEARS = (

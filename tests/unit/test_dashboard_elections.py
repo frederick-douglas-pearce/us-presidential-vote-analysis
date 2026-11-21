@@ -2296,12 +2296,17 @@ class TestMetricsModule:
             hits, 3, 1976, 1988
         )
 
-    def test_a_null_flag_is_left_out_never_read_as_false(self) -> None:
-        assert metrics.flag_count([(1824, None), (1828, False)], False) == (
+    @pytest.mark.parametrize("null", [None, "", "  "])
+    def test_a_null_or_blank_flag_is_left_out_never_read_as_false(
+        self, null: Any
+    ) -> None:
+        # A blank is null, as the table's cells read it (labels.is_blank; #602's
+        # review, cr.1, amending D112(a)).
+        assert metrics.flag_count([(1824, null), (1828, False)], False) == (
             metrics.FlagCount(1, 1, 1828, 1828)
         )
 
-    @pytest.mark.parametrize("value", ["", " ", 0, 1, 1.0, "true", "false", [True]])
+    @pytest.mark.parametrize("value", [0, 1, 1.0, "true", "false", "x", [True]])
     def test_a_value_that_is_no_flag_makes_the_count_unrecognized(
         self, value: Any
     ) -> None:
@@ -2330,6 +2335,9 @@ class TestMetricsModule:
             (True, 1, 2000, 2000),
             (1, 1, 2000, 2000, True),
             (0, 0, 2000, 2000),
+            (1, True, 2000, 2000),  # an N that is no int
+            (0, 1, None, 2000),  # a first year missing beside a last
+            (0, 1, True, 2000),  # a first year that is no int
         ],
     )
     def test_a_count_in_no_state_cannot_be_built(self, args: tuple[Any, ...]) -> None:

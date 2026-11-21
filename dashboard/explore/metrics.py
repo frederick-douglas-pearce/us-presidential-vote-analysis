@@ -183,15 +183,16 @@ def flag_count(pairs: Iterable[tuple[int, object]], counted: bool) -> FlagCount:
     """How many of the flags in ``(year, flag)`` pairs, already joined on the year, are
     ``counted``, out of the flags that are a value (#569, D112).
 
-    Only ``None`` is null: it is left out of N and never read as false (D097(a)). Any
-    other value that is not a ``bool`` (a blank string, a number, ``1`` for true) makes
-    the whole count :data:`UNRECOGNIZED_COUNT`: leaving it out would drop a year and
-    misstate N. Each pair is one election; the caller passes each year once.
+    A null or a blank (:func:`explore.labels.is_blank`, the module's one rule of what is
+    null, which the table cells follow too) is left out of N and never read as false
+    (D097(a)). Any other value that is not a ``bool`` (a number, ``1`` for true, a
+    word) makes the whole count :data:`UNRECOGNIZED_COUNT`: leaving it out would drop a
+    year and misstate N. Each pair is one election; the caller passes each year once.
     """
     hits = 0
     years: list[int] = []
     for year, value in pairs:
-        if value is None:
+        if labels.is_blank(value):
             continue
         if type(value) is not bool:
             return UNRECOGNIZED_COUNT

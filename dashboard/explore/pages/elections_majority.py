@@ -683,15 +683,18 @@ def _counts(rows: list[dict[str, Any]], window: tuple[int, int]) -> html.Div:
     while the popular-vote count shows a number, the note naming the popular-vote
     window. ``rows`` are the table's rows, one per year, each carrying N1's flags
     (:data:`YEAR_FIELDS`); each count reads the field ``metrics.METRICS`` names. A
-    value that is no flag makes that count alone read unrecognized."""
+    value that is no flag makes that count alone read unrecognized. Raises
+    ``TypeError`` for a flag count that names no value to count, which
+    :func:`_leader_section`'s ``try`` shows as the section's unavailable state."""
     years = [row["year"] for row in rows]
     entries: list[Any] = []
     note = False
     for key, ident in METRIC_IDS.items():
         metric = metrics.METRICS[key]
+        if metric.counted is None:
+            raise TypeError(f"{key} is a flag count that names no value to count")
         result = metrics.flag_count(
-            ((row["year"], row[metric.source.field]) for row in rows),
-            bool(metric.counted),
+            ((row["year"], row[metric.source.field]) for row in rows), metric.counted
         )
         pv_window = window if key == PV_METRIC else None
         value, rest = labels.metric_count(
@@ -769,6 +772,8 @@ def _leader_section(
         by_row = {id(row): cell for row, cell in zip(rows, cells, strict=True)}
         # Inside the try: the table and its CSV read N1 too (each row's slug, the
         # provenance the preamble names), and a defect there is N1's, not the page's.
+        # The headline counts (#569, D112), inside the try: they read the same N1 rows.
+        counts = _counts(rows, window)
         table = components.table(
             rows,
             lambda r: _leader_row(r, by_row[id(r)]),
@@ -792,7 +797,7 @@ def _leader_section(
         controls,
         # The headline counts over the years shown (#569, D112): inside C2's card,
         # after the filters and before the chart (D111(b)).
-        _counts(rows, window),
+        counts,
         components.chart(C2_ID, c2.figure, LEADER_TABLE_ID, _c2_caption(c2, window)),
         html.H2(C2_TABLE_HEADING),
         *table,

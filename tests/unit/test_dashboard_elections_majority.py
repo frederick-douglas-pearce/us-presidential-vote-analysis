@@ -1664,10 +1664,108 @@ class TestMajorityCounts:
         for ident in COUNT_IDS.values():
             assert count_text(raw, ident) == count_text(reopened, ident), (query, ident)
 
-    def test_the_counts_read_the_fields_metrics_names(self) -> None:
-        # D097(f): the page reads the source field from METRICS, never a literal.
-        source = MOD["_counts"].__code__.co_consts
-        assert "pv_flip" not in source and "ec_determinative" not in source
+    def test_the_counts_read_the_fields_metrics_names(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # D097(f), by mechanism (#602's review, cr.4): point the Electoral College
+        # count at the flip, counting true, and it reads the flip's hand count.
+        from explore import metrics
+
+        flip = metrics.METRICS["pv_flip_count"]
+        monkeypatch.setitem(metrics.METRICS, "ec_no_majority_count", flip)
+        tree = render_c2()
+        assert count_text(tree, EC_COUNT) == "2 of 13 elections (1976–2024)"
+
+    def test_a_flag_count_naming_no_value_degrades_the_section(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # cr.8: a flag count with no ``counted`` fails loudly, inside C2's try.
+        from explore import metrics
+
+        metric = metrics.METRICS["pv_flip_count"]._replace(counted=None)
+        monkeypatch.setitem(metrics.METRICS, "pv_flip_count", metric)
+        tree = render_c2()
+        assert find(tree, COUNTS) is None
+        assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
+        assert find(tree, PAGE_ID) is not None
+
+    def test_the_window_years_come_from_coverage(self) -> None:
+        # ge.2: the note and the no-figure wording name coverage's window, never a
+        # literal. With the window doctored to 1980–2016 (the index's flags with it),
+        # the count still reads every year whose flip is a value (cr.3: the note
+        # claims only a popular-vote winner in this dataset, D112(b)).
+        index = copy.deepcopy(BODY)
+        index["meta"]["provenance"]["coverage"].update(
+            pv_year_min=1980, pv_year_max=2016
+        )
+        for row in index["data"]:
+            row["has_popular_vote"] = 1980 <= row["year"] <= 2016
+        tree = MOD["render"](copy.deepcopy(index), copy.deepcopy(SUMMARY))
+        assert notes_in(tree) == [
+            labels.METRIC_PV_WINDOW_NOTE.format(first=1980, last=2016)
+        ]
+        assert count_text(tree, PV_COUNT) == "2 of 13 elections (1976–2024)"
+        early = MOD["render"](
+            copy.deepcopy(index),
+            copy.deepcopy(SUMMARY),
+            elections_view.parse_filters({"year_from": "1960", "year_to": "1972"}),
+        )
+        assert count_text(early, PV_COUNT) == (
+            labels.METRIC_NO_COUNT_PV_YEARS.format(first=1980, last=2016)
+        )
+
+    def test_every_flip_null_in_the_window_is_no_figure_and_no_note(self) -> None:
+        # ge.3: a year inside the window with no popular-vote winner (its flip null,
+        # as C2's check requires) is the null wording, not the window's, and no note.
+        summary = _with(
+            **{
+                "2000.pv_flip": None,
+                "2000.pv_winner": None,
+                "2000.pv_winner_slug": None,
+            }
+        )
+        tree = filtered_c2({"year_from": "2000", "year_to": "2000"}, summary)
+        assert count_text(tree, PV_COUNT) == labels.METRIC_NO_COUNT_NULL_PV
+        assert notes_in(tree) == []
+
+    @pytest.mark.parametrize(
+        "summary",
+        [
+            None,
+            _with(**{"1824.ec_determinative": ""}),
+            _with(**{"1824.ec_determinative": None}),
+        ],
+        ids=["recorded", "blank", "null"],
+    )
+    def test_each_count_reconciles_to_its_table_cells(self, summary: Any) -> None:
+        # The figure classifies each row exactly as its companion table's cell does
+        # (D097(a); #602's review, cr.1 and cr.3).
+        tree = render_c2(summary)
+        rows = leader_rows(tree)
+        fields = MOD["LEADER_FIELDS"]
+        years = [int(r[0]) for r in rows]
+        majority = [r[fields.index("ec_determinative")] for r in rows]
+        ec = [y for y, c in zip(years, majority, strict=True) if c in MAJORITY_CELLS]
+        no = sum(c == labels.NO_EC_MAJORITY for c in majority)
+        assert count_text(tree, EC_COUNT) == (
+            f"{no} of {len(ec)} elections ({min(ec)}–{max(ec)})"
+        )
+        named = [
+            (y, r[fields.index("candidate")], r[fields.index("pv_winner")])
+            for y, r in zip(years, rows, strict=True)
+            if r[fields.index("pv_winner")] not in NULL_CELLS
+        ]
+        differ = sum(leader != pv for _, leader, pv in named)
+        pv_years = [y for y, _, _ in named]
+        assert count_text(tree, PV_COUNT) == (
+            f"{differ} of {len(named)} elections ({min(pv_years)}–{max(pv_years)})"
+        )
+
+
+#: The leader table's ``ec_determinative`` cells that are a value, and the winner
+#: cells that name no candidate.
+MAJORITY_CELLS = (labels.EC_MAJORITY, labels.NO_EC_MAJORITY)
+NULL_CELLS = (labels.NOT_IN_DATASET, labels.NOT_APPLICABLE, labels.UNRECOGNIZED)
 
 
 class TestMetricCountWording:
@@ -1695,6 +1793,9 @@ class TestMetricCountWording:
             ),
             ([1900, 1980], (1976, 2024), labels.METRIC_NO_COUNT_NULL_PV),
             ([1900], None, labels.METRIC_NO_COUNT_NULL_EC),
+            # Both bounds are inside the window (ge.4).
+            ([1976], (1976, 2024), labels.METRIC_NO_COUNT_NULL_PV),
+            ([2024], (1976, 2024), labels.METRIC_NO_COUNT_NULL_PV),
         ],
     )
     def test_no_count_is_worded_by_its_cause(
