@@ -82,7 +82,7 @@ def test_schema_version_mismatch_fails_loud_at_open(
 def test_an_older_schema_snapshot_reports_the_version_not_a_missing_table(
     snapshot_path: str, tmp_path: Path
 ) -> None:
-    """A v4 snapshot under a v5 server must say "schema_version 4 != 5" (#245, #386).
+    """A v4 snapshot under a v6 server must say "schema_version 4 != 6" (#245, #386).
 
     A v4 ``snapshot_meta`` lacks the ``usgov_*`` columns, so a reader that fetched the
     full row before comparing versions would fail on a missing column and report "not a
@@ -103,7 +103,38 @@ def test_an_older_schema_snapshot_reports_the_version_not_a_missing_table(
         conn.commit()
     finally:
         conn.close()
-    with pytest.raises(SnapshotError, match=r"schema_version 4 != this server's 5"):
+    with pytest.raises(SnapshotError, match=r"schema_version 4 != this server's 6"):
+        SnapshotRepository.open(str(old))
+
+
+def test_a_v5_snapshot_reports_the_version_not_a_missing_column(
+    snapshot_path: str, tmp_path: Path
+) -> None:
+    """A v5 snapshot under a v6 server must say "schema_version 5 != 6" (#245, #570).
+
+    The actual cutover shape (D034): a v5 ``hybrid_summary`` lacks #570's two tally
+    columns. This builds it by dropping them and writing the old version number. The
+    v4 test above keeps the D069(f) case, a ``snapshot_meta`` missing columns, which is
+    what pins reading ``schema_version`` before the full meta row.
+    """
+    import shutil
+    import sqlite3
+
+    old = tmp_path / "v5.sqlite"
+    shutil.copy(snapshot_path, old)
+    conn = sqlite3.connect(old)
+    try:
+        conn.execute(
+            "ALTER TABLE hybrid_summary DROP COLUMN electoral_votes_outside_top_two"
+        )
+        conn.execute(
+            "ALTER TABLE hybrid_summary DROP COLUMN electors_without_a_counted_vote"
+        )
+        conn.execute("UPDATE snapshot_meta SET schema_version = 5")
+        conn.commit()
+    finally:
+        conn.close()
+    with pytest.raises(SnapshotError, match=r"schema_version 5 != this server's 6"):
         SnapshotRepository.open(str(old))
 
 

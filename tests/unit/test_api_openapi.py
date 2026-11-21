@@ -34,8 +34,8 @@ def test_openapi_info_has_public_metadata(client: TestClient) -> None:
     # value and stop pinning the thing that matters: that a human moved it when the
     # served contract changed. Bumped 0.3.0 -> 0.4.0 by #102, 0.4.0 -> 0.5.0 by #245,
     # 0.5.0 -> 0.6.0 by #330, 0.6.0 -> 0.7.0 by #386, 0.7.0 -> 0.8.0 by #431,
-    # 0.8.0 -> 0.9.0 by #428.
-    assert info["version"] == "0.9.0"
+    # 0.8.0 -> 0.9.0 by #428; 0.9.0 -> 0.10.0 by #570.
+    assert info["version"] == "0.10.0"
     assert info["summary"]
     desc = info["description"]
     # The thesis + what the dataset is.

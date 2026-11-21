@@ -337,28 +337,43 @@ jobs:
             }
 
             # /v1/elections/summary: meta.count == len(data) > 0, and the years in
-            # `elections` are exactly the years in `data`, each once.
+            # `elections` are exactly the years in `data`, each once. Since #570 (schema
+            # 6), every `elections` item also carries its two electoral-vote tallies as
+            # whole numbers >= 0; the count of items lacking them is printed, never a
+            # body byte. Values are pinned by the tests, not here.
             summary_check=$(mktemp)
             cat > "$summary_check" <<'PY'
           import json, sys
+          TALLIES = ("electoral_votes_outside_top_two", "electors_without_a_counted_vote")
           try:
               b = json.load(open(sys.argv[1]))
               rows, elections = b["data"], b["elections"]
               row_years = {int(r["year"]) for r in rows}
               election_years = [int(e["year"]) for e in elections]
               count = int(b["meta"]["count"])
+              untallied = sum(
+                  1
+                  for e in elections
+                  if not all(
+                      type(e.get(k)) is int and e[k] >= 0 for k in TALLIES
+                  )
+              )
           except Exception:
               sys.exit(2)
           ok = (
               count == len(rows) > 0
               and len(election_years) == len(set(election_years))
               and set(election_years) == row_years
+              and untallied == 0
           )
-          print(f"{len(rows)} rows over {len(election_years)} elections")
+          print(
+              f"{len(rows)} rows over {len(election_years)} elections, "
+              f"{untallied} without both tallies"
+          )
           sys.exit(0 if ok else 1)
           PY
             probe_json "/v1/elections/summary" "$summary_check" \
-              "meta.count, data and elections disagree" || exit 1
+              "meta.count, data and elections disagree, or an election lacks a tally" || exit 1
 
             # /v1/elections/states: meta.count == len(data) > 0, and no (year, state)
             # appears twice (the grain, D094(i)).

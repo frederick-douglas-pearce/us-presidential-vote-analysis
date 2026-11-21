@@ -41,7 +41,9 @@ star-schema knowledge), so like :mod:`usvote.join` it stays out of ``usvote/pv/`
     from the fact table is the multiply-by-candidate-count trap
     :func:`usvote.hybrid.ec_denominator_by_year` exists to prevent.
 
-``hybrid_summary`` — one row per election: the three-method comparison (#102).
+``hybrid_summary`` — one row per election: the three-method comparison (#102), plus
+    two electoral-vote tallies derived from the roll-up (#570):
+    ``electoral_votes_outside_top_two`` and ``electors_without_a_counted_vote``.
 
 ``per_capita`` — one row per ``(year, state)``: persons per electoral vote, read from
     the census-side warehouse view ``dwh.election_per_capita`` (#245 / D069). The census
@@ -944,6 +946,14 @@ _HYBRID_ROLLUP_FIELDS: tuple[str, ...] = (
     "hybrid_score",
 )
 
+#: The two ``hybrid_summary`` columns derived from the national roll-up rather than
+#: by :func:`build_hybrid_tables` (#570): they need the per-candidate cast and counted
+#: totals and ranks, which exist only once the roll-up is built.
+_ELECTORAL_REMAINDER_COLUMNS: tuple[str, ...] = (
+    "electoral_votes_outside_top_two",
+    "electors_without_a_counted_vote",
+)
+
 #: The three ``(winner name column, winner slug column)`` pairs on the summary (#102).
 _WINNER_SLUG_PAIRS: tuple[tuple[str, str], ...] = (
     ("ec_winner", "ec_winner_slug"),
@@ -1017,7 +1027,15 @@ def build_hybrid_tables(
                 "hybrid summary names a winner absent from the slug map: "
                 f"{out.loc[unmapped, name_col].unique().tolist()}"
             )
-    return per_candidate, out[list(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)]
+    # The two #570 columns are added by `add_electoral_remainders`, which owns the
+    # final projection once the roll-up exists.
+    return per_candidate, out[
+        [
+            c
+            for c in SNAPSHOT_HYBRID_SUMMARY_COLUMNS
+            if c not in _ELECTORAL_REMAINDER_COLUMNS
+        ]
+    ]
 
 
 def assert_no_hybrid_pv_below_mit_window(summary_df: pd.DataFrame) -> None:
@@ -1077,6 +1095,171 @@ def assert_rollup_and_hybrid_summary_cover_the_same_years(
             f"{sorted(summary_years - rollup_years)}. Every served election needs both "
             "its national rows and its three-method comparison (D094)."
         )
+
+
+#: The roll-up columns the two #570 tallies are computed from; a NULL in any of them
+#: would silently undercount (a NULL rank is not ``> 2``; ``sum`` skips a NULL vote).
+_REMAINDER_INPUT_COLUMNS: tuple[str, ...] = (
+    "president_electoral_rank",
+    "national_electoral_votes",
+    "national_counted_electoral_votes",
+)
+
+
+def _remainder_totals(rollup_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-year totals from the roll-up: cast, counted, and cast outside the top two.
+
+    "Outside the top two" is ``president_electoral_rank > 2``: the served rank, ordered
+    by votes **counted** and dense (D094(iv)), so a tie at rank 2 keeps every tied
+    candidate inside and a tie at rank 1 makes the next candidate rank 2. The sum adds
+    votes **cast** — 1872 Greeley ranks 6 on 0 counted and adds his 3 cast.
+    """
+    outside_mask = rollup_df["president_electoral_rank"].astype("Int64") > 2
+    outside = rollup_df["national_electoral_votes"].where(
+        outside_mask.fillna(False).astype(bool), 0
+    )
+    frame = pd.DataFrame(
+        {
+            "year": rollup_df["year"].astype(int),
+            "cast": rollup_df["national_electoral_votes"],
+            "counted": rollup_df["national_counted_electoral_votes"],
+            "outside": outside,
+        }
+    )
+    return frame.groupby("year", as_index=False)[["cast", "counted", "outside"]].sum()
+
+
+def add_electoral_remainders(
+    summary_df: pd.DataFrame, rollup_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Append the two #570 tallies to the hybrid summary and project it to its contract.
+
+    - ``electoral_votes_outside_top_two``: electoral votes **cast** for candidates whose
+      counted-basis rank is above 2 (see :func:`_remainder_totals`).
+    - ``electors_without_a_counted_vote``: the summary's own ``ec_denominator`` (the
+      electors appointed, served beside it as ``electoral_denominator``) minus the
+      year's electoral votes **counted** — votes never cast plus votes cast but not
+      counted.
+
+    Computed from the built roll-up rather than re-aggregated from state rows, so
+    national aggregation keeps its one derivation (D037/F). A **left** merge on the
+    summary: a year missing from the roll-up surfaces as a NULL that
+    :func:`assert_electoral_remainders_are_consistent` refuses, never as a dropped row.
+    Run it after :func:`assert_rollup_and_hybrid_summary_cover_the_same_years`.
+    """
+    totals = _remainder_totals(rollup_df)
+    try:
+        out = summary_df.merge(
+            totals[["year", "outside", "counted"]],
+            on="year",
+            how="left",
+            validate="1:1",
+        )
+    except ValueError as e:
+        # MergeError (a duplicate summary year) is a ValueError, as is a `year` whose
+        # dtype will not merge with the roll-up's int years; either is ours to report,
+        # so `_run_build` exits 3 rather than with a traceback.
+        raise SnapshotError(
+            f"the electoral-vote tallies do not join the summary one-to-one: {e}"
+        ) from e
+    out["electoral_votes_outside_top_two"] = out["outside"]
+    out["electors_without_a_counted_vote"] = out["ec_denominator"] - out["counted"]
+    return out[list(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)]
+
+
+def assert_electoral_remainders_are_consistent(
+    summary_df: pd.DataFrame, rollup_df: pd.DataFrame
+) -> None:
+    """Refuse a ``hybrid_summary`` whose #570 tallies disagree with the roll-up.
+
+    Each check reads the **served** columns against an identity recomputed here from
+    ``rollup_df``, so every one can fire on its own:
+
+    - (e) every roll-up row has a rank, a cast total and a counted total (a NULL would
+      silently undercount both tallies);
+    - (d) both tallies are non-null, with exactly one summary row per year;
+    - (a) the summary's ``ec_denominator`` equals the roll-up's
+      ``national_electoral_denominator`` (a NULL on either side is a mismatch);
+    - (b) appointed ≥ cast ≥ counted, per year (D046);
+    - (b′) ``electors_without_a_counted_vote`` == appointed − counted;
+    - (c) 0 ≤ ``electoral_votes_outside_top_two`` ≤ cast;
+    - (c′) ``electoral_votes_outside_top_two`` == the roll-up's cast votes over
+      candidates ranked above 2.
+
+    (b′) and (c′) recompute with the same :func:`_remainder_totals` the builder uses,
+    so they catch a served value that drifted from the roll-up, not a bug inside that
+    helper; the hand-written literals in ``test_snapshot_electoral_remainders.py`` pin
+    the helper itself.
+    """
+    null_inputs = rollup_df[list(_REMAINDER_INPUT_COLUMNS)].isna().any(axis=1)
+    if bool(null_inputs.any()):
+        raise SnapshotError(
+            f"{int(null_inputs.sum())} national_rollup row(s) lack a rank, a cast "
+            "total or a counted total, so the electoral-vote tallies would undercount: "
+            f"years {sorted(set(rollup_df.loc[null_inputs, 'year'].astype(int)))}"
+        )
+    remainders = summary_df[["year", *_ELECTORAL_REMAINDER_COLUMNS]]
+    null_out = remainders.isna().any(axis=1)
+    if bool(null_out.any()):
+        raise SnapshotError(
+            "hybrid_summary rows with a NULL electoral-vote tally: years "
+            f"{sorted(set(summary_df.loc[null_out, 'year'].astype(int)))}. Both are a "
+            "whole number for every year served."
+        )
+    dup = summary_df["year"].duplicated(keep=False)
+    if bool(dup.any()):
+        raise SnapshotError(
+            "hybrid_summary has more than one row for years "
+            f"{sorted(set(summary_df.loc[dup, 'year'].astype(int)))}"
+        )
+
+    totals = _remainder_totals(rollup_df)
+    denominators = (
+        rollup_df[["year", "national_electoral_denominator"]]
+        .assign(year=lambda d: d["year"].astype(int))
+        .drop_duplicates()
+    )
+    checked = (
+        summary_df[["year", "ec_denominator", *_ELECTORAL_REMAINDER_COLUMNS]]
+        .assign(year=lambda d: d["year"].astype(int))
+        .merge(totals, on="year", how="left")
+        .merge(denominators, on="year", how="left")
+    )
+
+    def _refuse(holds: pd.Series, what: str) -> None:
+        # `holds` is the identity, per year. NA means a side is missing: refused as a
+        # failure, never skipped.
+        bad = ~holds.astype("boolean").fillna(False).astype(bool)
+        if bool(bad.any()):
+            raise SnapshotError(
+                f"electoral-vote tallies fail {what} for years "
+                f"{sorted(checked.loc[bad, 'year'].tolist())}"
+            )
+
+    appointed = checked["ec_denominator"].astype("Int64")
+    _refuse(
+        appointed == checked["national_electoral_denominator"].astype("Int64"),
+        "(a) hybrid_summary ec_denominator == national_rollup "
+        "national_electoral_denominator",
+    )
+    cast = checked["cast"].astype("Int64")
+    counted = checked["counted"].astype("Int64")
+    _refuse(
+        (appointed >= cast) & (cast >= counted),
+        "(b) appointed >= cast >= counted (D046)",
+    )
+    _refuse(
+        checked["electors_without_a_counted_vote"].astype("Int64")
+        == appointed - counted,
+        "(b') electors_without_a_counted_vote == appointed - counted",
+    )
+    outside = checked["electoral_votes_outside_top_two"].astype("Int64")
+    _refuse((outside >= 0) & (outside <= cast), "(c) 0 <= outside the top two <= cast")
+    _refuse(
+        outside == checked["outside"].astype("Int64"),
+        "(c') electoral_votes_outside_top_two == the roll-up's cast votes above "
+        "rank 2",
+    )
 
 
 #: The shared remedy for a per-capita frame that disagrees with the served facts.
@@ -1421,6 +1604,12 @@ def build_snapshot(
     hybrid_summary_df = _to_int64(hybrid_summary_df, ("ec_denominator",))
     assert_no_hybrid_pv_below_mit_window(hybrid_summary_df)
     assert_rollup_and_hybrid_summary_cover_the_same_years(rollup_df, hybrid_summary_df)
+    # #570: the year sets agree (above), so the left merge cannot drop or invent a year.
+    hybrid_summary_df = _to_int64(
+        add_electoral_remainders(hybrid_summary_df, rollup_df),
+        _ELECTORAL_REMAINDER_COLUMNS,
+    )
+    assert_electoral_remainders_are_consistent(hybrid_summary_df, rollup_df)
     per_capita_table = build_per_capita_table(per_capita_df, data_df)
 
     ts = build_timestamp if build_timestamp is not None else datetime.now(UTC)
@@ -1613,7 +1802,11 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         " hybrid_flip INTEGER,"
         " ec_margin REAL,"
         " pv_margin REAL,"
-        " hybrid_margin REAL)"
+        " hybrid_margin REAL,"
+        # --- #570: whole numbers for every year served, 0 a real value; NOT NULL
+        # backs the build guard per row.
+        " electoral_votes_outside_top_two INTEGER NOT NULL,"
+        " electors_without_a_counted_vote INTEGER NOT NULL)"
     )
     series_check = _in_check("population_series", PER_CAPITA_SERIES_VALUES)
     basis_check = _in_check("boundary_basis", PER_CAPITA_BOUNDARY_BASIS_VALUES)

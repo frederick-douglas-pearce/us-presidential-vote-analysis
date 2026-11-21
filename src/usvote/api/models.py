@@ -186,6 +186,9 @@ _ELECTION_SUMMARY_EXAMPLE: dict[str, Any] = {
     # from 0.2204 at code review — a shipped OpenAPI example that does not reconcile
     # with its own siblings teaches a consumer the wrong formula.
     "hybrid_margin": 0.2090,
+    # #570: no candidate ranked below second; one DC elector did not vote.
+    "electoral_votes_outside_top_two": 0,
+    "electors_without_a_counted_vote": 1,
 }
 
 #: 2020 California: the 2010 census (which governs 2020 — the 2020 census first governed
@@ -663,6 +666,9 @@ class ElectionSummary(BaseModel):
     *or* disagree with the electoral college. The electoral-college fields
     (``ec_winner``, ``ec_margin``, ``electoral_denominator``, ``ec_determinative``) and
     ``pv_coverage`` are populated for **every** year the API serves, back to 1824.
+    ``electoral_votes_outside_top_two`` and ``electors_without_a_counted_vote`` are
+    never null: each is a whole number for every year served, and 0 is a real value, not
+    a missing one.
 
     **``ec_determinative: false`` is a real answer, not a gap** — it means no candidate
     reached a majority of the appointed electors and the election went to the House.
@@ -741,6 +747,33 @@ class ElectionSummary(BaseModel):
     hybrid_margin: float | None = Field(
         default=None,
         description="Top-two gap in the hybrid score, in percentage points.",
+    )
+    # --- #570: appended, never inserted. Wording: ba spec for #570 (plan gate).
+    electoral_votes_outside_top_two: int = Field(
+        description=(
+            "Electoral votes CAST this year for candidates ranked below second: the "
+            "sum of national_electoral_votes over every candidate whose electoral_rank "
+            "is 3 or more. The top two are ranks 1 and 2. electoral_rank orders "
+            "candidates by electoral votes COUNTED, but this sum adds votes CAST, so a "
+            "candidate whose votes Congress did not count can rank below second and "
+            "still add to it: 1872 is 24, including Horace Greeley's 3 votes cast, "
+            "none of them counted. Candidates with equal counted totals share a rank, "
+            "so ranks 1 and 2 can hold more than two candidates. 0 when every "
+            "candidate who received electoral votes ranks first or second."
+        ),
+    )
+    electors_without_a_counted_vote: int = Field(
+        description=(
+            "Electors appointed this year whose vote is not in Congress's count: "
+            "electoral_denominator minus the year's electoral votes counted "
+            "(national_electoral_votes_counted, added up over the year's candidates). "
+            "It includes both kinds: votes never cast, where an appointed elector did "
+            "not vote (2000 is 1, in the District of Columbia), and votes cast but not "
+            "counted, whose electoral_count_status on the year's state rows is "
+            "'not_counted' or 'disputed' (1868 is 9; 1872 is 17). It is therefore not "
+            "the number of 'not_counted' votes, which are only part of the second "
+            "kind. 0 when every appointed elector's vote was counted."
+        ),
     )
 
 
