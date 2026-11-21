@@ -106,12 +106,17 @@ class TestCard:
         with pytest.raises(TypeError, match="not one component"):
             components.card(html.Div([html.P("x", id="x")]))  # type: ignore[arg-type]
 
-    def test_a_card_refuses_a_card_beside_a_table(self) -> None:
-        # The refusal skips a table's cells, never the elements around the table.
+    @pytest.mark.parametrize("table_first", [True, False])
+    def test_a_card_refuses_a_card_beside_a_table(self, table_first: bool) -> None:
+        # The refusal skips a table's cells, never the elements around the table: it
+        # steps over the table and goes on, in whichever order the walk meets the two
+        # (a walk that stopped at the first table would pass one order and not the
+        # other; #567's acceptance gate, Class B).
         scroll = html.Div(html.Table([]), className="table-scroll")
         nested = html.Div([components.card([html.P("x")])])
+        children = [scroll, nested] if table_first else [nested, scroll]
         with pytest.raises(ValueError, match="a card holds a card"):
-            components.card([scroll, nested])
+            components.card(children)
 
     def test_a_card_keeps_its_children_in_source_order(self) -> None:
         kids = [html.H2("a", id="a"), html.P("b", id="b"), html.Div(id="c")]
