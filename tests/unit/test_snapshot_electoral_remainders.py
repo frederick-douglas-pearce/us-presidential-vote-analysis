@@ -15,15 +15,24 @@ cannot tell "rank by counted" from "rank by cast" (#570's architect review, I4).
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.fixtures.api_snapshot import (
+    synthetic_ec_pv_frame,
+    synthetic_party_keys_frame,
+    synthetic_per_capita_frame,
+    synthetic_pv_status_frame,
+)
+from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.snapshot import (
     SnapshotError,
     add_electoral_remainders,
     assert_electoral_remainders_are_consistent,
+    build_snapshot,
 )
 from usvote.snapshot_schema import HYBRID_SUMMARY_COLUMNS
 
@@ -254,6 +263,18 @@ def test_guard_b_refuses_counted_above_cast() -> None:
         assert_electoral_remainders_are_consistent(out, rollup)
 
 
+def test_guard_b_refuses_cast_above_appointed() -> None:
+    """The other half of (b): 2016 cast 539 of 538 appointed. Only (b) can fire.
+
+    Trump's rank stays 1, so (c) and (c′) hold; counted is unchanged, so (b′) holds.
+    """
+    out, rollup = _built()
+    hit = (rollup["year"] == 2016) & (rollup["candidate_slug"] == "donald-j-trump")
+    rollup.loc[hit, "national_electoral_votes"] = 305
+    with pytest.raises(SnapshotError, match=r"\(b\).*\[2016\]"):
+        assert_electoral_remainders_are_consistent(out, rollup)
+
+
 def test_guard_b_prime_refuses_a_wrong_served_count() -> None:
     out, rollup = _built()
     out.loc[out["year"] == 1868, "electors_without_a_counted_vote"] = 0
@@ -266,6 +287,18 @@ def test_guard_c_refuses_an_outside_value_out_of_range(bad: int) -> None:
     out, rollup = _built()
     out.loc[out["year"] == 2016, "electoral_votes_outside_top_two"] = bad
     with pytest.raises(SnapshotError, match=r"\(c\).*\[2016\]"):
+        assert_electoral_remainders_are_consistent(out, rollup)
+
+
+@pytest.mark.parametrize(("year", "wrong"), [(2016, 6), (1832, 0)])
+def test_guard_c_prime_refuses_an_in_range_value_that_disagrees(
+    year: int, wrong: int
+) -> None:
+    """(c′): a served value inside 0..cast but not the roll-up's sum (2016 is 7, 1832
+    is 18). A range check alone would accept both."""
+    out, rollup = _built()
+    out.loc[out["year"] == year, "electoral_votes_outside_top_two"] = wrong
+    with pytest.raises(SnapshotError, match=rf"\(c'\).*\[{year}\]"):
         assert_electoral_remainders_are_consistent(out, rollup)
 
 
@@ -302,6 +335,22 @@ def test_guard_e_refuses_a_null_rollup_input(column: str) -> None:
     rollup.loc[hit, column] = pd.NA
     with pytest.raises(SnapshotError, match=r"lack a rank.*\[1872\]"):
         assert_electoral_remainders_are_consistent(out, rollup)
+
+
+def test_a_duplicate_summary_year_is_refused_at_the_merge() -> None:
+    """``validate="1:1"`` refuses it, reported as ours rather than a pandas error."""
+    summary, rollup = _frames(_YEARS)
+    summary = pd.concat([summary, summary[summary["year"] == 1832]], ignore_index=True)
+    with pytest.raises(SnapshotError, match="do not join the summary one-to-one"):
+        add_electoral_remainders(summary, rollup)
+
+
+def test_a_summary_year_that_will_not_merge_is_reported_as_ours() -> None:
+    """A ``year`` of another dtype fails the merge as a SnapshotError (exit 3)."""
+    summary, rollup = _frames(_YEARS)
+    summary["year"] = summary["year"].astype(str)
+    with pytest.raises(SnapshotError, match="do not join the summary one-to-one"):
+        add_electoral_remainders(summary, rollup)
 
 
 def test_a_summary_year_missing_from_the_rollup_is_refused_not_dropped() -> None:
@@ -342,6 +391,50 @@ def test_the_built_snapshot_serves_the_tallies_from_state_level_rows(
     assert rows == [(1860, 18, 0, 8), (2016, 93, 0, 0), (2020, 93, 0, 0)]
     assert types["electoral_votes_outside_top_two"] == ("INTEGER", 1)
     assert types["electors_without_a_counted_vote"] == ("INTEGER", 1)
+
+
+def test_a_candidate_ranked_third_reaches_the_built_snapshot(tmp_path: Path) -> None:
+    """A non-zero tally through the real build, from state-level rows.
+
+    The synthetic 2020 is re-cut so that Cand C takes 5 of California's 55 from Cand B
+    (B 50, A 38, C 5): C ranks third, so 5 votes are outside the top two. The other
+    tests that build a snapshot see 0 there in every year, so a build that zeroed the
+    tally, or read the wrong rank, would pass them.
+    """
+    frame = synthetic_ec_pv_frame()
+    b = (frame["year"] == 2020) & (frame["candidate"] == "Cand B")
+    frame.loc[b, ["national_electoral_votes", "national_counted_electoral_votes"]] = 50
+    b_ca = b & (frame["state"] == "California")
+    frame.loc[b_ca, ["president_electoral_votes", COUNTED_VOTES_COLUMN]] = 50
+    c = frame[b].copy()
+    c["candidate_id"] = 9
+    c["candidate"] = "Cand C"
+    c["national_electoral_votes"] = 5
+    c["national_counted_electoral_votes"] = 5
+    c["president_electoral_rank"] = 3
+    c["took_office"] = False
+    c["president_electoral_votes"] = [0 if s == "Texas" else 5 for s in c["state"]]
+    c[COUNTED_VOTES_COLUMN] = c["president_electoral_votes"]
+    c["candidate_votes"] = [100_000, 200_000]
+    frame = pd.concat([frame, c], ignore_index=True)
+
+    out = str(tmp_path / "rank3.sqlite")
+    build_snapshot(
+        frame,
+        out,
+        pv_status_df=synthetic_pv_status_frame(),
+        per_capita_df=synthetic_per_capita_frame(),
+        party_keys_df=synthetic_party_keys_frame(frame),
+    )
+    conn = sqlite3.connect(out)
+    try:
+        rows = conn.execute(
+            "SELECT year, electoral_votes_outside_top_two, "
+            "electors_without_a_counted_vote FROM hybrid_summary ORDER BY year"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [(1860, 0, 8), (2016, 0, 0), (2020, 5, 0)]
 
 
 # --- served on the API -------------------------------------------------------------

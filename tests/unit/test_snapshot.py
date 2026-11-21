@@ -1534,7 +1534,9 @@ def test_the_schema_version_moved_for_the_new_shape() -> None:
 
 
 def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
-    """``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` ⊆ the warehouse tuple + the slugs.
+    """``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` ⊆ the warehouse tuple + build-derived.
+
+    The build-derived columns are the three winner slugs and #570's two tallies.
 
     **The test the schema docstring claimed and this change originally did not write**
     (caught at code review). Without it the one-way containment is a comment, not a

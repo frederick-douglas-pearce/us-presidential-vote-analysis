@@ -1155,7 +1155,10 @@ def add_electoral_remainders(
             how="left",
             validate="1:1",
         )
-    except pd.errors.MergeError as e:
+    except ValueError as e:
+        # MergeError (a duplicate summary year) is a ValueError, as is a `year` whose
+        # dtype will not merge with the roll-up's int years; either is ours to report,
+        # so `_run_build` exits 3 rather than with a traceback.
         raise SnapshotError(
             f"the electoral-vote tallies do not join the summary one-to-one: {e}"
         ) from e
@@ -1179,7 +1182,14 @@ def assert_electoral_remainders_are_consistent(
       ``national_electoral_denominator`` (a NULL on either side is a mismatch);
     - (b) appointed ≥ cast ≥ counted, per year (D046);
     - (b′) ``electors_without_a_counted_vote`` == appointed − counted;
-    - (c) 0 ≤ ``electoral_votes_outside_top_two`` ≤ cast.
+    - (c) 0 ≤ ``electoral_votes_outside_top_two`` ≤ cast;
+    - (c′) ``electoral_votes_outside_top_two`` == the roll-up's cast votes over
+      candidates ranked above 2.
+
+    (b′) and (c′) recompute with the same :func:`_remainder_totals` the builder uses,
+    so they catch a served value that drifted from the roll-up, not a bug inside that
+    helper; the hand-written literals in ``test_snapshot_electoral_remainders.py`` pin
+    the helper itself.
     """
     null_inputs = rollup_df[list(_REMAINDER_INPUT_COLUMNS)].isna().any(axis=1)
     if bool(null_inputs.any()):
@@ -1245,6 +1255,11 @@ def assert_electoral_remainders_are_consistent(
     )
     outside = checked["electoral_votes_outside_top_two"].astype("Int64")
     _refuse((outside >= 0) & (outside <= cast), "(c) 0 <= outside the top two <= cast")
+    _refuse(
+        outside == checked["outside"].astype("Int64"),
+        "(c') electoral_votes_outside_top_two == the roll-up's cast votes above "
+        "rank 2",
+    )
 
 
 #: The shared remedy for a per-capita frame that disagrees with the served facts.
@@ -1592,7 +1607,7 @@ def build_snapshot(
     # #570: the year sets agree (above), so the left merge cannot drop or invent a year.
     hybrid_summary_df = _to_int64(
         add_electoral_remainders(hybrid_summary_df, rollup_df),
-        ("ec_denominator", *_ELECTORAL_REMAINDER_COLUMNS),
+        _ELECTORAL_REMAINDER_COLUMNS,
     )
     assert_electoral_remainders_are_consistent(hybrid_summary_df, rollup_df)
     per_capita_table = build_per_capita_table(per_capita_df, data_df)

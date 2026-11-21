@@ -1021,7 +1021,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   counted (he ranks below second). Computed when the data file is built, never by the API at
   request time. A whole number for every year served; 0 is a real value.
 - **Shown as:** on the API's `/docs` page, the `ElectionSummary.electoral_votes_outside_top_two`
-  field description in `src/usvote/api/models.py`; served on each `elections` item of
+  field description in `src/usvote/api/models.py`, and the sentence in the `ElectionSummary`
+  class docstring that says it is never null; served on each `elections` item of
   `/v1/elections/summary` and in `election` on `/v1/elections/{year}` and
   `/v1/elections/{year}/summary`. Not shown on the dashboard until #563 adds a `LABELS` key.
 - **Source:** #570 (figure approved by the owner, 2026-11-17); `ElectionSummary` in
@@ -1114,7 +1115,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   no electors appointed (1864, 1868) adds nothing. Computed when the data file is built; a whole
   number for every year served; 0 is a real value.
 - **Shown as:** on the API's `/docs` page, the `ElectionSummary.electors_without_a_counted_vote`
-  field description in `src/usvote/api/models.py`; served where *Electoral votes outside the top
+  field description in `src/usvote/api/models.py`, and the sentence in the `ElectionSummary`
+  class docstring that says it is never null; served where *Electoral votes outside the top
   two* is. Not shown on the dashboard until #563 adds a `LABELS` key.
 - **Source:** #570 (figure approved by the owner, 2026-11-17); `ElectionSummary`;
   `ELECTORAL_VOTE_SHORTFALLS` and the count-status overrides in `src/usvote/transform.py`; D041;
