@@ -36,6 +36,7 @@ from tests.e2e.dashboard_pages import (
     NARROW_DESKTOP,
     NOT_FOUND_ERROR,
     PER_CAPITA_SUCCESS,
+    PHONE_WIDTHS,
     RESOURCE_ERROR,
     SECTIONS,
     STATES_NOT_FOUND,
@@ -1190,7 +1191,7 @@ def test_narrow_the_per_capita_filter_fills_its_box_as_before(
     assert found["width"] > FILTER_MAX_PX, (width, found)
 
 
-@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
 @pytest.mark.parametrize("section", election_view.SECTIONS)
 @pytest.mark.parametrize("year", LAYOUT_YEARS)
 def test_every_width_keeps_order_measure_and_tables(

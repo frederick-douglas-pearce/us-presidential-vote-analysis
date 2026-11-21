@@ -42,6 +42,7 @@ TOKENS: tuple[str, ...] = (
     "--rule",
     "--callout",
     "--callout-edge",
+    "--card-edge",
     "--text-muted",
     "--surface",
     "--border",
@@ -55,6 +56,13 @@ TOKENS: tuple[str, ...] = (
     "--chart-grid",
     "--chart-reference",
 )
+
+#: The tokens whose role the header declares "decorative, exempt from 3:1": what each
+#: paints is never the only cue to anything (WCAG 1.4.11 does not reach it). A chart's
+#: gridlines sit under its marks (#432); a card's edge frames a page section whose
+#: separation is the space around it (#567, D111), which the e2e suite measures
+#: (``test_dashboard_e2e_cards.py``). Each is held below 3:1, so the record is honest.
+DECORATIVE = frozenset({"--chart-grid", "--card-edge"})
 
 #: The non-color custom properties, declared in the light block: the readable measure
 #: (#360) and the font stack the page and the charts share (#432).
@@ -601,9 +609,56 @@ class TestThemeTokens:
         assert len(listed) == len(set(listed))
         assert set(listed) == set(TOKENS)
 
+    def test_the_header_marks_exactly_the_decorative_tokens(self) -> None:
+        # #567 (D111): the header's own words are the record. Every token its list
+        # marks "exempt from 3:1" is in DECORATIVE, and every one in DECORATIVE is
+        # marked, so the exemption cannot spread or be dropped in one place alone.
+        css = STYLESHEET.read_text(encoding="utf-8")
+        header = css[: css.index("*/")]
+        entries = re.split(r"^ {5}(?=--[\w-]+ {2,}\S)", header, flags=re.M)
+        marked = set()
+        for entry in entries:
+            if not entry.startswith("--"):
+                continue
+            # An entry is its token's line and the continuation lines indented under
+            # it; the first line that is not one (a blank line, a paragraph) ends it,
+            # so prose after the last entry is never read as that token's role.
+            first, *rest = entry.split("\n")
+            held = [first]
+            for line in rest:
+                if not line.startswith(" " * 6) or not line.strip():
+                    break
+                held.append(line)
+            if "exempt from 3:1" in " ".join(" ".join(held).split()):
+                marked.add(entry.split()[0])
+        assert marked == DECORATIVE
+
+    @pytest.mark.parametrize("theme", [LIGHT, EXPLICIT_DARK])
+    @pytest.mark.parametrize("token", sorted(DECORATIVE))
+    def test_a_decorative_token_stays_below_3_to_1_on_the_page(
+        self, token: str, theme: tuple[str | None, str]
+    ) -> None:
+        # Declared decorative, so it must be: a value that reached 3:1 would be a
+        # strong stroke, and the edge the issue asked for is faint (#567).
+        palette = block(theme)
+        ratio = contrast(parse_color(palette[token]), parse_color(palette["--page"]))
+        assert 1.0 < ratio < NON_TEXT, (token, theme, ratio)
+
+    def test_the_card_edge_reads_apart_from_the_table_rules(self) -> None:
+        # The card's top and bottom rules are not the rules between a table's rows
+        # (--rule) inside it (#567's architect review, m4): a different value, and
+        # the stronger of the two, in both palettes.
+        for theme in (LIGHT, EXPLICIT_DARK):
+            palette = block(theme)
+            page = parse_color(palette["--page"])
+            edge = contrast(parse_color(palette["--card-edge"]), page)
+            rule = contrast(parse_color(palette["--rule"]), page)
+            assert edge > rule, (theme, edge, rule)
+
     @pytest.mark.parametrize(
         ("token", "role"),
         [
+            ("--card-edge", "the edge of a section's card"),
             ("--border", "the earlier-and-later bar's edge"),
             ("--accent", "the earlier-and-later bar's"),
         ],
@@ -1889,9 +1944,43 @@ class TestLayoutRules:
                 grid = name in {"grid-auto-flow", "grid"}
                 assert not (grid and "dense" in value), where
 
+    def test_a_card_draws_its_rules_in_the_card_edge_token(self) -> None:
+        # #567 (D111): the one .card rule, outside every media block, draws a top
+        # and a bottom rule in --card-edge and nothing at the sides, so the token the
+        # header records as decorative is the one the card paints with.
+        (card,) = [
+            dict(declarations(body))
+            for at, prelude, body in shipped_rules()
+            if " ".join(prelude.split()) == ".card"
+        ]
+        assert card == {
+            "border-block": "1px solid var(--card-edge)",
+            "padding-block": "0 1rem",
+            "margin-block": "2rem",
+        }
+        found = [
+            (at, prelude)
+            for at, prelude, _ in shipped_rules()
+            if re.search(r"\.card\b", prelude)
+        ]
+        assert found == [(None, ".card"), (None, ".card > .states:first-child")], found
+
     def test_the_header_comment_describes_the_layout(self) -> None:
         css = STYLESHEET.read_text(encoding="utf-8")
         header = " ".join(css[: css.index("*/")].split())
-        pieces = ("76rem", ".filter-row", ".filter-own-row", ".pair", "42rem", "D102")
+        pieces = (
+            "76rem",
+            ".filter-row",
+            ".filter-own-row",
+            ".pair",
+            "42rem",
+            "D102",
+            # Cards (#567, D111): what one is, its edge, and what stays outside.
+            ".card",
+            "--card-edge",
+            "decorative",
+            "components.card",
+            "D111",
+        )
         for piece in pieces:
             assert piece in header, piece

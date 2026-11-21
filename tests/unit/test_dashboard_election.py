@@ -27,6 +27,7 @@ from dash import no_update
 
 from explore import api, components, election_view, export, labels
 from explore import app as appmod
+from tests.dashboard_cards import card_children, card_holding, cards, in_one_card
 from tests.unit.test_dashboard_app import (
     META,
     RECORDED,
@@ -4501,12 +4502,12 @@ class TestWideLayout:
     ) -> None:
         tree = render_page(OV, year)
         pair = self.pair(tree)
-        # A direct child of the success marker, after the section links.
+        # The first thing in the card that follows the section links (#567): the
+        # pair and T3 below it share that one card.
         kids = list(tree.children)
-        assert pair in kids
-        assert kids.index(pair) == kids.index(
-            find(tree, election_view.SECTIONS_ID)
-        ) + 1
+        position = kids.index(find(tree, election_view.SECTIONS_ID)) + 1
+        assert card_children(tree, position)[0] is pair
+        assert cards(tree) == [kids[position]]
         left, right = pair.children
         assert [h.children for h in of_type(left, "H2")] == ["Under each method"]
         assert find(left, PANEL) is not None
@@ -4525,9 +4526,9 @@ class TestWideLayout:
         assert find(pair, NATION) is None
         order = ids_in_order(tree)
         assert order.index(C1) < order.index(NATION)
-        # T3's own scroll box is a later sibling of the pair.
-        kids = list(tree.children)
-        after = kids[kids.index(pair) + 1 :]
+        # T3's own scroll box is a later sibling of the pair, in the pair's card.
+        held = card_holding(tree, pair).children
+        after = held[held.index(pair) + 1 :]
         assert any(find(kid, NATION) is not None for kid in after)
 
     def test_the_pair_holds_when_the_panel_is_unavailable(self) -> None:
@@ -4537,6 +4538,11 @@ class TestWideLayout:
         assert find(left, MOD["PANEL_UNAVAILABLE_ID"]) is not None
         assert find(left, PANEL) is None
         assert find(right, C1) is not None
+        # The panel's note stays in the overview's one card, with T3 (#567).
+        tree = render_page(OV, 1872, body=body)
+        assert in_one_card(tree, MOD["PANEL_UNAVAILABLE_ID"]) is in_one_card(
+            tree, NATION
+        )
 
     @pytest.mark.parametrize(
         ("page", "ids"),

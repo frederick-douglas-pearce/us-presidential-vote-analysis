@@ -489,26 +489,34 @@ def render(
             html.H1(PER_CAPITA_HEADING.format(year=year)),
             html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             election_view.section_nav(year, election_view.PER_CAPITA),
-            components.chart(
-                C3_ID, c3.figure, PER_CAPITA_TABLE_ID, _c3_caption(c3, selected)
+            # The page's one section, C3 with its companion table, named by its H1,
+            # in one card (#567, D111).
+            components.card(
+                [
+                    components.chart(
+                        C3_ID, c3.figure, PER_CAPITA_TABLE_ID, _c3_caption(c3, selected)
+                    ),
+                    _control(rows, chosen),
+                    html.P(
+                        f"Showing {len(shown)} of {len(rows)} rows", className="count"
+                    ),
+                    *components.table(
+                        shown,
+                        lambda r: html.Tr(
+                            [
+                                components.state_cell(r),
+                                *labels.per_capita_cells(r, strings[r["state_usps"]]),
+                            ]
+                        ),
+                        PER_CAPITA_FIELDS,
+                        PER_CAPITA_TABLE_ID,
+                        _download(year, per_capita, chosen),
+                        extra=PER_CAPITA_EXTRA,
+                        notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
+                    ),
+                    labels.glossary(PER_CAPITA_FIELDS),
+                ]
             ),
-            _control(rows, chosen),
-            html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            *components.table(
-                shown,
-                lambda r: html.Tr(
-                    [
-                        components.state_cell(r),
-                        *labels.per_capita_cells(r, strings[r["state_usps"]]),
-                    ]
-                ),
-                PER_CAPITA_FIELDS,
-                PER_CAPITA_TABLE_ID,
-                _download(year, per_capita, chosen),
-                extra=PER_CAPITA_EXTRA,
-                notes=(labels.GOVERNING_CENSUS_NOTE, labels.BOUNDARY_NOTE),
-            ),
-            labels.glossary(PER_CAPITA_FIELDS),
             components.provenance_footer(per_capita["meta"]["provenance"]),
         ],
         id=PAGE_ID,

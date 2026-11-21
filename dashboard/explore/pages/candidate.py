@@ -386,19 +386,26 @@ def render(
     content = html.Div(
         [
             dcc.Location(id=URL_ID, refresh="callback-nav"),
-            _controls(rows, years, several, chosen),
-            html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            *components.table(
-                shown,
-                lambda r: _row(r, coverage),
-                FIELDS,
-                TABLE_ID,
-                download,
-                extra=EXTRA,
-                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
+            # The page's one section, named by its H1, in one card (#567, D111).
+            components.card(
+                [
+                    _controls(rows, years, several, chosen),
+                    html.P(
+                        f"Showing {len(shown)} of {len(rows)} rows", className="count"
+                    ),
+                    *components.table(
+                        shown,
+                        lambda r: _row(r, coverage),
+                        FIELDS,
+                        TABLE_ID,
+                        download,
+                        extra=EXTRA,
+                        notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
+                    ),
+                    *labels.party_notes(shown),
+                    labels.glossary(GLOSSARY),
+                ]
             ),
-            *labels.party_notes(shown),
-            labels.glossary(GLOSSARY),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

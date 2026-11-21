@@ -279,7 +279,7 @@ def test_the_plots_stay_aligned_across_resizes(page: Page) -> None:
 
 
 @pytest.mark.plotlyjs_fetches(1)
-@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
 def test_every_width_keeps_order_measure_and_tables(page: Page, width: int) -> None:
     open_at(page, width)
     assert_layout_holds(page, OVER_TIME_SUCCESS, ("#elections-over-time-table",), width)

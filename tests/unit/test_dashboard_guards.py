@@ -1345,9 +1345,21 @@ def _class_values(tree: ast.AST) -> list[ast.AST]:
 
 
 def pair_class_uses(source: str) -> list[str]:
-    """Each place ``source`` sets the ``pair`` class (#553, D103), as
+    """Each place ``source`` sets the ``pair`` class (#553, D103): :func:`class_uses`
+    for ``pair``."""
+    return class_uses(source, "pair")
+
+
+def card_class_uses(source: str) -> list[str]:
+    """Each place ``source`` sets the ``card`` class (#567, D111): :func:`class_uses`
+    for ``card``."""
+    return class_uses(source, "card")
+
+
+def class_uses(source: str, name: str) -> list[str]:
+    """Each place ``source`` sets the class ``name``, as
     ``"<function>: line <n>"`` (the line where the class expression names it): a
-    string in a class expression whose words include ``pair``, literal, in a
+    string in a class expression whose words include ``name``, literal, in a
     multi-class string, an f-string or a join, or a module-level name a plain,
     chained, tuple or annotated assignment binds to such a string. It reads source,
     so a class passed through a local variable, a function's return value or a
@@ -1393,7 +1405,7 @@ def pair_class_uses(source: str) -> list[str]:
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
-                and "pair" in node.value.split()
+                and name in node.value.split()
             ):
                 where = owner.get(id(found_node), "<module>")
                 line = getattr(found_node, "lineno", 0)
@@ -1417,32 +1429,56 @@ def test_only_components_builds_a_pair() -> None:
     assert found == {}
 
 
-@pytest.mark.parametrize(
-    ("source", "caught"),
-    [
-        ("html.Div([], className='pair')\n", True),
-        ("html.Div([], className='note pair')\n", True),
-        ("html.Div([], className=f'{x} pair')\n", True),
-        ("html.Div([], className=' '.join(['a', 'pair']))\n", True),
-        ("html.Div([], className='pair' if x else 'b')\n", True),
-        ("html.Div([], **{'className': 'pair'})\n", True),
-        ("d = html.Div([])\nd.className = 'pair'\n", True),
-        ("PAIR = 'pair'\nhtml.Div([], className=PAIR)\n", True),
-        ("PAIR: str = 'note pair'\nhtml.Div([], className=f'{PAIR} x')\n", True),
-        ("A = B = 'pair'\nhtml.Div([], className=A)\n", True),
-        ("A, B = 'x', 'pair'\nhtml.Div([], className=B)\n", True),
-        ("[A, (B, C)] = ['x', ('y', 'pair')]\nhtml.Div([], className=C)\n", True),
-        ("A, B = 'pair', 'x'\nhtml.Div([], className=B)\n", False),
-        ("PAIR = 'pairs'\nhtml.Div([], className=PAIR)\n", False),
-        ("NAME = 'pair'\nhtml.Div([], id=NAME)\n", False),
-        ('"""A docstring about a pair."""\n', False),
-        ("html.Div([], className='pairs pair-col')\n", False),
-        ("html.Div([], id='pair')\n", False),
-        ("x = 'pair'\n", False),
-    ],
-)
+def test_only_components_builds_a_card() -> None:
+    """D111: a ``.card`` is built only by ``components.card``, which refuses a card in
+    a card, as ``components.pair`` refuses one in a column (``TestCard`` in
+    ``test_dashboard_cards.py``). Any other module setting the class fails here."""
+    assert RUNTIME_MODULES, "no runtime modules found"
+    found = {
+        str(path.relative_to(PACKAGE)): uses
+        for path in RUNTIME_MODULES
+        if (uses := card_class_uses(path.read_text(encoding="utf-8")))
+    }
+    owners = [use.split(":")[0] for use in found.pop("components.py", [])]
+    assert owners == ["card"]
+    assert found == {}
+
+
+PAIR_LINT_CASES = [
+    ("html.Div([], className='pair')\n", True),
+    ("html.Div([], className='note pair')\n", True),
+    ("html.Div([], className=f'{x} pair')\n", True),
+    ("html.Div([], className=' '.join(['a', 'pair']))\n", True),
+    ("html.Div([], className='pair' if x else 'b')\n", True),
+    ("html.Div([], **{'className': 'pair'})\n", True),
+    ("d = html.Div([])\nd.className = 'pair'\n", True),
+    ("PAIR = 'pair'\nhtml.Div([], className=PAIR)\n", True),
+    ("PAIR: str = 'note pair'\nhtml.Div([], className=f'{PAIR} x')\n", True),
+    ("A = B = 'pair'\nhtml.Div([], className=A)\n", True),
+    ("A, B = 'x', 'pair'\nhtml.Div([], className=B)\n", True),
+    ("[A, (B, C)] = ['x', ('y', 'pair')]\nhtml.Div([], className=C)\n", True),
+    ("A, B = 'pair', 'x'\nhtml.Div([], className=B)\n", False),
+    ("PAIR = 'pairs'\nhtml.Div([], className=PAIR)\n", False),
+    ("NAME = 'pair'\nhtml.Div([], id=NAME)\n", False),
+    ('"""A docstring about a pair."""\n', False),
+    ("html.Div([], className='pairs pair-col')\n", False),
+    ("html.Div([], id='pair')\n", False),
+    ("x = 'pair'\n", False),
+]
+
+
+@pytest.mark.parametrize(("source", "caught"), PAIR_LINT_CASES)
 def test_the_pair_lint_catches_the_listed_ways(source: str, caught: bool) -> None:
     assert bool(pair_class_uses(source)) is caught
+
+
+@pytest.mark.parametrize(("source", "caught"), PAIR_LINT_CASES)
+def test_the_card_lint_catches_the_same_ways(source: str, caught: bool) -> None:
+    """The card lint is the pair lint for another name (#567): every shape it reads,
+    and every shape it does not, is the same."""
+    assert bool(card_class_uses(source.replace("pair", "card"))) is caught
+    # And one never stands for the other.
+    assert not card_class_uses(source)
 
 
 def test_the_pair_lint_names_where_the_class_is_set() -> None:

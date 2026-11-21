@@ -687,6 +687,62 @@ def _within(children: Any) -> list[Any]:
     return found
 
 
+def _classes(node: Any) -> list[str]:
+    """A component's ``className``, split into its classes."""
+    return str(node.to_plotly_json()["props"].get("className") or "").split()
+
+
+# Private (#567's review): a page sets the class only through card(), and a constant
+# another module could import would be a way round the lint that guards that.
+_CARD_CLASS = "card"
+
+
+def _holds_a_card(children: Any) -> bool:
+    """Whether a card sits anywhere in ``children``. It reads each node's props once
+    and does not descend into a table or a table's scroll box, where no card can be:
+    a card wraps whole tables, so walking every cell on each render would cost far
+    more than the check is worth (#567's review)."""
+    stack = [children]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (list, tuple)):
+            stack.extend(node)
+        elif isinstance(node, Component):
+            props = node.to_plotly_json()["props"]
+            classes = str(props.get("className") or "").split()
+            if _CARD_CLASS in classes:
+                return True
+            if not isinstance(node, html.Table) and "table-scroll" not in classes:
+                stack.append(props.get("children"))
+    return False
+
+
+def card(children: Sequence[Any]) -> html.Div:
+    """One page section, framed (#567, D111): the one way to build a ``.card``, as
+    :func:`pair` is for pairs. ``children`` is a run of elements the page already
+    builds, in source order: a section's heading and everything under it, or, on a page
+    whose content has no section heading, that whole run under the page's ``H1``. A
+    chart and its companion table, and a pair and the table below it, share one card.
+
+    A plain ``div``: no id, role, landmark or accessible name, and no ``tabIndex``, so
+    the card adds nothing to the accessibility tree and changes neither reading nor tab
+    order. Its edge is decorative (``--card-edge``); spacing separates the sections.
+
+    A card never holds a card: one nested in ``children`` raises ``ValueError``, a
+    page's bug that fails any render reaching it. ``test_only_components_builds_a_card``
+    (``test_dashboard_guards.py``) fails a runtime module other than this one that sets
+    the ``card`` class in the shapes the pair lint reads.
+    """
+    if isinstance(children, Component):
+        # A component is iterable (over its descendants' ids), so list() would build
+        # a card of id strings without a word: refuse it.
+        raise TypeError("card takes a sequence of elements, not one component")
+    held = list(children)
+    if _holds_a_card(held):
+        raise ValueError("a card holds a card")
+    return html.Div(held, className=_CARD_CLASS)
+
+
 def pair(
     left: Sequence[Any],
     right: Sequence[Any],
@@ -706,16 +762,22 @@ def pair(
     a column, so a chart in a pair has its table full width below it. Either column
     holding a table, or a table's scroll box, raises ``ValueError``: only a code change
     reaches that, so it is a page's bug, and it fails any render that reaches it, in
-    tests or in production. A table reached only through a prop other than
-    ``children`` (an option's label, say) is not seen, nor is one a callback writes
-    into a column later. ``test_only_components_builds_a_pair``
+    tests or in production. A card in either column raises the same way (#567): the
+    pair sits inside its section's card, never the reverse. A table reached only
+    through a prop other than ``children`` (an option's label, say) is not seen, nor
+    is one a callback writes into a column later. ``test_only_components_builds_a_pair``
     (``test_dashboard_guards.py``) fails a runtime module other than this one that
     sets the ``pair`` class in the shapes it reads; D103 names what it does not.
     """
     for node in _within([*left, *right]):
-        classes = str(node.to_plotly_json()["props"].get("className") or "").split()
+        classes = _classes(node)
         if isinstance(node, html.Table) or "table-scroll" in classes:
             raise ValueError(f"pair {ident!r} holds a table")
+        # A card frames a page section, and a pair sits inside one (#567, D111): a
+        # card in a column would frame the column on its own, which D103 forbids, and
+        # would become the column's first child under D102(b)'s margin reset.
+        if _CARD_CLASS in classes:
+            raise ValueError(f"pair {ident!r} holds a card")
     columns = []
     for held, column_id in ((left, left_id), (right, right_id)):
         named: dict[str, Any] = {} if column_id is None else {"id": column_id}

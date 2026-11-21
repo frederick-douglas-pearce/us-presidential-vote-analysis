@@ -169,7 +169,7 @@ def test_narrow_the_filters_stack_as_before(
         assert abs(f["width"] - box["width"]) <= 0.5, (width, f, box)
 
 
-@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
 @pytest.mark.parametrize("path", [STATE_PATH, PER_CAPITA_PATH, CANDIDATE_PATH])
 def test_every_width_keeps_order_measure_and_tables(
     page: Page, path: str, width: int

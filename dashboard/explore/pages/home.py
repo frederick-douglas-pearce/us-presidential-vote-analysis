@@ -50,24 +50,31 @@ def render(meta: dict[str, Any]) -> html.Div:
     coverage = provenance["coverage"]
     return html.Div(
         [
-            html.H2("What it covers"),
-            html.Ul(
+            components.card(
                 [
-                    html.Li(
+                    html.H2("What it covers"),
+                    html.Ul(
                         [
-                            html.Span("Electoral College: ", className="label"),
-                            _years(coverage["year_min"], coverage["year_max"]),
-                        ]
+                            html.Li(
+                                [
+                                    html.Span("Electoral College: ", className="label"),
+                                    _years(coverage["year_min"], coverage["year_max"]),
+                                ]
+                            ),
+                            html.Li(
+                                [
+                                    html.Span("Popular vote: ", className="label"),
+                                    _years(
+                                        coverage["pv_year_min"], coverage["pv_year_max"]
+                                    ),
+                                ]
+                            ),
+                        ],
+                        id=COVERAGE_ID,
                     ),
-                    html.Li(
-                        [
-                            html.Span("Popular vote: ", className="label"),
-                            _years(coverage["pv_year_min"], coverage["pv_year_max"]),
-                        ]
-                    ),
-                ],
-                id=COVERAGE_ID,
+                ]
             ),
+            # The two links are navigation, outside the card (#567, D111).
             html.P(
                 dcc.Link("Browse every election in the dataset", href="/elections"),
                 className="next",

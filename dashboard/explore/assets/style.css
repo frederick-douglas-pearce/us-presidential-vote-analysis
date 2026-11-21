@@ -20,6 +20,9 @@
      --rule            table and footer rules
      --callout         the degraded state's fill
      --callout-edge    the degraded state's edge
+     --card-edge       the edge of a section's card (decorative, exempt from 3:1): the
+                       card's top and bottom rules, set apart from the table rules
+                       (--rule) inside it (#567, D111)
    Control tokens (#409), which the dcc controls paint with through Dash's --Dash-*
    variables. In light, Dash's own light defaults paint the controls, so each light
    value here is a copy of the one Dash variable named beside it, pinned to the
@@ -81,7 +84,16 @@
    pair is built by components.pair (D103), which refuses a table on any render that
    reaches it, and test_only_components_builds_a_pair
    (tests/unit/test_dashboard_guards.py) fails a page that sets the class itself in
-   the shapes that lint reads (D103(b) names those it does not). */
+   the shapes that lint reads (D103(b) names those it does not).
+
+   Cards (#567, D111), detailed at the .card rule: each page section is one .card, a
+   run of the page's content between a top and a bottom rule in --card-edge, with no
+   side edge and no side padding, so a card costs no width at any width. The edge is
+   decorative: the space around each card separates the sections. A chart and its
+   companion table, and a pair and the table below it, share one card; the heading and
+   lede, the section links, the earlier-and-later bar and the provenance footer stay
+   outside every card. Every card is built by components.card, which refuses a card
+   in a card, as components.pair refuses one in a column. */
 :root {
   color-scheme: light;
   /* Not colors: the readable measure (#360), and the font stack the page and every
@@ -97,6 +109,7 @@
   --rule: #ddd;
   --callout: #fdf6e3;
   --callout-edge: #b58900;
+  --card-edge: #c4c4c4;
   --text-muted: rgba(0, 12, 51, 0.65); /* --Dash-Text-Weak */
   --surface: #fff; /* --Dash-Fill-Inverse-Strong */
   --border: rgba(0, 18, 77, 0.45); /* --Dash-Stroke-Strong */
@@ -122,6 +135,7 @@
     --rule: #333;
     --callout: #2b2610;
     --callout-edge: #b58900;
+    --card-edge: #474747;
     --text-muted: #a3a3a3;
     --surface: #1e1e1e;
     --border: #767676;
@@ -161,6 +175,7 @@
   --rule: #333;
   --callout: #2b2610;
   --callout-edge: #b58900;
+  --card-edge: #474747;
   --text-muted: #a3a3a3;
   --surface: #1e1e1e;
   --border: #767676;
@@ -527,6 +542,17 @@ fieldset.filter legend { padding: 0; }
 .metrics dt { font-weight: 600; }
 .metrics dt, .metrics dd { overflow-wrap: anywhere; }
 .metrics dd { margin: 0; }
+/* A page section's card (#567, D111): a top and a bottom rule and the space around
+   them. No top padding: the card's first child's own top margin sets the space under
+   the top rule, as it set the space above the section before: a section heading's
+   1.75rem (or a pair's margin-block from 76rem, so D102(b)'s pair spacing holds inside
+   a card at every width), a .filters box's 1rem, or, for a chart first (.chart has no
+   margin), its title paragraph's 1em collapsing through the figure. The States list
+   (ul, margin 0) is the one first child that would touch the rule, so it takes 1rem.
+   No side edge or side padding (the owner's choice at #567's plan gate), so a card
+   takes no width from a table or a chart. */
+.card { border-block: 1px solid var(--card-edge); padding-block: 0 1rem; margin-block: 2rem; }
+.card > .states:first-child { margin-top: 1rem; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }
 /* The readable measure. T1 and the States list are here too: at full width their few
    short columns would spread thin. A chart's caption and a table's party notes are

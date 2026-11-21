@@ -316,19 +316,26 @@ def render(
             html.H1(STATES_HEADING.format(year=year)),
             html.P(f"{LEDE} {FILTER_SENTENCE}", className="lede"),
             election_view.section_nav(year, election_view.STATES),
-            _controls(rows, chosen),
-            html.P(f"Showing {len(shown)} of {len(rows)} rows", className="count"),
-            *components.table(
-                shown,
-                lambda r: _state_row(r, year, coverage),
-                STATE_FIELDS,
-                STATES_TABLE_ID,
-                _download(year, body, chosen),
-                extra=STATE_EXTRA,
-                notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
+            # The page's one section, named by its H1, in one card (#567, D111).
+            components.card(
+                [
+                    _controls(rows, chosen),
+                    html.P(
+                        f"Showing {len(shown)} of {len(rows)} rows", className="count"
+                    ),
+                    *components.table(
+                        shown,
+                        lambda r: _state_row(r, year, coverage),
+                        STATE_FIELDS,
+                        STATES_TABLE_ID,
+                        _download(year, body, chosen),
+                        extra=STATE_EXTRA,
+                        notes=(labels.PARTY_NOTE, labels.PARTY_NULL_NOTE),
+                    ),
+                    *labels.party_notes(shown),
+                    labels.glossary(STATE_GLOSSARY),
+                ]
             ),
-            *labels.party_notes(shown),
-            labels.glossary(STATE_GLOSSARY),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

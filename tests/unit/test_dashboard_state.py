@@ -36,6 +36,7 @@ from explore import (
     query,
     state_view,
 )
+from tests.dashboard_cards import card_children, cards, every_card, in_one_card
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -1590,26 +1591,26 @@ class TestWideLayout:
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
         assert kids[0].id == state_view.SECTIONS_ID
-        assert type(kids[1]).__name__ == "H2"
-        assert kids[1].children == MOD["C7_HEADING"]
-        assert type(kids[2]).__name__ == "Figure"
-        assert kids[2].id == charts.dom_id(MOD["C7_ID"])
-        assert type(kids[3]).__name__ == "H2"
-        assert kids[3].children == MOD["C7_TABLE_HEADING"]
-        t4 = [
-            i
-            for i, k in enumerate(kids)
-            if type(k).__name__ == "H2" and k.children == MOD["HISTORY_TABLE_HEADING"]
-        ]
-        assert len(t4) == 1
-        (at,) = t4
-        # C7's table and its column-name list sit between its heading and T4's.
-        between = kids[4:at]
-        assert find(between, MOD["ELECTORS_TABLE_ID"]) is not None
-        assert find(between, MOD["ELECTORS_GLOSSARY_ID"]) is not None
-        assert find(between, MOD["TABLE_ID"]) is None
-        assert type(kids[at + 1]).__name__ == "Location"
-        assert kids[at + 2].className.split()[:1] == ["filters"]
+        # Two cards, one per section (#567, D111): C7's, then T4's.
+        assert cards(content) == kids[1:3]
+        c7 = card_children(content, 1)
+        assert type(c7[0]).__name__ == "H2"
+        assert c7[0].children == MOD["C7_HEADING"]
+        assert type(c7[1]).__name__ == "Figure"
+        assert c7[1].id == charts.dom_id(MOD["C7_ID"])
+        assert type(c7[2]).__name__ == "H2"
+        assert c7[2].children == MOD["C7_TABLE_HEADING"]
+        # C7's table and its column-name list are in C7's card, and T4 is not.
+        assert find(c7, MOD["ELECTORS_TABLE_ID"]) is not None
+        assert find(c7, MOD["ELECTORS_GLOSSARY_ID"]) is not None
+        assert find(c7, MOD["TABLE_ID"]) is None
+        t4 = card_children(content, 2)
+        assert type(t4[0]).__name__ == "H2"
+        assert t4[0].children == MOD["HISTORY_TABLE_HEADING"]
+        assert type(t4[1]).__name__ == "Location"
+        assert t4[2].className.split()[:1] == ["filters"]
+        assert find(t4, MOD["TABLE_ID"]) is not None
+        assert find(t4, MOD["ELECTORS_TABLE_ID"]) is None
         assert [f.id for f in of_type(page, "Figure")] == [charts.dom_id("C7")]
 
     def test_the_per_capita_page_s_slider_has_its_own_row_and_no_slot(
@@ -1625,8 +1626,10 @@ class TestWideLayout:
         kids = list(content.children)
         assert kids[0].id == state_view.SECTIONS_ID
         assert type(kids[1]).__name__ == "Location"
+        # The page's one section is one card (#567, D111), opened by the filters.
+        assert cards(content) == [kids[2]]
         (box,) = classed(content, "filters")
-        assert kids[2] is box
+        assert card_children(content, 2)[0] is box
         assert box.className.split() == ["filters", "filter-row"]
         (own,) = box.children
         assert own.className.split() == ["filter", "filter-own-row"]
@@ -1819,14 +1822,12 @@ class TestC7:
             lines
         )
         assert labels.C4_BASIS in lines
-        table = find(tree, ELECTORS)
-        at = [
-            i
-            for i, k in enumerate(tree.children)
-            if find(k, ELECTORS) is not None
-        ]
-        assert table is not None and at
-        assert labels.C4_BASIS in texts(tree.children[at[0] + 1 : at[0] + 4])
+        # The note follows the table's scroll box, in C7's card (#567).
+        (card,) = [k for k in cards(tree) if find(k, ELECTORS) is not None]
+        held = list(card.children)
+        at = [i for i, k in enumerate(held) if find(k, ELECTORS) is not None]
+        assert at
+        assert labels.C4_BASIS in texts(held[at[0] + 1 : at[0] + 4])
 
     def test_a_zero_allotment_is_a_marker_by_its_cause(self) -> None:
         # Georgia took no part in 1864 (recorded); Texas's 1864 and 1868 zeros through
@@ -1959,6 +1960,11 @@ class TestC7Degraded:
         headings = [h.children for h in of_type(tree, "H2")]
         assert headings[:2] == [MOD["C7_HEADING"], MOD["HISTORY_TABLE_HEADING"]]
         assert MOD["C7_TABLE_HEADING"] not in headings
+        # C7's note is in C7's card, the first of the page's two, and T4 in the
+        # second (#567).
+        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=2)
+        assert in_one_card(tree, TABLE, total=2) is not c7
+        assert every_card(tree)[0] is c7
 
     def test_two_allotments_in_one_election(self) -> None:
         body = ga_body()

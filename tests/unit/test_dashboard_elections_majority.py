@@ -16,6 +16,7 @@ import dash
 import pytest
 
 from explore import api, charts, components, elections_view, labels, over_time
+from tests.dashboard_cards import in_one_card
 from tests.unit.test_dashboard_app import (
     RECORDED,
     VERSION,
@@ -1212,6 +1213,8 @@ class TestC2Degraded:
         assert tree.id == PAGE_ID
         assert find(tree, MOD["LEADER_UNAVAILABLE_ID"]) is not None
         assert find(tree, C2) is None
+        # The section's note is in the section's one card (#567).
+        in_one_card(tree, MOD["LEADER_UNAVAILABLE_ID"])
 
     def test_the_index_down_degrades_the_whole_page(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1404,6 +1407,10 @@ class TestC2Filters:
         assert note.children == labels.NO_ELECTIONS_MATCH
         assert note.className == "empty"
         assert find(tree, C2) is None and find(tree, LEADERS) is None
+        # The note and the filters share the section's one card (#567).
+        assert in_one_card(tree, elections_view.NO_MATCH_ID) is in_one_card(
+            tree, elections_view.YEARS_ID
+        )
         assert len(of_type(tree, "RangeSlider")) == 1
         assert lede(tree) == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
         assert find(tree, elections_view.SECTIONS_ID) is not None
