@@ -41,6 +41,7 @@ CARD_COUNTS = {
     "/not-found-404": 0,
 }
 
+
 def card_parent_id(key: str) -> str | None:
     """The id of the ``Div`` whose children a page's cards are: the page's success
     marker, or ``None`` on home, whose marker is the coverage list inside its card, so
