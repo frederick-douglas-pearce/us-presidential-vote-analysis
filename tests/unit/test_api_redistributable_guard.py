@@ -165,6 +165,10 @@ _ALLOWED_ELECTION_FIELDS = frozenset(
         "ec_margin",
         "pv_margin",
         "hybrid_margin",
+        # #570: two integers summed from the electoral-vote measures (cast, counted,
+        # appointed), all NARA spine (US-PD). No popular-vote input, no free text.
+        "electoral_votes_outside_top_two",
+        "electors_without_a_counted_vote",
     }
 )
 

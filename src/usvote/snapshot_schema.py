@@ -54,7 +54,13 @@ from dataclasses import dataclass
 #: (``usgov_source`` / ``usgov_license``). The three columns are on ``ec_pv``, so they
 #: are inside the content hash: a later curated row (#387/#388) moves the version with
 #: no schema change. ``party`` (MIT's) is unchanged.
-SNAPSHOT_SCHEMA_VERSION = 5
+#:
+#: ``6`` (#570) — ``hybrid_summary`` gained two per-election electoral-vote tallies,
+#: ``electoral_votes_outside_top_two`` and ``electors_without_a_counted_vote``, appended
+#: at the end. They are derived from the roll-up, and the derived tables are outside the
+#: content hash, so only this bump moves ``snapshot_version`` (and the ETag): without it
+#: a revalidating client would keep a cached body that lacks the two fields.
+SNAPSHOT_SCHEMA_VERSION = 6
 
 #: The **electoral-college** provenance codes (#139 / D048), written into
 #: ``snapshot_meta`` by every build. The PV codes are read from the ``pv_source``
@@ -243,6 +249,15 @@ HYBRID_SUMMARY_COLUMNS: tuple[str, ...] = (
     "ec_margin",
     "pv_margin",
     "hybrid_margin",
+    # --- #570: appended, never inserted -----------------------------------------------
+    # Two per-election electoral-vote tallies, computed by the build from the national
+    # roll-up (not from the warehouse, so they are build-derived like the three slugs).
+    # Sum of electoral votes CAST over candidates whose rank — ordered by votes COUNTED,
+    # dense — is above 2. A tie at rank 2 keeps every tied candidate inside the top two.
+    "electoral_votes_outside_top_two",
+    # Electors appointed (``ec_denominator``) minus electoral votes COUNTED: votes never
+    # cast plus votes cast but not counted (``not_counted`` or ``disputed``).
+    "electors_without_a_counted_vote",
 )
 
 

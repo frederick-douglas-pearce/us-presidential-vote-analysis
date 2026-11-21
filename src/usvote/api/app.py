@@ -116,7 +116,11 @@ API_TITLE = "US Presidential Vote API"
 #: 0.8.0 -> 0.9.0 by #428: the ``/v1/elections/states`` route and its
 #: ``ElectionStateRow`` model. Additive, hence minor. It reads existing tables, so
 #: ``SNAPSHOT_SCHEMA_VERSION`` did not move (D070(c)).
-API_VERSION = "0.9.0"
+#:
+#: 0.9.0 -> 0.10.0 by #570: two fields on ``ElectionSummary``,
+#: ``electoral_votes_outside_top_two`` and ``electors_without_a_counted_vote``.
+#: Additive, hence minor. ``SNAPSHOT_SCHEMA_VERSION`` moved 5 -> 6 for the same event.
+API_VERSION = "0.10.0"
 
 API_SUMMARY = (
     "Electoral College vs. popular vote for every US presidential election from 1824."

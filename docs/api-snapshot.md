@@ -245,6 +245,30 @@ served year back to 1824. And `ec_determinative: false` is a **real answer** —
 reached a majority of the appointed electors, which is 1824 and is the case the hybrid
 exists to speak to — not a missing value.
 
+#### Two electoral-vote tallies (#570, schema 6)
+
+Two whole-number columns ride on the same row. They are not part of the three-method
+comparison; they summarize the year's electoral votes so a consumer need not re-derive them
+from `national_rollup`:
+
+- **`electoral_votes_outside_top_two`** — the electoral votes **cast** for candidates whose
+  `president_electoral_rank` is above 2. The rank is ordered by votes **counted** and is
+  dense, so a tie at second keeps every tied candidate inside the top two and a tie at first
+  makes the next candidate second. The sum adds votes cast: 1872 is 24, including Greeley's 3
+  votes cast, none of them counted (he ranks sixth).
+- **`electors_without_a_counted_vote`** — `ec_denominator` (the electors appointed) minus the
+  year's electoral votes **counted**. It spans both gaps of the ladder appointed ≥ cast ≥
+  counted: votes never cast (1832: 2, 1864: 1, 2000: 1) and votes cast but not counted or
+  disputed (1868: 9, 1872: 17). A state appointed no electors adds nothing to either figure.
+
+Both are computed by the build from the national roll-up's rows (`add_electoral_remainders`),
+never by the API at request time, and never NULL: 0 is a real value. The build refuses a
+snapshot where either tally disagrees with the roll-up it was summed from, where appointed ≥
+cast ≥ counted fails for a year, or where a roll-up row lacks a rank, a cast total or a
+counted total (`assert_electoral_remainders_are_consistent`). The derived tables are outside
+the content hash, so adding the two columns moved `schema_version` 5 → 6: that bump is what
+moves `snapshot_version`, and so the ETag.
+
 **`ec_share_full` and `ec_share_hybrid` are shipped separately even though they are equal.**
 The published coverage policy never restricts the electoral share, so no coverage rule can
 manufacture a majority that did not exist (D037/A). Both columns ship precisely so a

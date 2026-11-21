@@ -1527,13 +1527,16 @@ def test_the_schema_version_moved_for_the_new_shape() -> None:
     A literal, deliberately. Comparing the constant to itself would pass under any
     value; the whole obligation is that a human moved it when the shape changed, and
     only a literal records that. 3 → 4 was #245's new ``per_capita`` table; 4 → 5 was
-    #386's nominating-party columns and curated provenance pair.
+    #386's nominating-party columns and curated provenance pair; 5 → 6 was #570's two
+    ``hybrid_summary`` tallies.
     """
-    assert SNAPSHOT_SCHEMA_VERSION == 5
+    assert SNAPSHOT_SCHEMA_VERSION == 6
 
 
 def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
-    """``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` ⊆ the warehouse tuple + the slugs.
+    """``snapshot_schema.HYBRID_SUMMARY_COLUMNS`` ⊆ the warehouse tuple + build-derived.
+
+    The build-derived columns are the three winner slugs and #570's two tallies.
 
     **The test the schema docstring claimed and this change originally did not write**
     (caught at code review). Without it the one-way containment is a comment, not a
@@ -1552,7 +1555,14 @@ def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
     snapshot tuple that no warehouse column supplies, which would ``KeyError`` only
     against a real warehouse — on the one machine that has one.
     """
-    derived = {"ec_winner_slug", "pv_winner_slug", "hybrid_winner_slug"}
+    derived = {
+        "ec_winner_slug",
+        "pv_winner_slug",
+        "hybrid_winner_slug",
+        # #570: summed from the built roll-up by `add_electoral_remainders`.
+        "electoral_votes_outside_top_two",
+        "electors_without_a_counted_vote",
+    }
     unexplained = (
         set(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
         - set(hybrid.HYBRID_SUMMARY_COLUMNS)
@@ -1566,8 +1576,9 @@ def test_the_summary_tuple_is_contained_by_the_warehouse_tuple() -> None:
     # pass with `derived` empty and stop pinning anything about the slugs.
     assert derived <= set(SNAPSHOT_HYBRID_SUMMARY_COLUMNS)
     assert not (derived & set(hybrid.HYBRID_SUMMARY_COLUMNS)), (
-        "the slug columns are minted by the snapshot build; if the warehouse view "
-        "starts carrying them, this test's `derived` allowance is hiding a real overlap"
+        "the slug and #570 tally columns are minted by the snapshot build; if the "
+        "warehouse view starts carrying them, this test's `derived` allowance is hiding "
+        "a real overlap"
     )
 
 

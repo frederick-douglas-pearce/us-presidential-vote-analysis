@@ -408,6 +408,29 @@ def test_snapshot_from_a_real_full_span_warehouse(
                 one(f"SELECT count(*) FROM {HYBRID_SUMMARY_TABLE}") == SERVED_YEARS
             ), "one hybrid_summary row per served election"
 
+            # --- #570: the two electoral-vote tallies, on the real build ----------
+            # Hand-written literals (the live API's national rows, 2026-11-21): votes
+            # never cast (1832 Maryland 2, 1864 Nevada 1, 2000 DC 1), votes cast but
+            # not counted or disputed (1868 9, 1872 17), and candidates ranked below
+            # second (1832 Floyd + Wirt 18; 1872 24 incl. Greeley's 3 cast, 0 counted;
+            # 2016 7).
+            tallies = {
+                int(r[0]): (r[1], r[2])
+                for r in conn.execute(
+                    "SELECT year, electoral_votes_outside_top_two, "
+                    f"electors_without_a_counted_vote FROM {HYBRID_SUMMARY_TABLE} "
+                    "WHERE year IN (1832, 1864, 1868, 1872, 2000, 2016)"
+                )
+            }
+            assert tallies == {
+                1832: (18, 2),
+                1864: (0, 1),
+                1868: (0, 9),
+                1872: (24, 17),
+                2000: (0, 1),
+                2016: (7, 0),
+            }
+
             for year in (2000, 2016):
                 snap = conn.execute(
                     "SELECT ec_winner, pv_winner, hybrid_winner, pv_flip, "
