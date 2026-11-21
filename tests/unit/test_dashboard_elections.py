@@ -2170,10 +2170,30 @@ class TestMetricLabels:
     def test_every_metric_has_a_label_and_no_metric_key_is_a_field_label(self) -> None:
         assert list(labels.METRIC_LABELS) == list(metrics.METRICS)
         assert set(labels.METRIC_LABELS).isdisjoint(labels.LABELS)
-        assert set(METRIC_IDS) == set(metrics.METRICS)
         assert set(MOD["MEANS"]) == {
             k for k, m in metrics.METRICS.items() if m.kind == "mean"
         }
+
+    def test_every_metric_shows_on_exactly_one_page_under_a_unique_id(self) -> None:
+        # Each page's id map (#437's here; #569's on /elections/majority, D112): their
+        # keys are disjoint and together every metric, and no DOM id repeats (D097(g)).
+        maps = [METRIC_IDS, *(page_globals(p)["METRIC_IDS"] for p in METRIC_PAGES)]
+        keys = [key for ids in maps for key in ids]
+        assert sorted(keys) == sorted(metrics.METRICS)
+        assert len(keys) == len(set(keys))
+        dom = [ident for ids in maps for ident in ids.values()]
+        assert len(dom) == len(set(dom))
+
+    def test_every_kind_is_closed_and_computed_by_its_own_function(self) -> None:
+        assert {m.kind for m in metrics.METRICS.values()} <= set(metrics.KINDS)
+        for kind in metrics.KINDS:
+            assert callable(getattr(metrics, kind)), kind
+        for key, metric in metrics.METRICS.items():
+            # A flag count names the value it counts; no other kind does.
+            if metric.kind == "flag_count":
+                assert type(metric.counted) is bool, key
+            else:
+                assert metric.counted is None, key
 
     def test_every_source_is_a_public_api_field(self) -> None:
         assert metric_source_problems(metrics.METRICS.values()) == []
@@ -2189,6 +2209,16 @@ class TestMetricLabels:
             "NoSuchModel.year",
             "ElectionSummary.ec_denominator",
         ]
+
+
+#: The pages other than this one that show metrics, each with its ``METRIC_IDS``.
+METRIC_PAGES = ("pages.elections_majority",)
+
+
+def page_globals(module: str) -> dict[str, Any]:
+    """A registered page module's namespace, reached through its layout."""
+    namespace: dict[str, Any] = dash.page_registry[module]["layout"].__globals__
+    return namespace
 
 
 def metric_source_problems(rows: Any) -> list[str]:
@@ -2254,6 +2284,65 @@ class TestMetricsModule:
     def test_count_counts_rows(self) -> None:
         assert metrics.count([]) == 0
         assert metrics.count(BODY["data"]) == len(YEARS)
+
+    # --- flag_count (#569, D112) ---
+
+    @pytest.mark.parametrize(("counted", "hits"), [(True, 2), (False, 1)])
+    def test_a_flag_count_counts_one_value_out_of_the_flags(
+        self, counted: bool, hits: int
+    ) -> None:
+        pairs = [(1976, True), (1980, None), (1984, False), (1988, True)]
+        assert metrics.flag_count(pairs, counted) == metrics.FlagCount(
+            hits, 3, 1976, 1988
+        )
+
+    @pytest.mark.parametrize("null", [None, "", "  "])
+    def test_a_null_or_blank_flag_is_left_out_never_read_as_false(
+        self, null: Any
+    ) -> None:
+        # A blank is null, as the table's cells read it (labels.is_blank; #602's
+        # review, cr.1, amending D112(a)).
+        assert metrics.flag_count([(1824, null), (1828, False)], False) == (
+            metrics.FlagCount(1, 1, 1828, 1828)
+        )
+
+    @pytest.mark.parametrize("value", [0, 1, 1.0, "true", "false", "x", [True]])
+    def test_a_value_that_is_no_flag_makes_the_count_unrecognized(
+        self, value: Any
+    ) -> None:
+        pairs = [(1976, True), (1980, value)]
+        assert metrics.flag_count(pairs, True) == metrics.UNRECOGNIZED_COUNT
+
+    def test_no_flag_is_no_count(self) -> None:
+        assert metrics.flag_count([], True) == metrics.NO_COUNT
+        assert metrics.flag_count([(1824, None)], True) == metrics.NO_COUNT
+        assert not metrics.NO_COUNT.unrecognized
+
+    def test_a_zero_count_is_a_count(self) -> None:
+        assert metrics.flag_count([(2000, False)], True) == metrics.FlagCount(
+            0, 1, 2000, 2000
+        )
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            (1, 0, None, None),
+            (0, 1, None, None),
+            (2, 1, 2000, 2000),
+            (-1, 1, 2000, 2000),
+            (0, 1, 2004, 2000),
+            (0, 1, 2000, None),
+            (True, 1, 2000, 2000),
+            (1, 1, 2000, 2000, True),
+            (0, 0, 2000, 2000),
+            (1, True, 2000, 2000),  # an N that is no int
+            (0, 1, None, 2000),  # a first year missing beside a last
+            (0, 1, True, 2000),  # a first year that is no int
+        ],
+    )
+    def test_a_count_in_no_state_cannot_be_built(self, args: tuple[Any, ...]) -> None:
+        with pytest.raises(ValueError):
+            metrics.FlagCount(*args)
 
 
 class TestN1Items:

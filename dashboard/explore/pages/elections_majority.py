@@ -11,6 +11,7 @@ heading, lede and success marker stay.
 
 from __future__ import annotations
 
+import functools
 from typing import Any, NamedTuple
 
 import dash
@@ -24,6 +25,7 @@ from explore import (
     elections_view,
     export,
     labels,
+    metrics,
     over_time,
 )
 from explore.config import CANONICAL_HOST, SITE_TITLE
@@ -78,6 +80,21 @@ LEADER_FIELDS = (
 LEADER_WORDED = LEADER_FIELDS[2:]
 #: Exported though not shown: the key of the candidate's history link.
 LEADER_EXTRA = ("candidate_slug",)
+
+#: The headline counts (#569, D112): the block and each count's value, by metric key;
+#: DOM ids are stable and never renamed (D097(g)).
+METRICS_ID = "majority-metrics"
+METRIC_IDS = {
+    "ec_no_majority_count": "majority-ec-no-majority-count",
+    "pv_flip_count": "majority-pv-flip-count",
+}
+#: Each count's wording for every flag null among the years shown.
+METRIC_NO_FIGURE = {
+    "ec_no_majority_count": labels.METRIC_NO_COUNT_NULL_EC,
+    "pv_flip_count": labels.METRIC_NO_COUNT_NULL_PV,
+}
+#: The count read against the popular-vote window.
+PV_METRIC = "pv_flip_count"
 
 C2_TABLE_HEADING = "Each election's Electoral College leader"
 #: C2's section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
@@ -661,6 +678,49 @@ def _c2_caption(c2: C2, window: tuple[int, int]) -> str:
     return " ".join(parts)
 
 
+def _counts(rows: list[dict[str, Any]], window: tuple[int, int]) -> html.Div:
+    """The two counts over the years C2's table shows (#569, D112), as a ``dl`` and,
+    while the popular-vote count shows a number, the note naming the popular-vote
+    window. ``rows`` are the table's rows, one per year, each carrying N1's flags
+    (:data:`YEAR_FIELDS`); each count reads the field ``metrics.METRICS`` names. A
+    value that is no flag makes that count alone read unrecognized. Raises
+    ``TypeError`` for a flag count that names no value to count, which
+    :func:`_leader_section`'s ``try`` shows as the section's unavailable state."""
+    years = [row["year"] for row in rows]
+    entries: list[Any] = []
+    note = False
+    for key, ident in METRIC_IDS.items():
+        metric = metrics.METRICS[key]
+        if metric.counted is None:
+            raise TypeError(f"{key} is a flag count that names no value to count")
+        result = metrics.flag_count(
+            ((row["year"], row[metric.source.field]) for row in rows), metric.counted
+        )
+        pv_window = window if key == PV_METRIC else None
+        value, rest = labels.metric_count(
+            result, years, METRIC_NO_FIGURE[key], pv_window
+        )
+        children: Any = (
+            value
+            if rest is None
+            else [html.Span(value, className="metric-value"), html.Span(rest)]
+        )
+        entries += [
+            html.Dt(labels.METRIC_LABELS[key]),
+            labels.cell(children, functools.partial(html.Dd, id=ident)),
+        ]
+        note = note or (pv_window is not None and rest is not None)
+    content: list[Any] = [html.Dl(entries, className="metrics")]
+    if note:
+        content.append(
+            html.P(
+                labels.METRIC_PV_WINDOW_NOTE.format(first=window[0], last=window[1]),
+                className="note",
+            )
+        )
+    return html.Div(content, id=METRICS_ID)
+
+
 def _leader_section(
     index: dict[str, Any],
     summary: Any,
@@ -712,6 +772,8 @@ def _leader_section(
         by_row = {id(row): cell for row, cell in zip(rows, cells, strict=True)}
         # Inside the try: the table and its CSV read N1 too (each row's slug, the
         # provenance the preamble names), and a defect there is N1's, not the page's.
+        # The headline counts (#569, D112), inside the try: they read the same N1 rows.
+        counts = _counts(rows, window)
         table = components.table(
             rows,
             lambda r: _leader_row(r, by_row[id(r)]),
@@ -733,6 +795,9 @@ def _leader_section(
         ], False
     return [
         controls,
+        # The headline counts over the years shown (#569, D112): inside C2's card,
+        # after the filters and before the chart (D111(b)).
+        counts,
         components.chart(C2_ID, c2.figure, LEADER_TABLE_ID, _c2_caption(c2, window)),
         html.H2(C2_TABLE_HEADING),
         *table,
@@ -747,7 +812,8 @@ def render(
     could not be read) and the page's filter pairs
     (:func:`explore.elections_view.parse_filters`; none, every year): the heading and
     lede (with :data:`FILTER_SENTENCE` when the filters render), the section links
-    carrying the filters applied, then C2's section, then the footer."""
+    carrying the filters applied, then C2's section (with its headline counts, #569),
+    then the footer."""
     provenance = index["meta"]["provenance"]
     coverage = provenance["coverage"]
     # The index's rows are the page's, not a section's (cr.1): a defect there raises to

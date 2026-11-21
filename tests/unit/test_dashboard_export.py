@@ -2380,7 +2380,9 @@ UNRECOGNIZED_CELLS = {
     # One per doctored field, ``ec_determinative`` and the two winners from the year's
     # item (#434, #564).
     "/elections/majority": {
-        "elections-leader-table": len(LEADER_ROW_FIELDS) + 1 + len(LEADER_ITEM_NAMES)
+        "elections-leader-table": len(LEADER_ROW_FIELDS) + 1 + len(LEADER_ITEM_NAMES),
+        # The doctored ``ec_determinative`` makes its count alone read it (#569, D112).
+        "majority-metrics": 1,
     },
     "/election/<year>": {
         "election-nation": len(SUMMARY_ROW_FIELDS),
@@ -2584,7 +2586,8 @@ class TestNoRawValues:
             **{
                 d.id: d
                 for d in of_type(tree, "Div")
-                if getattr(d, "id", None) in ("election-panel", "elections-metrics")
+                if getattr(d, "id", None)
+                in ("election-panel", "elections-metrics", "majority-metrics")
             },
         }
         assert set(UNRECOGNIZED_CELLS[key]) >= on_page
