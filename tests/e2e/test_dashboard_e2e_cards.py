@@ -159,10 +159,12 @@ def test_every_width_keeps_order_measure_and_tables(
     page: Page, path: str, width: int
 ) -> None:
     """Home and the States list take the layout checks every other page's own suite
-    runs (#567's 360 px criterion; neither had a layout test). Neither shows a table,
-    so the table check has nothing to hold."""
-    success = open_page(page, path, width)
-    assert_layout_holds(page, success, (), width, tables_expected=False)
+    runs (#567's 360 px criterion; neither had a layout test). Their success markers
+    are the lists inside their cards, so the checks root at ``main``, which holds the
+    card, its heading, home's browse links and the footer (#567's review, round 2).
+    Neither shows a table, so the table check has nothing to hold."""
+    open_page(page, path, width)
+    assert_layout_holds(page, "main", (), width, tables_expected=False)
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])

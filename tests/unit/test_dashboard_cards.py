@@ -41,10 +41,10 @@ CARD_COUNTS = {
     "/not-found-404": 0,
 }
 
-#: The id of the ``Div`` whose children a page's cards are: its success marker, except
-#: on home, whose marker is the coverage list inside its card, so its cards sit in the
-#: render's unnamed body.
 def card_parent_id(key: str) -> str | None:
+    """The id of the ``Div`` whose children a page's cards are: the page's success
+    marker, or ``None`` on home, whose marker is the coverage list inside its card, so
+    its card sits in the render's unnamed body (pinned by position in the test)."""
     return None if key == "/" else str(page_of(key)["success"])
 
 
@@ -160,6 +160,11 @@ class TestEveryPageCards:
                     assert not any(is_card(a) for a in above), key
                     assert type(parent) is html.Div, key
                     assert getattr(parent, "id", None) == card_parent_id(key), key
+                    if key == "/":
+                        # Home's layout is its heading, its lede and the render's
+                        # body, so the card's parent is that body itself and not a
+                        # wrapper inside it (#567's review, round 2).
+                        assert above == (tree, list(tree.children)[-1]), key
                     assert node in parent.children, key
 
     def test_beside_its_cards_a_page_body_holds_only_chrome(
