@@ -21,12 +21,14 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+import usvote.snapshot as snapshot_module
 from tests.fixtures.api_snapshot import (
     synthetic_ec_pv_frame,
     synthetic_party_keys_frame,
     synthetic_per_capita_frame,
     synthetic_pv_status_frame,
 )
+from usvote.api.models import ElectionSummary
 from usvote.count_status import COUNTED_VOTES_COLUMN
 from usvote.snapshot import (
     SnapshotError,
@@ -435,6 +437,51 @@ def test_a_candidate_ranked_third_reaches_the_built_snapshot(tmp_path: Path) -> 
     finally:
         conn.close()
     assert rows == [(1860, 0, 8), (2016, 0, 0), (2020, 5, 0)]
+
+
+def test_the_build_runs_the_consistency_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``build_snapshot`` itself refuses a tally that disagrees with the roll-up.
+
+    The guard's fire-tests call it directly, so they would stay green if the build
+    stopped calling it. Here the builder is made to serve an in-range wrong value
+    (1860's 0 becomes 1, still <= cast), which only (c′) — run by the build — refuses.
+    """
+    real = snapshot_module.add_electoral_remainders
+
+    def wrong(summary_df: pd.DataFrame, rollup_df: pd.DataFrame) -> pd.DataFrame:
+        out = real(summary_df, rollup_df)
+        out.loc[out["year"] == 1860, "electoral_votes_outside_top_two"] = 1
+        return out
+
+    monkeypatch.setattr(snapshot_module, "add_electoral_remainders", wrong)
+    frame = synthetic_ec_pv_frame()
+    with pytest.raises(SnapshotError, match=r"\(c'\).*\[1860\]"):
+        build_snapshot(
+            frame,
+            str(tmp_path / "bad.sqlite"),
+            pv_status_df=synthetic_pv_status_frame(),
+            per_capita_df=synthetic_per_capita_frame(),
+            party_keys_df=synthetic_party_keys_frame(frame),
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ["electoral_votes_outside_top_two", "electors_without_a_counted_vote"]
+)
+def test_the_published_schema_declares_each_tally_a_required_integer(
+    field: str,
+) -> None:
+    """The /docs contract: a required, non-nullable integer (no ``null`` branch).
+
+    The served values would be unchanged by ``int | None``, so only the schema shows
+    whether the model still promises "never null".
+    """
+    schema = ElectionSummary.model_json_schema()
+    assert field in schema["required"]
+    assert schema["properties"][field]["type"] == "integer"
+    assert "anyOf" not in schema["properties"][field]
 
 
 # --- served on the API -------------------------------------------------------------
