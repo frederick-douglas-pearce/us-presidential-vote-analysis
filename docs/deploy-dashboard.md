@@ -1831,3 +1831,86 @@ chart's width.
   (D110(b)).
 - **§9's checks:** `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200,
   and the plotly.js path a 404.
+
+### Chart C10 on the state history page, measured after deploy (2026-11-22, #582)
+
+#582 (D113) added C10, a state's total popular vote per election, in its own card below C7 on
+`/state/<usps>`. Like C7, it reads the `/v1/states/{usps}` body the page already filled, so
+the page's fills on a miss are unchanged: the roster (`/v1/elections/{year_max}`) and
+`/v1/states/{usps}`. #582 asked for D071(g) re-measured on that page after deploy. The
+baseline is
+[#560's record](#chart-c7-on-the-state-history-page-measured-after-deploy-2026-11-19-560).
+
+Dashboard version `v-17433b9ff088-r37-a1` (deploy run 45001265605 of 17433b9, the merge of
+#605), snapshot `b09807fa…`, API 0.10.0, revision `usvote-api-00014-q75` (deployed
+01:11Z that day, so the snapshot differs from the baseline's). The API origin was warm
+throughout: the keep-warm ping reached it every 5 minutes before the window (the last at
+08:08 and 08:09Z), and it logged no `Starting new instance` in the window. Measured
+08:10–08:13Z, clear of the daily canary (its last run 2026-11-21 20:07Z, the next due
+13:17Z), by #277's method: `scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps /
+100 ms, a fresh browser context each run), with `--chart "#c10 .main-svg"` (one run with
+`#c7`). The chart column is the time until that chart is drawn, which is not a D071(g)
+measure.
+
+**Three instances:**
+
+- **A**, the deploy's new instance, up since 08:09:07Z (the deploy probe's `GET /` was its
+  loading request; no warmup). It held only the two prefetched paths, so its first visit,
+  `/state/GA`, made both fills. Five runs from the cache followed, then `/state/NY` with the
+  roster cached, and one more GA run timing C7.
+- **B** and **C**, after [restarts](#restarting-the-instance-to-empty-its-cache) at
+  08:11:19Z and 08:11:50Z: one first visit each, making both fills (`/state/TX` on B,
+  `/state/CA` on C). Warmup ran on each (1.94 s and 1.69 s), and each was serving its
+  snapshot (2 responses) about 3.5 s after the delete command was issued. B then had
+  `/state/NY` with the roster cached; C had three runs from the cache.
+
+Each first visit was a genuine miss: no earlier fill of its state (or of the roster, for a
+two-fill run) on that instance, and each run's `api fetch` lines were logged during it.
+Every roster fill was an edge hit. Of the state paths, GA (A) and NY (B, 42 s after A
+filled it) were edge hits; NY (A), TX and CA missed the edge and reached the warm origin
+(61, 17 and 16 ms there).
+
+| Run | Instance | Fills | TTFB (s) | First data (s) | Chart drawn (s) |
+|---|---|---|---|---|---|
+| GA, first visit | A | two (roster, state) | 0.16 | 1.56 | 4.34 (C10) |
+| NY, roster cached | A | one (state) | 0.18 | 1.58 | 4.08 (C10) |
+| TX, first visit | B | two (roster, state) | 0.18 | 1.52 | 4.13 (C10) |
+| NY, roster cached | B | one (state) | 0.18 | 1.17 | 3.97 (C10) |
+| CA, first visit | C | two (roster, state) | 0.18 | 1.56 | 4.22 (C10) |
+| GA, from the cache (5 runs) | A | none | 0.16–0.20 | 1.12–1.56 | 3.83–4.07 (C10) |
+| GA, from the cache | A | none | 0.16 | 1.18 | 4.09 (C7) |
+| CA, from the cache (3 runs) | C | none | 0.14–0.19 | 1.04–1.08 | 3.80–3.84 (C10) |
+
+Every run reached data, with no degraded page and no section unavailable.
+
+- **TTFB met D071(g) on 14 of 14 runs** (0.14–0.20 s, against ≤ 1 s).
+- **First data met it on 14 of 14** (1.17–1.58 s with a fill, 1.04–1.56 s from the cache,
+  against ≤ 3 s). The baseline's first visits took 1.24–1.59 s; from the cache it took
+  1.06–1.17 s, and so did these runs but one (A's third GA run, 1.56 s, among four at
+  1.12–1.23 s).
+- **The fills.** The routing callback took 0.26–0.47 s with two fills and 0.13–0.38 s with
+  one (NY on A, 0.38 s, went to the origin; NY on B, 0.13 s, was an edge hit), against
+  0.15–0.32 s in the baseline; from the cache 0.07–0.19 s on A and 0.04 s on C (baseline
+  0.11–0.12 s).
+- **C10 is drawn 2.5–2.8 s after first data** on every run, with a fill or from the cache,
+  as C7 was in the baseline (2.4–2.9 s). C7 drawn at 4.09 s sits at the top of the
+  baseline's 3.72–4.15 s.
+
+**Request budget held.** Besides the refresher's `/v1/meta` cycles, the version logged only
+the expected fills in the window: on A the roster, GA and NY; on B its two prefetched paths,
+the roster, TX and NY; on C its two prefetched paths, the roster and CA; and GA, TX and AK
+from the checks below. The runs from the cache made none. The app logged no warnings and no
+5xx since the deploy.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes): C, 133.0 MB
+(126.8 MiB), 35 % of the 384 MB D071 names for F1, after its runs and the checks below (292
+requests). This is below #470's peak of 143.7 MB, so D071's F1 flip condition is not near.
+
+**Checked on the deployed version** with a scripted browser, after the runs, at 360 px and
+390 px, with the browser's color scheme light and dark, for GA, TX and AK (12 renders): no
+sideways scroll, no unavailable note, and C7 and C10 drawn on every render with no text over
+other text or outside the chart's width. Both charts read the year ticks 1840, 1880, 1920,
+1960 and 2000, at least 15 px apart edge to edge at 360 px (21 px at 390 px). C10's short
+value ticks (D113) read 0, 2M, 4M for GA; 0, 5M, 10M for TX; and 0, 100k, 200k, 300k for
+AK. §9's checks: `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200,
+and the plotly.js path a 404.
