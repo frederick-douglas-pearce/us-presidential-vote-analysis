@@ -949,6 +949,17 @@ class TestCandidateFigures:
         assert figure(tree, CAST) == labels.UNRECOGNIZED
         assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
 
+    def test_a_field_missing_on_every_row_of_a_year_is_unrecognized(self) -> None:
+        # #612's acceptance gate (Class B survivor): a missing field is no null, so a
+        # year whose every row lacks it reads Unrecognized, never No figure (D115(e)).
+        body = jackson()
+        for row in body["data"]:
+            if row["year"] == 1828:
+                del row["national_electoral_votes"]
+        tree = render(body=body)
+        assert figure(tree, CAST) == labels.UNRECOGNIZED
+        assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
+
     @pytest.mark.parametrize("value", [None, ""])
     def test_a_year_null_on_every_row_reads_no_figure(self, value: Any) -> None:
         # D097: a sum with any null reads no figure; the other total stays.
