@@ -6,8 +6,9 @@ the same one-state series (C7) without importing a page module, which Dash canno
 A shared module: it reads no API and imports only other shared modules (``charts``,
 ``components`` and ``labels``), so a source's path reaches an error message only as an
 argument. The bands over the years outside the popular-vote window (:func:`pv_bands`)
-are here too since #564, which C5 and C2 both draw; C5's figure and the N1 reader stay
-with their page.
+are here too since #564, which C5 and C2 both draw, and since #582 (D113, amending
+D106(b)) the total popular vote's figure (:func:`total_figure`), which C5 and a state's
+C10 both draw; C5's chart constants and the N1 reader stay with their page.
 """
 
 from __future__ import annotations
@@ -91,12 +92,17 @@ def noted(cell: str) -> str:
 
 
 def point_hover(point: Point, state: str | None, *, total: bool) -> str:
-    """A row's hover in C4 or C7 (``total`` false) or C5: the table's cells. ``state``
-    is the escaped state name, or ``None`` for all states. C5 has no one-state form
-    since #562 (D107): asking for one is a code error, never served data's."""
+    """A row's hover in C4 or C7 (``total`` false) or C5 and C10 (``total`` true): the
+    table's cells. ``state`` is the escaped state name, or ``None`` for all states: C5
+    is all states only since #562 (D107), and C10 is one state's (#582)."""
     year = str(point.year)
     if total and state is not None:
-        raise ValueError("C5 draws all states only (#562)")
+        return labels.C10_HOVER.format(
+            year=year,
+            state=state,
+            total=noted(point.total_cell),
+            pv_status=noted(point.status_cell or labels.UNRECOGNIZED),
+        )
     if state is None:
         if total:
             return labels.C5_HOVER.format(year=year, total=noted(point.total_cell))
@@ -429,6 +435,127 @@ def c4_figure(
     return OverTime({"data": data, "layout": layout}, zeros, missing, False, False)
 
 
+class TotalChart(NamedTuple):
+    """What C5's and C10's figures differ by (#582, D113): the bar series' name, each
+    table cell's marker label (a cell with none draws no marker when the band covers
+    its year, else :data:`explore.labels.UNRECOGNIZED`), each label's symbol, and the
+    year ticks' size (:func:`time_layout`)."""
+
+    name: str
+    marker_labels: Mapping[str, str]
+    symbols: Mapping[str, str]
+    tick_px: int
+
+
+def total_figure(
+    points: list[Point],
+    years: list[int],
+    title: str,
+    window: tuple[int, int],
+    state: str | None,
+    chart: TotalChart,
+) -> OverTime:
+    """The total popular vote's figure (#436, D100; moved here from C5's page by #582,
+    D113): the total of each row with one, as a bar at its year. The years before and
+    after the popular-vote window (``window``, read from ``coverage``) are a shaded
+    band, labeled inside it at its top (the band after the window, and a before band
+    under half the axis, above the plot: #593, D109; #596, D110), which alone marks a
+    held popular vote outside it; every other row with nothing to draw is a marker, one
+    series per label (``chart.marker_labels``), named in the chart's key (#558, D104),
+    wherever it falls, inside the band included. ``state`` is the escaped state name
+    (C10), or ``None`` for all states (C5). Its value axis writes its numbers short
+    (#596, D110; both charts' registry rows set ``short_value_ticks``), or none at all
+    with no bar drawn."""
+    pv_min, pv_max = window
+    banded = {
+        labels.NOT_APPLICABLE,
+        labels.AFTER_WINDOW,
+        labels.BEFORE_WINDOW.format(pv_year_min=pv_min),
+    }
+    drawn: list[tuple[Point, int, str, str]] = []
+    marks: dict[str, list[tuple[Point, str]]] = {}
+    for point in points:
+        hover = point_hover(point, state, total=True)
+        value = figure_value(point.total, zero=True)
+        if value is not None and point.total_cell == labels.number(value):
+            drawn.append((point, value, point.total_cell, hover))
+            continue
+        outside = not pv_min <= point.year <= pv_max
+        if outside and point.total_cell in banded:
+            continue
+        label = chart.marker_labels.get(point.total_cell, labels.UNRECOGNIZED)
+        marks.setdefault(label, []).append((point, hover))
+    data: list[dict[str, Any]] = []
+    if drawn:
+        data.append(bar_trace(chart.name, drawn, charts.PV_COLOR))
+    data += series(marks, dict(chart.symbols))
+    longest = max((value for _, value, _, _ in drawn), default=1)
+    layout = time_layout(
+        title,
+        labels.C5_VALUE_AXIS,
+        years,
+        longest,
+        marked=bool(marks),
+        tick_px=chart.tick_px,
+    )
+    bands = pv_bands(
+        years,
+        window,
+        labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
+        labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
+        # One key row per entry, the most rows the key can wrap to (#593's review).
+        key_px=KEY_ROW_PX * len(marks),
+    )
+    # Short value ticks, the chart rule's exception (#596, D110; #582, D113); with no
+    # bar drawn the axis runs 0-1 and the SI form would write "200m", so it writes no
+    # value ticks at all.
+    if drawn:
+        layout["yaxis"]["tickformat"] = charts.SHORT_TICKFORMAT
+    else:
+        layout["yaxis"]["showticklabels"] = False
+    if bands.shapes:
+        layout["shapes"] = bands.shapes
+        layout["annotations"] = bands.annotations
+    if bands.top_px:
+        layout["margin"] = {"t": bands.top_px}
+    return OverTime(
+        {"data": data, "layout": layout},
+        False,
+        bool(marks),
+        bands.before,
+        bands.after,
+        bool(drawn),
+    )
+
+
+#: C10's marker series' symbols (#582): C5's for the labels they share, so one symbol
+#: keeps one meaning across C5 and C10, and for a null total with no status to explain
+#: it, an open circle with a dot, apart from C5's "no total" open circle, which C10 can
+#: draw beside it.
+C10_SYMBOLS = {
+    labels.C5_LEGISLATURE: "diamond",
+    labels.C5_TOOK_NO_PART: "x",
+    labels.C5_NO_TOTAL: "circle-open",
+    labels.NOT_IN_DATASET: "circle-open-dot",
+    labels.UNRECOGNIZED: "square-open",
+}
+
+#: C7 and C10's one left and right margin on a state's history page (#582, D113, after
+#: D109's C4 and C5): stacked in two cards, their plots start and end at the same x, so
+#: a reader can read a year down both. Sized as C4 and C5's, for the widest short value
+#: tick C10 writes ("15M") and the axis title, which plotly.js places by this margin;
+#: no value axis pushes its own (:func:`align`).
+STATE_MARGIN = {"l": 72, "r": 16}
+
+
+def align(figure: dict[str, Any], margin: Mapping[str, int]) -> None:
+    """Fix ``figure``'s left and right margin to ``margin``, keeping its own top, and
+    stop its value axis pushing its own (#593, D109; #582, D113). In place."""
+    layout = figure["layout"]
+    layout["margin"] = {**layout.get("margin", {}), **margin}
+    layout["yaxis"]["automargin"] = False
+
+
 _Row = TypeVar("_Row")
 
 
@@ -453,6 +580,36 @@ def state_series(
     if sorted(by_year) != expected:
         raise TypeError(f"{source} skips a year for {usps}")
     return [by_year[year] for year in expected]
+
+
+def total_points(
+    rows: Iterable[Mapping[str, Any]], coverage: Mapping[str, Any]
+) -> list[Point]:
+    """One state's total popular vote, a point per row (#582, C10): each row's
+    ``year``, ``state_popular_total`` and ``pv_status``, worded once as the companion
+    table writes them (:func:`explore.labels.popular_votes`, with
+    :data:`explore.labels.NO_STATE_TOTAL` inside the window). Carries no allotment
+    (C7's), so ``appointed`` is ``None`` and ``appointed_cell`` empty;
+    :func:`total_figure` never reads them."""
+    window = dict(coverage)
+    return [
+        Point(
+            year=row["year"],
+            appointed=None,
+            appointed_cell="",
+            total=row["state_popular_total"],
+            total_cell=labels.popular_votes(
+                row["state_popular_total"],
+                row["pv_status"],
+                row["year"],
+                window,
+                no_figure=labels.NO_STATE_TOTAL,
+            ),
+            status=row["pv_status"],
+            status_cell=labels.pv_status(row["pv_status"]),
+        )
+        for row in rows
+    ]
 
 
 def appointed_points(rows: Iterable[Mapping[str, Any]]) -> list[Point]:

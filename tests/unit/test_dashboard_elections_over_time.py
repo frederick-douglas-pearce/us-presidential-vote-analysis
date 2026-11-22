@@ -941,19 +941,26 @@ class TestGuardsTheGateAdded:
             "Each bar is the national total: every state's total, added up."
         )
 
-    def test_c5_has_no_one_state_hover(self) -> None:
+    def test_the_one_state_total_hover_writes_c10s_cells(self) -> None:
+        """C5 asks for no state; one state's total hover is C10's (#582), and writes
+        its table's cells: the total, then the popular-vote status (until #582 a state
+        here raised, since #562 retired C5's one-state mode)."""
         point = over_time.Point(
             year=2016,
-            appointed=1,
-            appointed_cell="1",
-            total=1,
-            total_cell="1",
-            status=None,
-            status_cell=None,
+            appointed=None,
+            appointed_cell="",
+            total=4114732,
+            total_cell="4,114,732",
+            status="popular_vote",
+            status_cell="Popular vote held",
         )
-        with pytest.raises(ValueError, match="all states only"):
-            over_time.point_hover(point, "Georgia", total=True)
-        assert over_time.point_hover(point, None, total=True).startswith("2016")
+        assert over_time.point_hover(point, "Georgia", total=True) == (
+            "2016: Georgia<br>Total popular vote: 4,114,732<br>"
+            "Popular vote in this state: Popular vote held"
+        )
+        assert over_time.point_hover(point, None, total=True) == (
+            "2016, all states<br>Total popular vote: 4,114,732"
+        )
 
 
 # --- the year filters, C5's short ticks and the narrow band (#596, D110) -----------------

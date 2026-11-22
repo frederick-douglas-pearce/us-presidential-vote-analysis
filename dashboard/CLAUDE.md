@@ -25,7 +25,7 @@ integrity, C7's reconciliation oracle, in `TestN2Fixture` in `test_dashboard_sta
 (the election pages, #307 and #465, the overview's panel, #308, chart C1, #433, in `TestC1`, chart C3, #435, in `TestC3`, the
 earlier-and-later bar's structure, #464, in `TestNeighborBar`, the section links in
 `TestSectionLinks`, and the wide layout's markup, #544, in `TestWideLayout`), `tests/unit/test_dashboard_state.py`
-(the state history and the state picker, #279, chart C7, #560, in `TestC7`, `TestC7Degraded` and `TestStateSeries`, the state's people per electoral vote page, #559, the section links between the two in `TestSectionLinks`, and their wide layout's markup, #545, in `TestWideLayout`), `tests/unit/test_dashboard_candidate.py`
+(the state history and the state picker, #279, chart C7, #560, in `TestC7`, `TestC7Degraded` and `TestStateSeries`, chart C10, #582 (D113), in `TestC10` (its N2 oracle read straight from the recording), `TestPopularTotals` (its one-value rule and the recording's premise) and `TestC10Degraded`, the state's people per electoral vote page, #559, the section links between the two in `TestSectionLinks`, and their wide layout's markup, #545, in `TestWideLayout`), `tests/unit/test_dashboard_candidate.py`
 (the candidate history and the candidate links, #331, and its wide layout's markup, #545, in `TestWideLayout`), `tests/unit/test_dashboard_export.py`
 (every table's CSV download, #309), `tests/unit/test_dashboard_theme.py` (the theme
 choice's color tokens, contrast, head script, toggle, icons and store, #359, #447, and the
@@ -128,9 +128,9 @@ measure, the dropdown filters in one row below it, each 14–20rem, above the fi
 the filters stacking as before at 1100 and 390 px; and at every width no reordered box or
 positive tab index, every paragraph, chart caption and party-notes item within 42rem,
 no sideways scroll, and from 1280 px none
-in C7's companion table, T4, T7 or T5; a state's two pages as one client-side chain (#559, D105): the section links
+in C7's or C10's companion table, T4, T7 or T5; a state's two pages as one client-side chain (#559, D105): the section links
 carrying the year range and only it, with the URL, tab and marks following, back and
-forward, and `/state/ZZ/per-capita` and `/state/GA/x` reading as not found; chart C7 on `/state/GA` (#560, D106): at 390 and 360 px the year ticks apart, every tick, axis title and key entry inside the width with none over another, no bar or marker text, no sideways scroll and a hover naming its year, its ticks and table unchanged under the filters, a theme switch redrawing it with no request, and a blocked CDN leaving its title, caption, pointer and table; the elections pages' wide layout (#553, D103; split by #562): at 1280 and 1850 px the list's
+forward, and `/state/ZZ/per-capita` and `/state/GA/x` reading as not found; charts C7 (#560, D106) and C10 (#582, D113) on `/state/GA`, each checked on one page load: at 390 and 360 px the year ticks apart, every tick, axis title and key entry inside the width with none over another, no bar or marker text, no sideways scroll and a hover naming its year, every value tick and axis title 8 px inside its chart, C10's value ticks short and its band labeled, the two plots' left edges and widths equal (also at 1280, 1850 and 1100 px), their ticks and tables unchanged under the filters, a theme switch redrawing them with no request, and a blocked CDN leaving their titles, captions, pointers and tables; the elections pages' wide layout (#553, D103; split by #562): at 1280 and 1850 px the list's
 filters beside the count and averages in equal columns with T1 below both
 (`test_dashboard_e2e_elections.py`), C4 above C5 in one column at every width, their plot areas' left edges and widths equal (#593, D109), above their companion table (`test_dashboard_e2e_elections_over_time.py`), and C2 full width above its
 table (`test_dashboard_e2e_elections_majority.py`); the list's pair stacking as before at 1100 and

@@ -102,6 +102,9 @@ LABELS: dict[str, str] = {
     # ``national_electoral_denominator``) and N1's per-year total popular vote.
     "electoral_denominator": "Electors appointed (nation)",
     "national_pv_denominator": "Total popular vote (nation)",
+    # Chart C10 and its companion table (#582): a ``/v1/states/{usps}`` row's total
+    # popular vote (restored; #436's wording, retired with C5's one-state mode, #562).
+    "state_popular_total": "Total popular vote (state)",
 }
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
@@ -163,6 +166,9 @@ BEFORE_WINDOW = "Popular vote held; not in this dataset before {pv_year_min}"
 AFTER_WINDOW = "Popular vote held; not in this dataset yet"
 NO_FIGURE = "No popular-vote figure in this dataset for this candidate in this state"
 NO_NATIONAL_FIGURE = "No popular-vote figure in this dataset for this candidate"
+#: A state's total popular vote with no figure inside the window: C10's table (#582;
+#: #436's wording, retired with C5's one-state mode by #562 and restored).
+NO_STATE_TOTAL = "No total popular vote in this dataset for this state"
 #: The nation's total popular vote with no figure inside the window (#436), in the
 #: C4/C5 table and C5.
 NO_NATIONAL_TOTAL = "No total popular vote in this dataset for this election"
@@ -861,6 +867,30 @@ C7_FILTERS_NOTE = (
     "of each candidate's electoral votes, not this chart or its table."
 )
 
+#: Chart C10 (#582): one state's total popular vote, on its history page, below C7. Its
+#: axis, bands, key and most of its caption are C5's; its title and hover are C5's
+#: one-state wording from #436 (retired by #562, restored), and the rest is the ba
+#: spec approved at #582's plan gate, 2026-11-21. The first-election sentence is its
+#: own, since C10's before band shades the years before a state's first election.
+C10_TITLE_STATE = "Total popular vote in {state} in each election"
+C10_TITLE_THIS_STATE = "Total popular vote in this state in each election"
+C10_HOVER = (
+    "{year}: {state}<br>Total popular vote: {total}<br>"
+    "Popular vote in this state: {pv_status}"
+)
+C10_SHORT_TICKS_NOTE = (
+    "The numbers up the side are written short: 500k is 500,000 and 2M is 2,000,000. "
+    "Each bar's hover and the table give the total in full."
+)
+C10_FIRST_ELECTION_NOTE = (
+    "The first election in this dataset for {state} is {year}, so the chart has no "
+    "bar or marker for the years before it."
+)
+C10_FIRST_ELECTION_NOTE_THIS_STATE = (
+    "The first election in this dataset for this state is {year}, so the chart has no "
+    "bar or marker for the years before it."
+)
+
 C5_TITLE = "Total popular vote in each election, all states"
 C5_VALUE_AXIS = "Total popular vote"
 C5_HOVER = "{year}, all states<br>Total popular vote: {total}"
@@ -884,8 +914,9 @@ C5_BASIS = (
 )
 #: Reworded at #562, as :data:`C4_ALL_STATES`.
 C5_ALL_STATES = "Each bar is the national total: every state's total, added up."
-#: C5's value axis writes its numbers short (#596, D110, the one exception to the chart
-#: rule); said in its caption only when a bar is drawn (ba spec for #596).
+#: C5's value axis writes its numbers short (#596, D110; C10's too, #582, D113: the two
+#: exceptions to the chart rule); said in its caption only when a bar is drawn (ba spec
+#: for #596).
 C5_SHORT_TICKS_NOTE = (
     "The numbers up the side are written short: 50M is 50,000,000. Each bar's hover "
     "and the table give the total in full."
@@ -908,6 +939,17 @@ C5_MARKER_LABELS: dict[str, str] = {
     LEGISLATURE_CHOSE: C5_LEGISLATURE,
     TOOK_NO_PART: C5_TOOK_NO_PART,
     NO_NATIONAL_TOTAL: C5_NO_TOTAL,
+    UNRECOGNIZED: UNRECOGNIZED,
+}
+#: C10's marker label, looked up by its table's cell (#582), as C5's is: the band's
+#: cells (:data:`BEFORE_WINDOW`, :data:`AFTER_WINDOW`) have none and draw no marker,
+#: and a null total with no status to explain it (:data:`NOT_IN_DATASET`) is a key
+#: series of its own, as in C4 and C7.
+C10_MARKER_LABELS: dict[str, str] = {
+    LEGISLATURE_CHOSE: C5_LEGISLATURE,
+    TOOK_NO_PART: C5_TOOK_NO_PART,
+    NO_STATE_TOTAL: C5_NO_TOTAL,
+    NOT_IN_DATASET: NOT_IN_DATASET,
     UNRECOGNIZED: UNRECOGNIZED,
 }
 #: The C4/C5 table's last note: the window, and that a missing total is never a zero.
@@ -1181,6 +1223,7 @@ def popular_votes(
     pv_status: object,
     year: int,
     coverage: dict[str, Any],
+    no_figure: str = NO_FIGURE,
 ) -> str:
     """A state's popular-vote cell: the figure, or why there is none.
 
@@ -1189,8 +1232,8 @@ def popular_votes(
     the year lies before the dataset's popular-vote window, after it (a snapshot whose
     Electoral College data runs ahead of its popular vote), or inside it. An unknown
     status names no cause it cannot vouch for: see :func:`_unknown`. The window comes
-    from ``coverage``, never a literal. Inside the window the cell is
-    :data:`NO_FIGURE` (a state's total had its own cell until #562).
+    from ``coverage``, never a literal. ``no_figure`` is the cell inside the window:
+    a candidate's by default, :data:`NO_STATE_TOTAL` for a state's total (C10, #582).
     """
     if not is_blank(value):
         return number(value)
@@ -1204,7 +1247,7 @@ def popular_votes(
         return BEFORE_WINDOW.format(pv_year_min=coverage["pv_year_min"])
     if year > coverage["pv_year_max"]:
         return AFTER_WINDOW
-    return NO_FIGURE
+    return no_figure
 
 
 def pv_status(value: object) -> str:

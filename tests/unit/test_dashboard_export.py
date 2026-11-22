@@ -49,6 +49,8 @@ TABLES = {
     "state-history": "/state/<usps>",
     # Chart C7's companion table (#560).
     "state-electors": "/state/<usps>",
+    # Chart C10's companion table (#582).
+    "state-popular-total": "/state/<usps>",
     # T7 has a page of its own since #559.
     "state-per-capita": "/state/<usps>/per-capita",
     "candidate-history": "/candidate/<slug>",
@@ -482,8 +484,8 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({}, "year_to=1972", "filtered"),
         ({}, "year_from=1700", "absent"),
     ],
-    # #560, D106: the state page's filters narrow T4 only, never C7 or its companion
-    # table. Georgia from 1824, with 1864's zero allotment.
+    # #560, D106: the state page's filters narrow T4 only, never C7, C10 (#582) or
+    # their companion tables. Georgia from 1824, with 1864's zero allotment.
     "/state/<usps>": [
         ({"usps": "GA"}, "year_from=1900", "filtered"),
         ({"usps": "GA"}, "year_to=1900", "filtered"),
@@ -517,8 +519,8 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/elections/over-time": {
         "elections-over-time-table": ("year_from", "year_to", "pv"),
     },
-    # #560: T4 alone; C7's companion table is unlisted, so it equals the unfiltered
-    # render under every query.
+    # #560: T4 alone; C7's and C10's (#582) companion tables are unlisted, so each
+    # equals the unfiltered render under every query.
     "/state/<usps>": {
         "state-history": ("year_from", "year_to", "candidate", "pv_status"),
     },
@@ -564,6 +566,7 @@ ROW_AXES: dict[str, str] = {
     charts.dom_id("C4"): "xaxis",
     charts.dom_id("C5"): "xaxis",
     charts.dom_id("C7"): "xaxis",
+    charts.dom_id("C10"): "xaxis",
 }
 
 
@@ -1524,6 +1527,7 @@ class TestExactlyTheView:
             "election-per-capita-csv": "election-1824-per-capita.csv",
             "state-history-csv": "state-GA-history.csv",
             "state-electors-csv": "state-GA-electors.csv",
+            "state-popular-total-csv": "state-GA-total-popular-vote.csv",
             "state-per-capita-csv": "state-GA-per-capita.csv",
             "candidate-history-csv": "candidate-andrew-jackson-history.csv",
         }
@@ -2270,7 +2274,10 @@ def _election(body: dict[str, Any]) -> None:
 def _state_history(body: dict[str, Any]) -> None:
     """A state's history (#560): T4's first row doctored, and the allotment and status
     it carries set alike on every row of its election, so C7 collapses them to one
-    point rather than refusing the year, and its companion table words both cells."""
+    point rather than refusing the year, and its companion table words both cells.
+    C10 (#582) reads the same status, and that election's rows carry no total popular
+    vote (1824's, before the window), so its companion table words both its cells
+    too."""
     _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE)(body)
     first = body["data"][0]
     for row in body["data"]:
@@ -2396,10 +2403,12 @@ UNRECOGNIZED_CELLS = {
     },
     # T4's other rows of the doctored election carry its allotment and status too
     # (#560), each with the popular-vote cell the status words, and C7's companion
-    # table words the allotment and status once.
+    # table words the allotment and status once; C10's (#582) words the total, which
+    # the status words, and the status once.
     "/state/<usps>": {
         "state-history": len(STATE_ROW_FIELDS) + 1 + 3 * (GA_FIRST_ROWS - 1),
         "state-electors": 2,
+        "state-popular-total": 2,
     },
     "/state/<usps>/per-capita": {"state-per-capita": len(PER_CAPITA_ROW_FIELDS)},
     "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 1},
@@ -2715,16 +2724,20 @@ SERVED_ROWS: dict[str, list[Served]] = {
     # and refuses a year whose rows disagree: doctoring one row would degrade the
     # section instead of reaching the point.
     "C7": [Served({"usps": "GA"}, "", "/v1/states/GA", _year_rows(2016))],
+    # #582: the same, since C10 collapses them to one total; its figure reads each
+    # row's ``popular_votes`` too, which decides whether its total is read (D113(b)).
+    "C10": [Served({"usps": "GA"}, "", "/v1/states/GA", _year_rows(2016))],
 }
 
 #: What a chart's section shows when its own read fails, where it has one: C2's (#434),
-#: C4 and C5's (#436), and C7's, when T4's rows cannot be read as one allotment per
-#: election (#560).
+#: C4 and C5's (#436), and C7's and C10's, when T4's rows cannot be read as one
+#: allotment (#560) or one total popular vote (#582) per election.
 SECTION_UNAVAILABLE = {
     "C2": "elections-leader-unavailable",
     "C4": "elections-over-time-unavailable",
     "C5": "elections-over-time-unavailable",
     "C7": "state-electors-unavailable",
+    "C10": "state-popular-total-unavailable",
 }
 
 #: The unexpected kinds a served field is doctored to (#484).
