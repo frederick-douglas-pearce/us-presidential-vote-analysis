@@ -879,9 +879,17 @@ class TestCandidateFigures:
     def test_the_state_filter_never_reaches_them_and_a_note_says_so(
         self, query: str
     ) -> None:
+        # #612's review (r1.ge.5): GA's 1832 rows removed, so T5's rows under GA hold
+        # 1824 and 1828 only; the figures still read all three years, national values.
+        body = jackson()
+        body["data"] = [
+            r for r in body["data"] if not (r["year"] == 1832 and r["state_usps"] == "GA")
+        ]
         unfiltered = query.replace("state=GA", "").strip("&")
-        tree = render(query)
-        assert figures(tree) == figures(render(unfiltered))
+        tree = render(query, body=copy.deepcopy(body))
+        assert figures(tree) == figures(render(unfiltered, body=copy.deepcopy(body)))
+        if "year_from" not in query:
+            assert figures(tree) == figures(render())
         note = find(tree, MOD["METRICS_NOTE_ID"])
         assert " ".join(texts(note)) == labels.METRIC_ALL_STATES_NOTE
         assert find(render(unfiltered), MOD["METRICS_NOTE_ID"]) is None
@@ -943,6 +951,15 @@ class TestCandidateFigures:
     def test_a_year_null_on_every_row_reads_no_figure(self, value: Any) -> None:
         # D097: a sum with any null reads no figure; the other total stays.
         tree = render(body=with_year(1828, national_electoral_votes=value))
+        assert figure(tree, CAST) == labels.METRIC_NO_FIGURE[CAST]
+        assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
+
+    def test_a_null_beside_a_blank_in_one_year_is_one_null(self) -> None:
+        # Owner, option A at #612's review (r1.cr.3, D115 amendment): ``is_blank`` is
+        # the rule of what is null, so the year holds a null and the total no figure.
+        body = with_year(1828, national_electoral_votes=None)
+        next(r for r in body["data"] if r["year"] == 1828)["national_electoral_votes"] = ""
+        tree = render(body=body)
         assert figure(tree, CAST) == labels.METRIC_NO_FIGURE[CAST]
         assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
 

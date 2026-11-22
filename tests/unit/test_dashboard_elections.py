@@ -3142,11 +3142,20 @@ class TestSum:
             (5, 1, 1828, 1824),
             (5.0, 1, 1824, 1824),
             (True, 1, 1824, 1824),
+            (5, True, 1824, 1824),
+            (None, 0, 1824, None),
         ],
     )
     def test_no_other_total_can_be_built(self, args: tuple[Any, ...]) -> None:
         with pytest.raises(ValueError, match="not a total"):
             metrics.Total(*args)
+
+    @pytest.mark.parametrize("args", [(5, 1, 1824, 1824), (None, 1, 1824, 1824)])
+    def test_an_unrecognized_total_holds_nothing(self, args: tuple[Any, ...]) -> None:
+        # #612's review (r1.ge.4): unrecognized is never built with a value or an N.
+        value, n, first, last = args
+        with pytest.raises(ValueError, match="not a total"):
+            metrics.Total(value, n, first, last, unrecognized=True)
 
 
 class TestTotalAndElectionsWording:
@@ -3168,12 +3177,22 @@ class TestTotalAndElectionsWording:
         )
 
     def test_a_count_of_elections_never_reads_zero(self) -> None:
-        assert labels.metric_elections(50, 1824, 2024, "none") == (
+        years = list(range(1824, 2025, 4))
+        years.remove(1864)
+        assert labels.metric_elections(years, "none") == (
             "50",
             " elections (1824–2024)",
         )
-        assert labels.metric_elections(1, 1828, 1828, "none") == (
+        assert labels.metric_elections([1828, 1828], "none") == (
             "1",
             " election (1828)",
         )
-        assert labels.metric_elections(0, None, None, "none") == ("none", None)
+        assert labels.metric_elections([], "none") == ("none", None)
+
+    def test_a_count_of_elections_names_the_earliest_and_latest_whatever_the_order(
+        self,
+    ) -> None:
+        assert labels.metric_elections([1832, 1824, 1828], "none") == (
+            "3",
+            " elections (1824–1832)",
+        )

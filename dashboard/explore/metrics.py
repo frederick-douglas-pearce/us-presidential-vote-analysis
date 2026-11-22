@@ -57,10 +57,11 @@ KINDS = ("count", "mean", "flag_count", "select", "sum")
 PICKS = ("first", "latest", "lowest", "highest")
 
 
-#: Every metric, keyed by metric key, never renamed or reused. The page reads the field
-#: each mean averages from here, so this table drives the code. A count's source is the
-#: field that decides which rows it counts: for ``elections_shown`` the grain key of the
-#: ``/v1/elections`` rows T1 shows (#601, D115).
+#: Every metric, keyed by metric key, never renamed or reused. Means and sums read their
+#: field from here (the page reads ``source.field``); a count's or flag count's source
+#: records the field that selects its rows (D115(b), (f)): for ``elections_shown`` the
+#: grain key of the ``/v1/elections`` rows T1 shows, for a state's took-office count the
+#: ``took_office`` that picks each year's row.
 METRICS: dict[str, Metric] = {
     "elections_shown": Metric("count", Source("YearListItem", "year")),
     "ec_margin_mean": Metric("mean", Source("ElectionSummary", "ec_margin")),

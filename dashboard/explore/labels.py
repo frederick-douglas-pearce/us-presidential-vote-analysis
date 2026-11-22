@@ -1624,12 +1624,14 @@ def metric_count(
     no_figure: str,
     pv_window: tuple[int, int] | None = None,
 ) -> tuple[str, str | None]:
-    """A count of elections on ``/elections/majority`` (#569, D112), as ``(value,
-    rest)``: the value text, and the text after it naming its N and years, or ``None``
-    where there is none to name. ``result`` is an ``explore.metrics.FlagCount`` (this
-    module imports no ``metrics``, which imports it); ``years`` the distinct years
-    shown; ``no_figure`` the count's own wording for every flag null; ``pv_window`` the
-    popular-vote window, given for the popular-vote count only.
+    """A count of elections, as ``(value, rest)``, on ``/elections/majority`` (#569,
+    D112) and ``/state/<usps>`` (the took-office count, #601, D115, whose ``no_figure``
+    the page chooses and whose N may be smaller than the elections count beside it): the
+    value text, and the text after it naming its N and years, or ``None`` where there is
+    none to name. ``result`` is an ``explore.metrics.FlagCount`` (this module imports no
+    ``metrics``, which imports it); ``years`` the distinct years shown; ``no_figure``
+    the count's own wording for every flag null; ``pv_window`` the popular-vote window,
+    given for the popular-vote count only.
 
     Checked in order: an unrecognized count (:data:`UNRECOGNIZED`, with no N or years);
     no contributing election, worded by its cause (a popular-vote count with no year
@@ -1654,19 +1656,20 @@ def metric_count(
     return text, whole.removeprefix(text)
 
 
-def metric_elections(
-    n: int, first: int | None, last: int | None, no_figure: str
-) -> tuple[str, str | None]:
-    """A count of elections with its years (#601, D115), as ``(value, rest)``: ``n``
-    elections from ``first`` to ``last``, or ``no_figure`` (with no rest) when ``n``
-    is 0, never "0 elections"."""
-    if n == 0:
+def metric_elections(years: Sequence[int], no_figure: str) -> tuple[str, str | None]:
+    """A count of elections with its years (#601, D115), as ``(value, rest)``: the
+    number of distinct ``years``, from the earliest to the latest, or ``no_figure``
+    (with no rest) when there are none, never "0 elections"."""
+    distinct = sorted(set(years))
+    if not distinct:
         return no_figure, None
-    text = str(n)
-    if n == 1:
-        whole = METRIC_COUNT_ELECTIONS_ONE.format(year=first)
+    text = str(len(distinct))
+    if len(distinct) == 1:
+        whole = METRIC_COUNT_ELECTIONS_ONE.format(year=distinct[0])
     else:
-        whole = METRIC_COUNT_ELECTIONS.format(n=text, first=first, last=last)
+        whole = METRIC_COUNT_ELECTIONS.format(
+            n=text, first=distinct[0], last=distinct[-1]
+        )
     return text, whole.removeprefix(text)
 
 

@@ -250,15 +250,19 @@ def _per_year(
 ) -> list[tuple[int, object]] | None:
     """One ``(year, value)`` pair per year of ``rows`` for a national ``field`` (#601,
     D115; D098's pattern): every row of a year must carry one value, a null beside a
-    figure being two (:func:`explore.over_time.same`). ``None`` (that total reads
-    unrecognized) on a disagreement or a row without the field; the other field's total
-    is checked on its own. A year whose rows are all null passes its null, so its total
-    reads no figure (D097)."""
+    figure being two (:func:`explore.over_time.same`). A null and a blank are one null
+    (:func:`explore.labels.is_blank`, the dashboard's rule of what is null; owner,
+    option A at #612's review, D115 amendment), so they are read as ``None`` before the
+    check. ``None`` (that total reads unrecognized) on a disagreement or a row without
+    the field; the other field's total is checked on its own. A year whose rows are all
+    null or blank passes its null, so its total reads no figure (D097)."""
     by_year: dict[int, object] = {}
     for row in rows:
         if field not in row:
             return None
         year, value = row["year"], row[field]
+        if labels.is_blank(value):
+            value = None
         if year in by_year and not over_time.same(by_year[year], value):
             return None
         by_year.setdefault(year, value)
@@ -279,10 +283,8 @@ def _figures(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
         metric = metrics.METRICS[key]
         rest: str | None
         if metric.kind == "count":
-            n = metrics.count(years)
-            first, last = (years[0], years[-1]) if years else (None, None)
             value, rest = labels.metric_elections(
-                n, first, last, labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS
+                years, labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS
             )
         elif metric.kind == "sum":
             pairs = _per_year(rows, metric.source.field)

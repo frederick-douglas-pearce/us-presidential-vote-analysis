@@ -2838,8 +2838,10 @@ class TestStateFigures:
     def test_the_hand_counts(self) -> None:
         # #569's plan recordings: GA has rows in 51 years, 50 with electors appointed
         # (1864's allotment is 0); the candidate who took office got at least one of
-        # its cast votes in 27 of them. Comparing ``electoral_votes`` with
-        # ``state_electoral_votes`` would give 28 (1864 reads 0 == 0).
+        # its cast votes in 27 of them. GA has no split delegation, so comparing
+        # ``electoral_votes`` with ``state_electoral_votes`` also gives 27 over these 50
+        # years (28 only with 1864 included, 0 == 0); that mistake is caught by
+        # ``test_a_split_delegation_counts`` (#612's review, r1.ge.3).
         tree = render()
         assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
         assert st_figure(tree, TOOK_OFFICE) == "27 of 50 elections (1824–2024)"
@@ -2876,7 +2878,15 @@ class TestStateFigures:
 
     @pytest.mark.parametrize(
         "change",
-        ["no took-office row", "two took-office rows", "null", "missing", "a number"],
+        [
+            "no took-office row",
+            "two took-office rows",
+            "null",
+            "missing",
+            "a number",
+            "zero",
+            "blank",
+        ],
     )
     def test_a_took_office_fault_makes_that_figure_alone_unrecognized(
         self, change: str
@@ -2896,6 +2906,11 @@ class TestStateFigures:
             other["took_office"] = None
         elif change == "missing":
             del other["took_office"]
+        elif change == "zero":
+            # Falsy and no bool (#612's review, r1.ge.1): never read as False.
+            other["took_office"] = 0
+        elif change == "blank":
+            other["took_office"] = ""
         else:
             other["took_office"] = 1
         tree = render(body=body)
@@ -2945,7 +2960,7 @@ class TestStateFigures:
         assert row["state_electoral_votes"] > 1
         assert st_figure(render(body=body), TOOK_OFFICE) == before
 
-    @pytest.mark.parametrize("value", [9.0, None, -1, "x"])
+    @pytest.mark.parametrize("value", [9.0, None, -1, "x", True])
     def test_an_allotment_no_count_can_read_makes_both_unrecognized_and_keeps_c7(
         self, value: Any
     ) -> None:
