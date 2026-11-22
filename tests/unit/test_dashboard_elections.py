@@ -2212,12 +2212,15 @@ class TestMetricLabels:
             "pv_total_latest",
         }
 
-    def test_no_figure_wording_is_keyed_by_exactly_the_counts_and_selects(
+    def test_no_figure_wording_is_keyed_by_exactly_the_counts_selects_and_sums(
         self,
     ) -> None:
-        # A mean words its own in ``metric_mean`` (#600, architect S2).
+        # A mean words its own in ``metric_mean`` (#600, architect S2), and a plain
+        # count its own constant (#601, D115, amending D114(d) for the sums).
         assert set(labels.METRIC_NO_FIGURE) == {
-            k for k, m in metrics.METRICS.items() if m.kind in ("flag_count", "select")
+            k
+            for k, m in metrics.METRICS.items()
+            if m.kind in ("flag_count", "select", "sum")
         }
 
     def test_no_page_keeps_the_retired_per_key_tables(self) -> None:
@@ -2236,6 +2239,8 @@ class TestMetricLabels:
         "pages.elections_majority": {"flag_count"},
         "pages.elections_over_time": {"select"},
         "pages.state_per_capita": {"select"},
+        "pages.state": {"count", "flag_count"},
+        "pages.candidate": {"count", "sum"},
     }
 
     def test_each_page_names_only_the_kinds_it_computes(self) -> None:
@@ -2311,6 +2316,8 @@ METRIC_PAGES = (
     "pages.elections_majority",
     "pages.elections_over_time",
     "pages.state_per_capita",
+    "pages.state",
+    "pages.candidate",
 )
 
 
@@ -3095,4 +3102,97 @@ class TestMetricSelectWording:
         assert rest is not None
         assert value + rest == labels.METRIC_SELECT.format(
             value="1", years="1976", n=3, first=1976, last=2024
+        )
+
+
+class TestSum:
+    """``metrics.sum`` and ``Total`` (#601, D115): one pair per year; a null among the
+    years reads no figure (D097), a value no total can hold unrecognized."""
+
+    def test_a_total_with_its_n_and_years(self) -> None:
+        assert metrics.sum([(1828, 178), (1824, 99), (1832, 219)]) == metrics.Total(
+            496, 3, 1824, 1832
+        )
+
+    def test_zero_is_a_value(self) -> None:
+        # Greeley's counted votes in 1872.
+        assert metrics.sum([(1872, 0)]) == metrics.Total(0, 1, 1872, 1872)
+
+    @pytest.mark.parametrize("null", [None, "", "  "])
+    def test_a_null_among_the_years_reads_no_figure(self, null: Any) -> None:
+        assert metrics.sum([(1824, 99), (1828, null)]) is metrics.NO_TOTAL
+
+    def test_no_year_reads_no_figure(self) -> None:
+        assert metrics.sum([]) is metrics.NO_TOTAL
+
+    @pytest.mark.parametrize("value", [True, 1.0, -1, "99", float("nan")])
+    def test_a_value_no_total_can_hold_is_unrecognized(self, value: Any) -> None:
+        assert metrics.sum([(1824, 99), (1828, value)]) is metrics.UNRECOGNIZED_TOTAL
+
+    def test_unrecognized_wins_over_a_null(self) -> None:
+        pairs = [(1824, None), (1828, "x")]
+        assert metrics.sum(pairs) is metrics.UNRECOGNIZED_TOTAL
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            (None, 1, 1824, 1824),
+            (5, 0, None, None),
+            (-1, 1, 1824, 1824),
+            (5, 1, 1828, 1824),
+            (5.0, 1, 1824, 1824),
+            (True, 1, 1824, 1824),
+            (5, True, 1824, 1824),
+            (None, 0, 1824, None),
+        ],
+    )
+    def test_no_other_total_can_be_built(self, args: tuple[Any, ...]) -> None:
+        with pytest.raises(ValueError, match="not a total"):
+            metrics.Total(*args)
+
+    @pytest.mark.parametrize("args", [(5, 1, 1824, 1824), (None, 1, 1824, 1824)])
+    def test_an_unrecognized_total_holds_nothing(self, args: tuple[Any, ...]) -> None:
+        # #612's review (r1.ge.4): unrecognized is never built with a value or an N.
+        value, n, first, last = args
+        with pytest.raises(ValueError, match="not a total"):
+            metrics.Total(value, n, first, last, unrecognized=True)
+
+
+class TestTotalAndElectionsWording:
+    def test_a_total_reads_as_the_averages_do(self) -> None:
+        assert labels.metric_total(metrics.Total(1496, 3, 1824, 1832), "none") == (
+            "1,496",
+            ", over 3 elections (1824–1832)",
+        )
+        assert labels.metric_total(metrics.Total(178, 1, 1828, 1828), "none") == (
+            "178",
+            ", over 1 election (1828)",
+        )
+
+    def test_a_total_s_no_figure_and_unrecognized(self) -> None:
+        assert labels.metric_total(metrics.NO_TOTAL, "none") == ("none", None)
+        assert labels.metric_total(metrics.UNRECOGNIZED_TOTAL, "none") == (
+            labels.UNRECOGNIZED,
+            None,
+        )
+
+    def test_a_count_of_elections_never_reads_zero(self) -> None:
+        years = list(range(1824, 2025, 4))
+        years.remove(1864)
+        assert labels.metric_elections(50, years, "none") == (
+            "50",
+            " elections (1824–2024)",
+        )
+        assert labels.metric_elections(1, [1828], "none") == (
+            "1",
+            " election (1828)",
+        )
+        assert labels.metric_elections(0, [], "none") == ("none", None)
+
+    def test_a_count_of_elections_names_the_earliest_and_latest_whatever_the_order(
+        self,
+    ) -> None:
+        assert labels.metric_elections(3, [1832, 1824, 1828], "none") == (
+            "3",
+            " elections (1824–1832)",
         )

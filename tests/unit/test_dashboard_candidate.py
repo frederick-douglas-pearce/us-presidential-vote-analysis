@@ -21,6 +21,7 @@ import pytest
 from dash import no_update
 
 from explore import api, components, election_view, labels
+from tests.dashboard_cards import in_one_card
 from tests.unit.test_dashboard_app import (
     RECORDED,
     RecordingBucket,
@@ -810,3 +811,204 @@ class TestWideLayout:
         assert built() == ["filter"]
         assert built(own_row=False) == ["filter"]
         assert built(own_row=True) == ["filter", "filter-own-row"]
+
+
+METRICS_MODULE = MOD["metrics"]
+
+# The candidate's headline figures (#601, D112(f), (g), D115).
+FIGURES = MOD["METRICS_ID"]
+FIGURE_IDS: dict[str, str] = MOD["METRIC_IDS"]
+COUNT = "candidate_elections_count"
+CAST = "candidate_ev_cast_total"
+COUNTED = "candidate_ev_counted_total"
+SUMMARY: dict[str, Any] = RECORDED[api.SUMMARY_PATH]
+
+
+def figure(tree: Any, key: str) -> str:
+    dd = find(tree, FIGURE_IDS[key])
+    assert dd is not None, key
+    return "".join(texts(dd))
+
+
+def figures(tree: Any) -> dict[str, str]:
+    return {key: figure(tree, key) for key in FIGURE_IDS}
+
+
+def with_year(year: int, **fields: Any) -> dict[str, Any]:
+    """Andrew Jackson's body with ``fields`` set on every row of ``year``."""
+    body = jackson()
+    for row in body["data"]:
+        if row["year"] == year:
+            row.update(fields)
+    return body
+
+
+class TestCandidateFigures:
+    def test_the_hand_counts(self) -> None:
+        # #569's plan recordings: 3 years; cast 99 + 178 + 219 = 496, counted 496,
+        # each one value across its year's 24 rows.
+        assert figures(render()) == {
+            COUNT: "3 elections (1824–1832)",
+            CAST: "496, over 3 elections (1824–1832)",
+            COUNTED: "496, over 3 elections (1824–1832)",
+        }
+
+    def test_the_count_reconciles_to_the_candidate_index(self) -> None:
+        # D112(f): checked against the recorded index's ``years`` in tests only.
+        (item,) = [c for c in CANDIDATES["data"] if c["candidate_slug"] == SLUG]
+        years = item["years"]
+        assert figure(render(), COUNT) == (
+            f"{len(years)} elections ({years[0]}–{years[-1]})"
+        )
+
+    def test_they_follow_the_year_choice(self) -> None:
+        assert figures(render("year_from=1828&year_to=1828")) == {
+            COUNT: "1 election (1828)",
+            CAST: "178, over 1 election (1828)",
+            COUNTED: "178, over 1 election (1828)",
+        }
+
+    def test_a_year_outside_the_candidate_s_falls_back_to_every_year(self) -> None:
+        # The year filter's own fallback; og:url names the year, and reopening it
+        # renders the same figures, since the render follows the query alone.
+        query = "year_from=1900&year_to=1900"
+        assert figures(render(query)) == figures(render())
+        assert figures(render(query)) == figures(render(query))
+
+    @pytest.mark.parametrize(
+        "query", ["state=GA", "state=GA&year_from=1828&year_to=1828"]
+    )
+    def test_the_state_filter_never_reaches_them_and_a_note_says_so(
+        self, query: str
+    ) -> None:
+        # #612's review (r1.ge.5): GA's 1832 rows removed, so T5's rows under GA hold
+        # 1824 and 1828 only; the figures still read all three years, national values.
+        body = jackson()
+        body["data"] = [
+            r for r in body["data"] if not (r["year"] == 1832 and r["state_usps"] == "GA")
+        ]
+        unfiltered = query.replace("state=GA", "").strip("&")
+        tree = render(query, body=copy.deepcopy(body))
+        assert figures(tree) == figures(render(unfiltered, body=copy.deepcopy(body)))
+        if "year_from" not in query:
+            assert figures(tree) == figures(render())
+        note = find(tree, MOD["METRICS_NOTE_ID"])
+        assert " ".join(texts(note)) == labels.METRIC_ALL_STATES_NOTE
+        assert find(render(unfiltered), MOD["METRICS_NOTE_ID"]) is None
+
+    def test_og_url_reopens_the_same_figures(self) -> None:
+        query = "year_from=1828&year_to=1828&state=GA"
+        rows = jackson()["data"]
+        chosen = MOD["filters"](MOD["parse_filters"](parse(query)), rows, JACKSON_YEARS)
+        reopened = MOD["applied_search"](chosen).lstrip("?")
+        assert figures(render(reopened)) == figures(render(query))
+
+    def test_cast_and_counted_differ_as_n1_serves_them(self) -> None:
+        # No recording shows cast and counted apart (#601's plan: the fixtures' one
+        # snapshot), so 1828's national values become Grant's 1872 ones as N1 records
+        # them; the totals reconcile to those served figures.
+        (grant,) = [
+            r
+            for r in SUMMARY["data"]
+            if r["year"] == 1872 and r["candidate_slug"] == "ulysses-s-grant"
+        ]
+        cast, counted = (
+            grant["national_electoral_votes"],
+            grant["national_electoral_votes_counted"],
+        )
+        assert (cast, counted) == (300, 286)
+        body = with_year(
+            1828,
+            national_electoral_votes=cast,
+            national_electoral_votes_counted=counted,
+        )
+        tree = render(body=body)
+        assert figure(tree, CAST) == f"{99 + cast + 219}, over 3 elections (1824–1832)"
+        assert figure(tree, COUNTED) == (
+            f"{99 + counted + 219}, over 3 elections (1824–1832)"
+        )
+
+    @pytest.mark.parametrize("value", [177, None, 178.0])
+    def test_a_year_s_rows_disagreeing_make_that_total_alone_unrecognized(
+        self, value: Any
+    ) -> None:
+        # Architect I2: per field and per year; a null beside a value is two values.
+        body = jackson()
+        row = next(r for r in body["data"] if r["year"] == 1828)
+        row["national_electoral_votes_counted"] = value
+        tree = render(body=body)
+        assert figure(tree, COUNTED) == labels.UNRECOGNIZED
+        assert find(tree, FIGURE_IDS[COUNTED]).title == labels.UNRECOGNIZED_NOTE
+        assert figure(tree, CAST) == "496, over 3 elections (1824–1832)"
+        assert find(tree, TABLE) is not None and tree.id == PAGE_ID
+
+    def test_a_row_without_the_field_makes_that_total_unrecognized(self) -> None:
+        body = jackson()
+        del body["data"][5]["national_electoral_votes"]
+        tree = render(body=body)
+        assert figure(tree, CAST) == labels.UNRECOGNIZED
+        assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
+
+    def test_a_field_missing_on_every_row_of_a_year_is_unrecognized(self) -> None:
+        # #612's acceptance gate (Class B survivor): a missing field is no null, so a
+        # year whose every row lacks it reads Unrecognized, never No figure (D115(e)).
+        body = jackson()
+        for row in body["data"]:
+            if row["year"] == 1828:
+                del row["national_electoral_votes"]
+        tree = render(body=body)
+        assert figure(tree, CAST) == labels.UNRECOGNIZED
+        assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
+
+    @pytest.mark.parametrize("value", [None, ""])
+    def test_a_year_null_on_every_row_reads_no_figure(self, value: Any) -> None:
+        # D097: a sum with any null reads no figure; the other total stays.
+        tree = render(body=with_year(1828, national_electoral_votes=value))
+        assert figure(tree, CAST) == labels.METRIC_NO_FIGURE[CAST]
+        assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
+
+    def test_a_null_beside_a_blank_in_one_year_is_one_null(self) -> None:
+        # Owner, option A at #612's review (r1.cr.3, D115 amendment): ``is_blank`` is
+        # the rule of what is null, so the year holds a null and the total no figure.
+        body = with_year(1828, national_electoral_votes=None)
+        next(r for r in body["data"] if r["year"] == 1828)["national_electoral_votes"] = ""
+        tree = render(body=body)
+        assert figure(tree, CAST) == labels.METRIC_NO_FIGURE[CAST]
+        assert figure(tree, COUNTED) == "496, over 3 elections (1824–1832)"
+
+    @pytest.mark.parametrize("value", [True, 1.5, -3, "x"])
+    def test_a_value_no_total_can_hold_is_unrecognized(self, value: Any) -> None:
+        tree = render(body=with_year(1828, national_electoral_votes=value))
+        assert figure(tree, CAST) == labels.UNRECOGNIZED
+
+    def test_the_count_is_metrics_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # #612's review (r2.recheck.1, D097, D115 amendment): the count is computed in
+        # ``metrics``, over the distinct years, and ``labels`` only words it.
+        seen: list[Any] = []
+
+        def count(rows: Any) -> int:
+            seen.append(rows)
+            return 7
+
+        monkeypatch.setattr(METRICS_MODULE, "count", count)
+        assert figure(render(), COUNT) == "7 elections (1824–1832)"
+        assert seen == [{1824, 1828, 1832}]
+
+    def test_they_sit_in_the_card_after_the_controls_and_before_the_count(
+        self,
+    ) -> None:
+        tree = render()
+        card = in_one_card(tree, FIGURES)
+        order = [
+            getattr(n, "id", None) or getattr(n, "className", None)
+            for n in components._within(card.children)
+        ]
+        assert order.index(MOD["YEAR_ID"]) < order.index(FIGURES) < order.index("count")
+
+    def test_the_page_still_makes_one_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls, _ = warm_client(monkeypatch)
+        ids = routed_ids(route(f"/candidate/{SLUG}"))
+        assert FIGURES in ids and all(i in ids for i in FIGURE_IDS.values())
+        assert calls == [JACKSON_PATH]

@@ -43,6 +43,7 @@ from explore import (
     components,
     export,
     labels,
+    metrics,
     over_time,
     query,
     state_view,
@@ -68,6 +69,16 @@ ELECTORS_GLOSSARY_ID = "state-electors-glossary"
 #: The degraded section's sentence (D096(d)'s rule): C7's section alone, when the
 #: rows T4 shows cannot be read as one allotment per election.
 C7_UNAVAILABLE_ID = "state-electors-unavailable"
+#: The headline figures (#601, D112(e), (g), D115): the block and each figure's value,
+#: by metric key, in display order, the page's one per-key table (D114(d)); DOM ids are
+#: stable and never renamed (D097(g)). In C7's card, after its heading.
+METRICS_ID = "state-history-metrics"
+METRIC_IDS = {
+    "state_elections_count": "state-elections-count",
+    "state_took_office_count": "state-took-office-count",
+}
+#: The note under the figures naming the years with no electors appointed.
+METRICS_NOTE_ID = "state-history-metrics-note"
 #: The companion table's columns, by public field name, and what its CSV adds.
 ELECTORS_FIELDS = ("year", "state_electoral_votes", "pv_status")
 ELECTORS_EXTRA = ("state_usps",)
@@ -457,6 +468,105 @@ def popular_totals(
     return over_time.state_series(by_year, served, source, usps)
 
 
+def _allotment(value: object) -> int | None:
+    """An allotment the figures can read: an ``int`` (never a ``bool``) at or above 0,
+    else ``None`` (#601, D115). C7 draws a null or a malformed allotment as a marker;
+    the figures cannot count such a year either way, so both read unrecognized."""
+    return value if type(value) is int and value >= 0 else None
+
+
+def _took_office_flags(
+    rows: list[dict[str, Any]], years: list[int]
+) -> list[tuple[int, object]] | None:
+    """One ``(year, flag)`` pair per year in ``years`` (the years the state appointed
+    electors), for :func:`explore.metrics.flag_count` (#601, D112(e), D115): the year's
+    one row with ``took_office`` true picks the candidate who took office, and that
+    row's cast ``electoral_votes`` decides, above 0 true and 0 false (a split
+    delegation counts). A null or a blank vote is passed as is, so it is left out of N.
+
+    ``None`` (the figure reads unrecognized) for a year with no such row or two, a
+    row of the year with ``took_office`` null, missing or not a bool, or a took-office
+    row whose votes are no ``int`` at or above 0. Total: it reads ``rows`` with
+    ``.get`` and raises nothing, so no fault here reaches C7's section or the page."""
+    by_year: dict[int, list[dict[str, Any]]] = {year: [] for year in years}
+    for row in rows:
+        year = row.get("year")
+        if year in by_year:
+            by_year[year].append(row)
+    pairs: list[tuple[int, object]] = []
+    for year in years:
+        picked = []
+        for row in by_year[year]:
+            took = row.get("took_office")
+            if type(took) is not bool:
+                return None
+            if took:
+                picked.append(row)
+        if len(picked) != 1:
+            return None
+        votes = picked[0].get("electoral_votes")
+        if labels.is_blank(votes):
+            pairs.append((year, votes))
+            continue
+        if type(votes) is not int or votes < 0:
+            return None
+        pairs.append((year, votes > 0))
+    return pairs
+
+
+def _figures(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> html.Div:
+    """The state's two headline figures (#601, D112(e), (g), D115), as a ``dl``: the
+    elections in which it appointed electors (an allotment above 0, from C7's
+    collapse, ``records``) and in how many of them its electors cast a vote for the
+    candidate who took office. Unfiltered, so they reconcile to C7's table.
+
+    An allotment no figure can read makes both unrecognized; a took-office fault, the
+    second alone (:func:`_took_office_flags`). Either way C7, T4 and the page stay. A
+    note names the years with no electors appointed while the count shows a number."""
+    allotments = [(r["year"], _allotment(r["state_electoral_votes"])) for r in records]
+    bad = any(value is None for _, value in allotments)
+    years = sorted(year for year, value in allotments if value)
+    zeros = sorted(year for year, value in allotments if value == 0)
+    entries: list[Any] = []
+    for key, ident in METRIC_IDS.items():
+        metric = metrics.METRICS[key]
+        rest: str | None
+        if bad:
+            value, rest = labels.UNRECOGNIZED, None
+        elif metric.kind == "count":
+            value, rest = labels.metric_elections(
+                metrics.count(set(years)), years, labels.METRIC_NO_FIGURE_NO_ELECTORS
+            )
+        elif metric.kind == "flag_count" and metric.counted is not None:
+            flags = _took_office_flags(rows, years)
+            result = (
+                metrics.UNRECOGNIZED_COUNT
+                if flags is None
+                else metrics.flag_count(flags, metric.counted)
+            )
+            no_figure = (
+                labels.METRIC_NO_FIGURE[key]
+                if years
+                else labels.METRIC_NO_FIGURE_NO_ELECTORS
+            )
+            value, rest = labels.metric_count(result, years, no_figure)
+        else:
+            raise TypeError(f"{key} is no count or flag count")
+        entries += components.metric_entry(key, ident, value, rest)
+    block: list[Any] = [html.Dl(entries, className="metrics")]
+    if not bad and years and zeros:
+        block.append(
+            html.P(
+                labels.METRIC_ZERO_ALLOTMENT_NOTE.format(
+                    years=labels.metric_years(zeros)
+                ),
+                id=METRICS_NOTE_ID,
+                className="note",
+            )
+        )
+    return html.Div(block, id=METRICS_ID)
+
+
 def _electors_row(point: over_time.Point) -> html.Tr:
     """A row of C7's companion table: the year, linked to its election, and the cells
     C7's hover writes."""
@@ -506,7 +616,9 @@ def _electors_section(
     C7's and D107 retired for N2), show the
     heading and :data:`C7_UNAVAILABLE` only, with no chart (D096(d)'s rule), while T4
     and the page stay. The ``try`` covers everything built from the rows, never
-    ``components.chart`` (D095(f))."""
+    ``components.chart`` (D095(f)), nor the headline figures (#601, D115), which sit
+    after the heading and before the chart and are built from C7's collapse outside it,
+    so a fault only they can see never removes C7."""
     heading = html.H2(C7_HEADING)
     try:
         records = electors(rows, served, usps, source)
@@ -551,6 +663,7 @@ def _electors_section(
         ]
     return [
         heading,
+        _figures(records, rows),
         components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, caption),
         html.H2(C7_TABLE_HEADING),
         *table,

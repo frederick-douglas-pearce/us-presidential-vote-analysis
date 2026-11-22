@@ -165,7 +165,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   12th Amendment's "whole number of Electors appointed", and the base for every majority test and
   electoral share. It can be 0 for a state whose votes were withheld (1864, 1868). It is the top
   rung of the ladder **appointed ≥ cast ≥ counted**. `electoral_denominator` on each
-  `/v1/elections/summary` item is the same national figure.
+  `/v1/elections/summary` item is the same national figure. In reader text, a state "appointed
+  electors" in a year exactly when its allotment is greater than 0 (D115).
 - **Shown as:** `LABELS["state_electoral_votes"]` (T2, T4, T6, T7, and the C4/C5 table and C4's bars
   with one state chosen); `LABELS["national_electoral_denominator"]` (T3); in C1, the hover line
   "Electors appointed" (`labels.C1_EC_HOVER`), the majority line's label `labels.C1_MAJORITY_LINE`,
@@ -180,7 +181,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   on the state history: its bars, `labels.C4_TITLE_STATE` or `labels.C7_TITLE_THIS_STATE`,
   `labels.C4_VALUE_AXIS`, the hover line "Electors appointed" (`labels.C4_STATE_HOVER`), the key
   entries, `labels.C4_BASIS` and `labels.C4_ZERO_NOTE`, and `LABELS["state_electoral_votes"]` in its
-  companion table. On `/elections/over-time`, the figures `labels.METRIC_LABELS["ec_appointed_first"]` and `["ec_appointed_latest"]` (*Earliest and latest electors appointed*).
+  companion table. On `/elections/over-time`, the figures `labels.METRIC_LABELS["ec_appointed_first"]` and `["ec_appointed_latest"]` (*Earliest and latest electors appointed*). On `/state/<usps>`, it decides which elections the figure `labels.METRIC_LABELS["state_elections_count"]` includes (*Elections in which a state appointed electors*), with `labels.METRIC_NO_FIGURE_NO_ELECTORS` and `labels.METRIC_ZERO_ALLOTMENT_NOTE`.
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`;
   `ElectionSummary.electoral_denominator`;
@@ -686,11 +687,37 @@ articles and announcements). Every rule binds all three unless the rule states a
   `ALL_YEARS` first, and no control for a candidate with one year), which the page builds from
   that candidate's `/v1/candidates/{slug}` rows, not from the `years` field; the two agree because
   `years` lists exactly the years that endpoint returns rows for. `years` itself is not shown, and
-  showing the field needs its own `LABELS` key.
+  showing the field needs its own `LABELS` key. The number of these years shown, under the year
+  choice, is `labels.METRIC_LABELS["candidate_elections_count"]` (*Elections in which electors
+  voted for a candidate*); tests check it against `years` (D112(f)).
 - **Source:** `CandidateListItem.years` in `src/usvote/api/models.py` and
   `SnapshotRepository.list_candidates` in `src/usvote/api/repository.py` (#330); D007.
 - **Not:** Years the candidate ran or was on the ballot; only years whose electoral votes Congress
   counted (*Electoral votes counted*); years the candidate took office (*Took office*).
+- **Status:** settled
+
+### Elections in which a state appointed electors (count)
+- **Plain:** On a state's history page: how many elections in this dataset the state appointed electors in, with the earliest and latest. An election in which the state appointed no electors (Georgia in 1864) is left out, so the number can be smaller than the years the electors chart shows; a note names the years left out.
+- **Precise:** The number of years on `/v1/states/{usps}` whose one allotment, collapsed by `electors()` (`state_electoral_votes`), is an `int` (never a `bool`) greater than 0. In reader text this is "appointed electors", never "took part" (D115). First and last are the earliest and latest of those years. It is unfiltered: T4's year, candidate and popular-vote filters do not reach it (D112(g)), and it matches C7's unfiltered companion table. If any year's allotment is not an `int` 0 or above, both state figures read *Unrecognized value* and C7 stays. If the collapse itself fails, because a year's allotments disagree, C7's section degrades and the figures go with it (D112(c)). With no year above 0 it reads `labels.METRIC_NO_FIGURE_NO_ELECTORS`. While it shows a number and some year's allotment is exactly 0, `labels.METRIC_ZERO_ALLOTMENT_NOTE` names those years through `labels.metric_years`. Recorded Georgia: 50 elections (1824–2024); C7 shows 51 years, and 1864 is left out.
+- **Shown as:** `labels.METRIC_LABELS["state_elections_count"]`; the value through `labels.metric_elections` (`labels.METRIC_COUNT_ELECTIONS`, `labels.METRIC_COUNT_ELECTIONS_ONE`); `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ZERO_ALLOTMENT_NOTE`; `labels.UNRECOGNIZED`. On `/state/<usps>`, in `state-history-metrics` inside C7's card, after its heading and before the chart; the value `state-elections-count` (`pages/state.py`).
+- **Source:** #569; #601; D112(c), (e), (g); D115; `EcPvRow.state_electoral_votes` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #601, approved at its plan gate.
+- **Not:** The years with rows. Elections the state's people voted in. A count of electors.
+- **Status:** settled
+
+### Elections in which a state's electors voted for the candidate who took office (count)
+- **Plain:** On a state's history page: in how many of the elections in which the state appointed electors, its electors cast at least one electoral vote for the candidate who became president for that term. A delegation that split counts if any of its votes went to that candidate.
+- **Precise:** `metrics.flag_count` over one flag per year in which the state appointed electors (an allotment that is an `int` greater than 0), counting true. In each such year the one row with `took_office` true picks the candidate, and that row's cast `electoral_votes` decides: above 0 is true, 0 is false (D112(a) as amended by D115; D112(e)). A null or blank `electoral_votes` there leaves the year out of N, so N can be smaller than the elections count beside it; the figure shows its own N ("27 of 50 elections") and never claims the two are equal. This figure alone reads *Unrecognized value* when a year that appointed electors has no `took_office`-true row or two, a row with a null, missing or non-boolean `took_office`, or a took-office row whose `electoral_votes` is neither null, blank nor an `int` 0 or above; the elections count, C7, T4 and the page stay. When an allotment is unrecognized, both figures read it. Comparing `electoral_votes` with `state_electoral_votes` would be wrong: it gives Georgia 28 where the answer is 27. First and last are the earliest and latest of the N years. It is unfiltered (D112(g)) and never a percentage (D097(a)). T4 does not show `took_office`. With no year that appointed electors it reads `labels.METRIC_NO_FIGURE_NO_ELECTORS`; with such years but every one left out, `labels.METRIC_NO_FIGURE["state_took_office_count"]`. The density this rests on was checked on the live API for every state (#601, 2026-11-22): one `took_office` row per year with electors, none null; 33 split delegations. Recorded Georgia: 27 of 50 (1824–2024).
+- **Shown as:** `labels.METRIC_LABELS["state_took_office_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_NO_FIGURE["state_took_office_count"]`; `labels.UNRECOGNIZED`. In `state-history-metrics` on `/state/<usps>`, the value `state-took-office-count`.
+- **Source:** #601; D112(a), (e), (g); D115; `EcPvRow.took_office` and `EcPvRow.electoral_votes`; `METRICS`; reader wording: `ba` spec for #601, approved at its plan gate.
+- **Not:** "Voted for the winner" or "the eventual winner": in 1824 the Electoral College leader did not take office (*Took office*). The state's popular-vote winner. A share or percentage.
+- **Status:** settled
+
+### Elections in which electors voted for a candidate (count)
+- **Plain:** On a candidate's page: how many elections in this dataset electors cast at least one electoral vote for the candidate in, with the earliest and latest. It follows the page's year choice, never its State filter.
+- **Precise:** `metrics.count` over the distinct `year` values of the candidate's `/v1/candidates/{slug}` rows for the chosen year, or for all years (never T5's shown rows, which follow the State filter too). A year choice outside the candidate's years falls back to all years. The basis is votes cast, so Greeley 1872 (3 cast, 0 counted) is one election. It equals the length of `years` on the candidate's `/v1/candidates` item, checked in tests only (D112(f)). On a successful render it is never 0; `labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS` is defensive. While the State filter is applied, `labels.METRIC_ALL_STATES_NOTE` shows under the block. Recorded Andrew Jackson: 3 elections (1824–1832); with 1828 chosen, 1 election (1828).
+- **Shown as:** `labels.METRIC_LABELS["candidate_elections_count"]`; `labels.metric_elections` (`labels.METRIC_COUNT_ELECTIONS`, `labels.METRIC_COUNT_ELECTIONS_ONE`); `labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`; `labels.METRIC_ALL_STATES_NOTE`. On `/candidate/<slug>`, in `candidate-metrics` inside T5's card, after the controls and before the count line; the value `candidate-elections-count` (`pages/candidate.py`).
+- **Source:** #601; D112(f), (g); D115; `EcPvRow.year`; `CandidateListItem.years`; reader wording: `ba` spec for #601, approved at its plan gate.
+- **Not:** Elections the candidate ran in (*Say instead*). Elections whose votes Congress counted. Elections the candidate took office in.
 - **Status:** settled
 
 ### Elections shown (count)
@@ -1008,7 +1035,10 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Precise:** `electoral_votes` per state row and `national_electoral_votes` per candidate. A
   candidate who got none in a state shows 0, a real zero (the dense Electoral College fact, D026).
   The middle rung of appointed ≥ cast ≥ counted.
-- **Shown as:** `LABELS["electoral_votes"]`, `LABELS["national_electoral_votes"]`.
+- **Shown as:** `LABELS["electoral_votes"]`, `LABELS["national_electoral_votes"]`. On
+  `/candidate/<slug>`, `national_electoral_votes` is added up over the elections shown in
+  `labels.METRIC_LABELS["candidate_ev_cast_total"]`, and on `/state/<usps>` the took-office row's
+  `electoral_votes` decides `labels.METRIC_LABELS["state_took_office_count"]`.
 - **Source:** `EcPvRow.electoral_votes`; `NationalSummaryRow.national_electoral_votes`;
   `count_status.CAST_VOTES_COLUMN`; D046; `posts/2026-08-25-it-takes-270-but-270-of-what.md`.
 - **Not:** *Electoral votes counted* (they differ in 1868 and 1872); *Appointed electors*.
@@ -1024,6 +1054,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   in C1, the hover line "Electoral votes counted" (`labels.C1_EC_HOVER`) and the caption sentences
   `labels.C1_BASES` and `labels.C1_EC_BASIS`. In C2, the hover line "Electoral votes counted"
   (`labels.C2_HOVER`), and the caption sentences `labels.C2_LEADER_POINT` and `labels.C1_EC_BASIS`.
+  On `/candidate/<slug>`, `labels.METRIC_LABELS["candidate_ev_counted_total"]`.
 - **Source:** `EcPvRow.electoral_votes_counted`; `count_status.COUNTED_VOTES_COLUMN`; D046;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Then there is a third number".
 - **Not:** *Electoral votes cast.*
@@ -1351,11 +1382,11 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### No figure (a figure with no election to include)
-- **Plain:** The page shows no number because none of the elections shown can enter it. Either all of them fall in years this dataset has no popular-vote figures for, or this dataset has no value for any of them, or, on a state's page, the years shown hold no election for that state. It is not zero: a count of zero shows 0.
-- **Precise:** `labels.metric_count` or `labels.metric_select` with N = 0 and no unrecognized value. Causes are checked in order. First, on a state's People per electoral vote page, no row in the year range (`labels.METRIC_NO_FIGURE_NO_ELECTIONS`). Then, for a figure read against the popular-vote window, no year shown inside the window of `meta.provenance.coverage` (`labels.METRIC_NO_FIGURE_PV_YEARS`). Otherwise every value among the years shown is null, worded per metric key (`labels.METRIC_NO_FIGURE`); on served data only the people-per-electoral-vote figures reach this. On the elections pages no year shown is not a cause: the page shows *No elections match* and no figure. It is never 0, "nan" or an empty cell.
-- **Shown as:** `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE_PV_YEARS`, and `labels.METRIC_NO_FIGURE` (keyed by metric key), through `labels.metric_count` and `labels.metric_select`.
-- **Source:** #569 acceptance criteria; D097; D112; reader wording: `ba` specs for #569 and #600.
-- **Not:** Zero. *No average* (a mean). *No popular-vote figure in this dataset* (a cell). *Unrecognized value*. The "no figure" of D097's rule for a sum with a null, which #601 words; if it reuses these words, this entry is extended to cover it.
+- **Plain:** The page shows no number because none of the elections shown can enter it. Either all of them fall in years this dataset has no popular-vote figures for, or this dataset has no value for any of them, or, on a state's page, the years shown hold no election for that state, or this state appointed electors in no election, or, for a candidate's total, one or more of the elections shown has no number. It is not zero: a count of zero shows 0.
+- **Precise:** `labels.metric_count`, `labels.metric_select`, `labels.metric_total` or `labels.metric_elections` with no unrecognized value and no value to show. Causes are checked in order. First, on a state's People per electoral vote page, no row in the year range (`labels.METRIC_NO_FIGURE_NO_ELECTIONS`). On a state's history page, no year with an allotment above 0 (`labels.METRIC_NO_FIGURE_NO_ELECTORS`, both figures). On a candidate's page, no election (`labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`, defensive). Then, for a figure read against the popular-vote window, no year shown inside the window of `meta.provenance.coverage` (`labels.METRIC_NO_FIGURE_PV_YEARS`). Otherwise the value is null, worded per metric key (`labels.METRIC_NO_FIGURE`): a count or select is null when every value is null, a sum when any year is (D097), which is why its wording says "one or more". On the elections pages no year shown is not a cause: the page shows *No elections match* and no figure. It is never 0, "nan" or an empty cell.
+- **Shown as:** `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE_NO_ELECTORS`, `labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`, `labels.METRIC_NO_FIGURE_PV_YEARS`, and `labels.METRIC_NO_FIGURE` (keyed by metric key), through `labels.metric_count`, `labels.metric_select`, `labels.metric_total` and `labels.metric_elections`.
+- **Source:** #569 acceptance criteria; D097; D112; #601; D115; reader wording: `ba` specs for #569, #600 and #601.
+- **Not:** Zero. *No average* (a mean). *No popular-vote figure in this dataset* (a cell). *Unrecognized value*.
 - **Status:** settled
 
 ### No popular-vote figure in this dataset (inside the window)
@@ -2144,11 +2175,21 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Plain:** Whether the candidate became president for that term.
 - **Precise:** `took_office`, a recorded yes or no.
 - **Shown as:** `LABELS["took_office"]` (T3 on `/election/<year>`, and the companion table of C2,
-  `elections-leader-table`, on `/elections/majority`); `labels.yes_no`.
+  `elections-leader-table`, on `/elections/majority`); `labels.yes_no`. On `/state/<usps>`,
+  `took_office` picks the row whose electoral votes decide
+  `labels.METRIC_LABELS["state_took_office_count"]`; the column itself is not shown there.
 - **Source:** `NationalSummaryRow.took_office`; owner decision, 2026-10-10, #348 (a separate term
   from the Electoral College winner); `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "The one
   time it happened"; the C2 companion-table column: owner, #434 plan gate (2026-11-11).
-- **Not:** *Electoral College winner, or leader with no majority* (1824).
+- **Not:** *Electoral College winner, or leader with no majority* (1824). "The eventual winner".
+- **Status:** settled
+
+### Total electoral votes cast and counted for a candidate (figures)
+- **Plain:** On a candidate's page: the electoral votes cast for the candidate in all states, and the ones Congress counted, added up over the elections the year choice shows. The two differ when Congress did not count some votes cast (1868, 1872).
+- **Precise:** Two `metrics.sum` figures over one `(year, value)` pair per year, from `national_electoral_votes` and from `national_electoral_votes_counted`, over the same rows as *Elections in which electors voted for a candidate*. Both are national, all states included, whatever the State filter. Each year's value is the one value of that field across the year's rows, checked by the page through `labels.is_blank` and then `over_time.same`, separately for each field and each year (D098's pattern). A row whose field is null or blank (`labels.is_blank`, the dashboard's rule of what is null) holds a null, so a year whose rows hold a null on one and a blank on another holds one null, not two values that differ. If every row of a year holds a null, that year's value is null and that total reads *No figure* (D097: a sum with any null). If a null sits beside a value, two values differ, or a row lacks the field, that total alone reads *Unrecognized value*; the other total, the count and T5 stay. A value that is not an `int` 0 or above (a `bool`, a float, text) also reads *Unrecognized value*. A total of 0 is a value (Greeley 1872 counted). Never a sum of state `electoral_votes` (D097(j)), and never a difference, ratio or percentage. T5 does not show these national fields. Recorded Andrew Jackson: 496 cast and 496 counted over 3 elections (1824–1832).
+- **Shown as:** `labels.METRIC_LABELS["candidate_ev_cast_total"]` and `["candidate_ev_counted_total"]`; the value through `labels.metric_total` with `labels.METRIC_OVER` or `labels.METRIC_OVER_ONE` (the averages' span text, reused); `labels.METRIC_NO_FIGURE["candidate_ev_cast_total"]` and `["candidate_ev_counted_total"]`; `labels.METRIC_ALL_STATES_NOTE`; `labels.UNRECOGNIZED`. In `candidate-metrics` on `/candidate/<slug>`, the values `candidate-ev-cast-total` and `candidate-ev-counted-total`.
+- **Source:** #601; D097; D112(f), (g); D115 (the `sum` kind and its three states; `METRIC_NO_FIGURE` keyed by sum, amending D114(d)); `EcPvRow.national_electoral_votes` and `national_electoral_votes_counted`; reader wording: `ba` spec for #601, approved at its plan gate; null and blank as one null: owner, option A at #612's code review (D115, amendment).
+- **Not:** The selected state's votes. Electors appointed. Popular votes. "Received" for the counted total.
 - **Status:** settled
 
 ### Total popular vote (nation) (`national_pv_denominator`)
@@ -2220,11 +2261,20 @@ articles and announcements). Every rule binds all three unless the rule states a
   vote page, an earliest, latest, lowest or highest figure reads it when a value among the years
   shown is not a finite number, or when any such value's own table cell reads it, whichever year
   holds it; both figures of that pair then read it and name no number of elections or years. A
-  null or blank value is left out first, even where its cell reads it. In a CSV download the field is written as the API
+  null or blank value is left out first, even where its cell reads it. On a state's history page,
+  both figures read it when an allotment is not an `int` 0 or above, and the took-office figure
+  alone when a year that appointed electors has no `took_office`-true row or two, a null, missing
+  or non-boolean `took_office`, or a took-office row whose electoral votes are neither null, blank
+  nor an `int` 0 or above. On a candidate's page, one total reads it when a year's rows disagree in
+  that field (a null or blank beside a value included), a row lacks it, or a value is not an
+  `int` 0 or above; the other total, the count of elections and T5 stay (#601, D115). A year
+  whose rows are each null or blank (`labels.is_blank`), a null on one row and a blank on
+  another included, holds one null: its total reads *No figure*, not this. In a CSV download the field is written as the API
   served it; for a null figure with an unrecognized cause, the figure's column is empty and the
   cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
-  (set by `labels.cell`, and by `labels.nominating_party_cell`). In C1, `labels.UNRECOGNIZED` labels
+  (set by `labels.cell`, and by `labels.nominating_party_cell`); for a headline total, through
+  `labels.metric_total`. In C1, `labels.UNRECOGNIZED` labels
   the marker drawn in place of a bar for such a value, and `labels.C1_NO_FIGURE_HOVER` writes it
   with `labels.UNRECOGNIZED_NOTE` as that marker's hover text. Reached through `labels.pv_status`,
   `labels.count_status`, `labels._closed_value` (so `labels.boundary_basis`,
@@ -2329,8 +2379,13 @@ Metric keys (`labels.METRIC_LABELS`) are not `LABELS` keys; each is named under 
 `pv_flip_count` (*Elections with a different popular-vote winner*), `ec_appointed_first` and
 `ec_appointed_latest` (*Earliest and latest electors appointed*), `pv_total_first` and
 `pv_total_latest` (*Earliest and latest total popular vote*), and `state_per_capita_lowest` and
-`state_per_capita_highest` (*Lowest and highest people per electoral vote*).
-`labels.METRIC_NO_FIGURE` is keyed by the same metric keys.
+`state_per_capita_highest` (*Lowest and highest people per electoral vote*), `state_elections_count`
+(*Elections in which a state appointed electors*), `state_took_office_count` (*Elections in which a
+state's electors voted for the candidate who took office*), `candidate_elections_count` (*Elections
+in which electors voted for a candidate*), and `candidate_ev_cast_total` and
+`candidate_ev_counted_total` (*Total electoral votes cast and counted for a candidate*).
+`labels.METRIC_NO_FIGURE` is keyed by the flag-count, select and sum keys among them (D114(d) as
+amended by D115); a plain count's no-figure wording is a constant of its own.
 
 ---
 
@@ -2359,7 +2414,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
-| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`); on `/elections/majority`, a count with no election to include, and on `/elections/over-time` and a state's People per electoral vote page, a figure with none, reads *No figure* (`labels.METRIC_NO_FIGURE_PV_YEARS`, `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE`) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`); on `/elections/majority`, a count with no election to include, and on `/elections/over-time` and a state's People per electoral vote page, a figure with none, reads *No figure* (`labels.METRIC_NO_FIGURE_PV_YEARS`, `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE`); on a state's history page and a candidate's page, *No figure* (`labels.METRIC_NO_FIGURE_NO_ELECTORS`, `labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`, `labels.METRIC_NO_FIGURE` for the took-office figure and both totals) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
 | "the state you chose" for a filter's state | Selected state | `labels.C3_SELECTED`, `labels.C3_SELECTED_NOTE` | A shared link carries the filter; the reader who opens it chose nothing. |
 | a party code with underscores or in capitals | the party's display form | `labels.NOMINATING_PARTY` | Owner decision, 2026-10-10; closed table since #389. |
 | "party" alone where both are meant | name which: the party (the nominating party); the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |
@@ -2367,7 +2422,8 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | a hyphen between the parties of a joint nomination | "and" | `labels.NOMINATING_PARTY` | A hyphen reads as one party's name (Democratic-Republican). |
 | "not yet collected", "not yet researched" | Not in this dataset | `labels.NOT_IN_DATASET`, `labels.PARTY_NULL_NOTE` | Dataset-first, with no promise (research §2.3). |
 | "Nominating party" as a column header | Party | `LABELS["nominating_party"]` | Rule-2 rows had no national nomination. |
-| "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
+| "the eventual winner", "the winner" for the candidate who became president | the candidate who took office | `labels.METRIC_LABELS["state_took_office_count"]` | In 1824 the Electoral College leader did not take office; "winner" claims a method. |
+| "every election they ran in" for a candidate's elections | every election in which they received an electoral vote | `pages/candidate.py` (its lede); `labels.METRIC_LABELS["candidate_elections_count"]`; otherwise a rule | The two sets differ both ways. A run with no electoral votes is not in this dataset, and a person can receive an electoral vote in an election they did not run in (a faithless elector's choice). |
 | "figure" for a chart | chart | a rule | In this file and on the page a figure is a number ("no popular-vote figure"). Plotly and HTML call the chart a figure. |
 | "C1", "C2" … in page text | the chart's title | a rule | A chart ID is a registry key and a link fragment; readers know a chart by its title (owner decision, 2026-11-06, #432). |
 | "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `labels.EARLIER_LINK`, `labels.LATER_LINK`, on every election page | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |

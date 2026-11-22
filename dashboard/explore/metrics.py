@@ -6,8 +6,8 @@ from the render's pinned view; only count, sum and mean over rows, never a ratio
 fields and never a recomputed served figure; a mean excludes nulls and shows its N; a
 sum with any null reads no figure; a null flag is never counted as false; and wherever
 a served figure exists, the metric reconciles to it. D112 (#569) amends it for the
-pages #569 adds figures to; the counts of a served flag here are its first, and the
-select (#600, D114) its second.
+pages #569 adds figures to; the counts of a served flag here are its first, the
+select (#600, D114) its second, and the sum (#601, D115) its third.
 
 Numbers only: the wording is :mod:`explore.labels`' (``METRIC_LABELS``,
 ``metric_mean``), except that a select carries each value's companion-table cell, so
@@ -49,16 +49,19 @@ class Metric(NamedTuple):
 
 
 #: The metric kinds, a closed set, each computed by the function of the same name here
-#: (``count``, ``mean``, ``flag_count``; #569, D112; ``select``, #600, D112(d), D114).
-KINDS = ("count", "mean", "flag_count", "select")
+#: (``count``, ``mean``, ``flag_count``; #569, D112; ``select``, #600, D112(d), D114;
+#: ``sum``, #601, D115).
+KINDS = ("count", "mean", "flag_count", "select", "sum")
 #: What a ``select`` picks: the earliest or latest year with a value, or the lowest or
 #: highest value (#600, D112(d)).
 PICKS = ("first", "latest", "lowest", "highest")
 
 
-#: Every metric, keyed by metric key, never renamed or reused. The page reads the field
-#: each mean averages from here, so this table drives the code. The count's source is
-#: the grain key of the rows it counts: the ``/v1/elections`` rows T1 shows.
+#: Every metric, keyed by metric key, never renamed or reused. Means and sums read their
+#: field from here (the page reads ``source.field``); a count's or flag count's source
+#: records the field that selects its rows (D115(b), (f)): for ``elections_shown`` the
+#: grain key of the ``/v1/elections`` rows T1 shows, for a state's took-office count the
+#: ``took_office`` that picks each year's row.
 METRICS: dict[str, Metric] = {
     "elections_shown": Metric("count", Source("YearListItem", "year")),
     "ec_margin_mean": Metric("mean", Source("ElectionSummary", "ec_margin")),
@@ -104,6 +107,26 @@ METRICS: dict[str, Metric] = {
     ),
     "state_per_capita_highest": Metric(
         "select", Source("PerCapitaRow", "persons_per_electoral_vote"), pick="highest"
+    ),
+    # The figures on /state/<usps> (#601, D112(e), D115): the elections in which the
+    # state appointed electors (an allotment above 0), and in how many of them its
+    # electors cast a vote for the candidate who took office (a flag the page derives:
+    # ``took_office`` picks the row, its ``electoral_votes`` decides).
+    "state_elections_count": Metric(
+        "count", Source("EcPvRow", "state_electoral_votes")
+    ),
+    "state_took_office_count": Metric(
+        "flag_count", Source("EcPvRow", "took_office"), counted=True
+    ),
+    # The figures on /candidate/<slug> (#601, D112(f), D115): the elections in which
+    # electors cast a vote for the candidate, and the national electoral votes cast and
+    # counted for them, one value per year.
+    "candidate_elections_count": Metric("count", Source("EcPvRow", "year")),
+    "candidate_ev_cast_total": Metric(
+        "sum", Source("EcPvRow", "national_electoral_votes")
+    ),
+    "candidate_ev_counted_total": Metric(
+        "sum", Source("EcPvRow", "national_electoral_votes_counted")
     ),
 }
 
@@ -355,3 +378,72 @@ def select(triples: Iterable[tuple[int, object, str]]) -> Selection:
         every_year(min(kept, key=lambda row: row[1])),
         every_year(max(kept, key=lambda row: row[1])),
     )
+
+
+@dataclass(frozen=True)
+class Total:
+    """A sum of one served integer field over elections, one value per year, with N
+    and the years that entered it (#601, D115).
+
+    Three states, and no other can be built: a total (``value`` an ``int`` ≥ 0, ``n`` ≥
+    1, ``first`` ≤ ``last``, both years); no figure (a null among the inputs, D097: a
+    sum with any null reads no figure; no value, no N, no years); and unrecognized (a
+    value no total can hold was among the inputs: no value, no N, no years).
+    """
+
+    value: int | None
+    n: int
+    first: int | None
+    last: int | None
+    unrecognized: bool = False
+
+    def __post_init__(self) -> None:
+        empty = self.n == 0 and self.first is None and self.last is None
+        if self.unrecognized or self.value is None:
+            ok = self.value is None and empty
+        else:
+            ok = (
+                type(self.value) is int
+                and self.value >= 0
+                and type(self.n) is int
+                and self.n >= 1
+                and type(self.first) is int
+                and type(self.last) is int
+                and self.first <= self.last
+            )
+        if not ok:
+            raise ValueError(f"not a total: {self!r}")
+
+
+#: The total over inputs that hold a value no total can hold.
+UNRECOGNIZED_TOTAL = Total(None, 0, None, None, unrecognized=True)
+#: The total with a null among its inputs, or with no input at all.
+NO_TOTAL = Total(None, 0, None, None)
+
+
+def sum(pairs: Iterable[tuple[int, object]]) -> Total:
+    """The sum of the values in ``(year, value)`` pairs, already joined on the year
+    (#601, D115): one pair per year, the per-year one-value check being the page's
+    (D098's pattern, through ``over_time.same``). Named for its kind (:data:`KINDS`),
+    so it shadows the builtin in this module, which never calls the builtin.
+
+    A null or a blank (:func:`explore.labels.is_blank`) among the values makes the whole
+    sum :data:`NO_TOTAL` (D097: a sum with any null reads no figure), unless a value no
+    total can hold comes too, which wins. A value that is not an ``int`` at or above 0
+    (a bool, a float, text, a negative) makes it :data:`UNRECOGNIZED_TOTAL`. No pair at
+    all is :data:`NO_TOTAL`. Zero is a value (Greeley's counted votes in 1872).
+    """
+    total = 0
+    years: list[int] = []
+    null = False
+    for year, value in pairs:
+        if labels.is_blank(value):
+            null = True
+            continue
+        if type(value) is not int or value < 0:
+            return UNRECOGNIZED_TOTAL
+        total += value
+        years.append(year)
+    if null or not years:
+        return NO_TOTAL
+    return Total(total, len(years), min(years), max(years))

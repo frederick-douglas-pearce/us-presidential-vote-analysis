@@ -723,12 +723,32 @@ METRIC_LABELS: dict[str, str] = {
     "pv_total_latest": "Total popular vote, latest election with a total",
     "state_per_capita_lowest": "People per electoral vote, lowest",
     "state_per_capita_highest": "People per electoral vote, highest",
+    # The figures on /state/<usps> and /candidate/<slug> (#601, D112(e), (f), D115; ba
+    # spec, approved by the owner at #601's plan gate, 2026-11-22). "Appointed
+    # electors", never "took part"; "the candidate who took office", never "the eventual
+    # winner" (1824); the candidate count and totals say "cast" and "in all states".
+    "state_elections_count": "Elections in which this state appointed electors",
+    "state_took_office_count": (
+        "Elections in which this state's electors cast at least one electoral vote "
+        "for the candidate who took office"
+    ),
+    "candidate_elections_count": (
+        "Elections in which electors cast at least one electoral vote for this "
+        "candidate"
+    ),
+    "candidate_ev_cast_total": (
+        "Total electoral votes cast for this candidate in all states"
+    ),
+    "candidate_ev_counted_total": (
+        "Total electoral votes Congress counted for this candidate in all states"
+    ),
 }
-#: An average over two or more elections; ``{margin}`` is :func:`margin`'s cell, the
-#: years the earliest and latest whose margin entered it (:func:`metric_mean`).
-METRIC_OVER = "{margin}, over {n} elections ({first}–{last})"
-#: An average over one election: the one year, never "2000–2000".
-METRIC_OVER_ONE = "{margin}, over 1 election ({year})"
+#: An average or a total over two or more elections; ``{value}`` is :func:`margin`'s
+#: cell for an average (:func:`metric_mean`) and :func:`number`'s for a total
+#: (:func:`metric_total`, #601), the years the earliest and latest that entered it.
+METRIC_OVER = "{value}, over {n} elections ({first}–{last})"
+#: An average or a total over one election: the one year, never "2000–2000".
+METRIC_OVER_ONE = "{value}, over 1 election ({year})"
 #: No average, because no election matches the filters (T1 then shows its own empty
 #: text, `empty=` in `pages/elections.py`, below the metrics).
 METRIC_NO_AVERAGE_FILTERS = "No average: no elections match these filters"
@@ -807,12 +827,58 @@ METRIC_NO_FIGURE: dict[str, str] = {
     "state_per_capita_highest": (
         "No figure: none of the elections shown has a people-per-electoral-vote figure"
     ),
+    # A state's history (#601): the state appointed electors in some election, but the
+    # took-office row's electoral votes are null in every one. Names no cause.
+    "state_took_office_count": (
+        "No figure: this dataset has no number of electoral votes this state's "
+        "electors cast for the candidate who took office, in any election in which "
+        "this state appointed electors"
+    ),
+    # A candidate's totals (#601): a sum with any null reads no figure (D097), so "one
+    # or more" is true whether one year or every year is null.
+    "candidate_ev_cast_total": (
+        "No figure: this dataset has no number of electoral votes cast for this "
+        "candidate in one or more of the elections shown"
+    ),
+    "candidate_ev_counted_total": (
+        "No figure: this dataset has no number of electoral votes counted for this "
+        "candidate in one or more of the elections shown"
+    ),
 }
 #: A select with no figure because the years shown hold no election for the state (a
 #: state's per-capita page, whose year range spans the dataset; #600). On the elections
 #: pages no year shown shows *No elections match* and no figure instead.
 METRIC_NO_FIGURE_NO_ELECTIONS = (
     "No figure: this dataset has no elections for this state in the years shown"
+)
+#: A count of elections with its years (#601; ba spec, approved at #601's plan gate):
+#: a state's elections with electors appointed, a candidate's with electoral votes
+#: cast for them (:func:`metric_elections`).
+METRIC_COUNT_ELECTIONS = "{n} elections ({first}–{last})"
+#: A count of one election: the one year, never "1828–1828".
+METRIC_COUNT_ELECTIONS_ONE = "1 election ({year})"
+#: Both state history figures when no year's allotment is above 0 (#601). It never
+#: says "elections shown", since the figures ignore T4's filters (D112(g)), and never
+#: "0", which would read as a measurement.
+METRIC_NO_FIGURE_NO_ELECTORS = (
+    "No figure: this dataset has no election in which this state appointed electors"
+)
+#: A candidate's election count at 0 (#601): unreachable on a successful render, kept
+#: so the count never reads "0 elections".
+METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS = (
+    "No figure: this dataset has no election in which electors cast an electoral "
+    "vote for this candidate"
+)
+#: Under the state history figures while the election count shows a number and some
+#: year's allotment is exactly 0 (#601; owner, #601's plan gate): ``{years}`` is
+#: :func:`metric_years` over those years, so GA's 50 beside C7's 51 years is explained.
+METRIC_ZERO_ALLOTMENT_NOTE = (
+    "These figures leave out {years}, when this state appointed no electors."
+)
+#: Under the candidate figures only while the State filter is applied (#601): the
+#: figures are national (D112(g)); "State" is the filter's own label.
+METRIC_ALL_STATES_NOTE = (
+    "These figures cover every state. The State filter narrows only the rows below."
 )
 #: A select over two or more elections (#600, D112(d); ba spec, approved at #600's plan
 #: gate): ``{value}`` is the companion table's own cell, ``{years}`` the year or tied
@@ -1544,10 +1610,10 @@ def metric_mean(
         return METRIC_NO_AVERAGE_NULL, None
     text = margin(mean.value, True)
     if mean.n == 1:
-        whole = METRIC_OVER_ONE.format(margin=text, year=mean.first)
+        whole = METRIC_OVER_ONE.format(value=text, year=mean.first)
     else:
         whole = METRIC_OVER.format(
-            margin=text, n=mean.n, first=mean.first, last=mean.last
+            value=text, n=mean.n, first=mean.first, last=mean.last
         )
     return text, whole.removeprefix(text)
 
@@ -1558,12 +1624,14 @@ def metric_count(
     no_figure: str,
     pv_window: tuple[int, int] | None = None,
 ) -> tuple[str, str | None]:
-    """A count of elections on ``/elections/majority`` (#569, D112), as ``(value,
-    rest)``: the value text, and the text after it naming its N and years, or ``None``
-    where there is none to name. ``result`` is an ``explore.metrics.FlagCount`` (this
-    module imports no ``metrics``, which imports it); ``years`` the distinct years
-    shown; ``no_figure`` the count's own wording for every flag null; ``pv_window`` the
-    popular-vote window, given for the popular-vote count only.
+    """A count of elections, as ``(value, rest)``, on ``/elections/majority`` (#569,
+    D112) and ``/state/<usps>`` (the took-office count, #601, D115, whose ``no_figure``
+    the page chooses and whose N may be smaller than the elections count beside it): the
+    value text, and the text after it naming its N and years, or ``None`` where there is
+    none to name. ``result`` is an ``explore.metrics.FlagCount`` (this module imports no
+    ``metrics``, which imports it); ``years`` the distinct years shown; ``no_figure``
+    the count's own wording for every flag null; ``pv_window`` the popular-vote window,
+    given for the popular-vote count only.
 
     Checked in order: an unrecognized count (:data:`UNRECOGNIZED`, with no N or years);
     no contributing election, worded by its cause (a popular-vote count with no year
@@ -1584,6 +1652,45 @@ def metric_count(
     else:
         whole = METRIC_COUNT_OF.format(
             count=text, n=result.n, first=result.first, last=result.last
+        )
+    return text, whole.removeprefix(text)
+
+
+def metric_elections(
+    n: int, years: Sequence[int], no_figure: str
+) -> tuple[str, str | None]:
+    """A count of elections with its years (#601, D115), as ``(value, rest)``: ``n``,
+    the count ``explore.metrics.count`` computed (this module only words it, D097), from
+    the earliest to the latest of ``years``, or ``no_figure`` (with no rest) when ``n``
+    is 0, never "0 elections"."""
+    if n == 0:
+        return no_figure, None
+    text = str(n)
+    if n == 1:
+        whole = METRIC_COUNT_ELECTIONS_ONE.format(year=min(years))
+    else:
+        whole = METRIC_COUNT_ELECTIONS.format(
+            n=text, first=min(years), last=max(years)
+        )
+    return text, whole.removeprefix(text)
+
+
+def metric_total(result: Any, no_figure: str) -> tuple[str, str | None]:
+    """A total of electoral votes (#601, D115), as ``(value, rest)``. ``result`` is an
+    ``explore.metrics.Total`` (this module imports no ``metrics``). Checked in order:
+    unrecognized (:data:`UNRECOGNIZED`, no N or years); no figure (``no_figure``, a null
+    among the years, D097); else the total through :func:`number`, as T5's cells write
+    a number, over its N and years (:data:`METRIC_OVER`, the averages' wording)."""
+    if result.unrecognized:
+        return UNRECOGNIZED, None
+    if result.n == 0:
+        return no_figure, None
+    text = number(result.value)
+    if result.n == 1:
+        whole = METRIC_OVER_ONE.format(value=text, year=result.first)
+    else:
+        whole = METRIC_OVER.format(
+            value=text, n=result.n, first=result.first, last=result.last
         )
     return text, whole.removeprefix(text)
 
