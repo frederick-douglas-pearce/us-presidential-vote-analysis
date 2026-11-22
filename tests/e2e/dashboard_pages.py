@@ -415,3 +415,27 @@ def assert_hover_names_year(page: Page, chart: str, selector: str, year: str) ->
     assert box is not None
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     expect(page.locator(f"{chart} .hoverlayer .hovertext")).to_contain_text(year)
+
+
+def assert_figures_inside(
+    page: Page, block: str, width: int, parts_expected: int
+) -> None:
+    """A headline figures block (#600) under each theme choice (Light, Dark, Auto,
+    which follows the device: the AC's "System"): every label, value and note inside
+    ``width`` with no sideways scroll. The figures add no color token, so the theme is
+    walked for the AC rather than for a color check."""
+    parts = page.locator(f"{block} dt, {block} dd, {block} p")
+    for choice in ("light", "dark", "auto"):
+        page.locator(f"#theme-{choice}").click()
+        assert parts.count() == parts_expected, choice
+        for i in range(parts.count()):
+            box = parts.nth(i).bounding_box()
+            assert box is not None
+            assert box["x"] >= 0 and box["x"] + box["width"] <= width + 0.5, (
+                choice,
+                i,
+                box,
+            )
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (
+            choice
+        )

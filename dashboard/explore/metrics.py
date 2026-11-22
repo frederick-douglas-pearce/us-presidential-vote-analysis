@@ -6,10 +6,13 @@ from the render's pinned view; only count, sum and mean over rows, never a ratio
 fields and never a recomputed served figure; a mean excludes nulls and shows its N; a
 sum with any null reads no figure; a null flag is never counted as false; and wherever
 a served figure exists, the metric reconciles to it. D112 (#569) amends it for the
-pages #569 adds figures to; the counts of a served flag here are its first.
+pages #569 adds figures to; the counts of a served flag here are its first, and the
+select (#600, D114) its second.
 
 Numbers only: the wording is :mod:`explore.labels`' (``METRIC_LABELS``,
-``metric_mean``). Pure and shared: it reads no API and imports only ``labels``, whose
+``metric_mean``), except that a select carries each value's companion-table cell, so
+the figure shows exactly what the table shows (D114, widening D097(f)). Pure and
+shared: it reads no API and imports only ``labels``, whose
 :func:`explore.labels.finite` and :func:`explore.labels.is_blank` are the one rule of
 what is a figure and what is null, the same the margin cells use.
 """
@@ -32,17 +35,25 @@ class Source(NamedTuple):
 
 
 class Metric(NamedTuple):
-    """One metric: its kind (one of :data:`KINDS`), the served field it reads and, for
-    a ``flag_count``, the flag value it counts (``None`` for every other kind)."""
+    """One metric: its kind (one of :data:`KINDS`), the served field it reads, for a
+    ``flag_count`` the flag value it counts and for a ``select`` the value it picks (one
+    of :data:`PICKS`), each ``None`` for every other kind; and whether it is read
+    against the popular-vote window (#600, D114), so a page asks the metric rather than
+    keeping a table of its own."""
 
     kind: str
     source: Source
     counted: bool | None = None
+    pick: str | None = None
+    reads_pv_window: bool = False
 
 
 #: The metric kinds, a closed set, each computed by the function of the same name here
-#: (``count``, ``mean``, ``flag_count``; #569, D112).
-KINDS = ("count", "mean", "flag_count")
+#: (``count``, ``mean``, ``flag_count``; #569, D112; ``select``, #600, D112(d), D114).
+KINDS = ("count", "mean", "flag_count", "select")
+#: What a ``select`` picks: the earliest or latest year with a value, or the lowest or
+#: highest value (#600, D112(d)).
+PICKS = ("first", "latest", "lowest", "highest")
 
 
 #: Every metric, keyed by metric key, never renamed or reused. The page reads the field
@@ -51,7 +62,9 @@ KINDS = ("count", "mean", "flag_count")
 METRICS: dict[str, Metric] = {
     "elections_shown": Metric("count", Source("YearListItem", "year")),
     "ec_margin_mean": Metric("mean", Source("ElectionSummary", "ec_margin")),
-    "pv_margin_mean": Metric("mean", Source("ElectionSummary", "pv_margin")),
+    "pv_margin_mean": Metric(
+        "mean", Source("ElectionSummary", "pv_margin"), reads_pv_window=True
+    ),
     # The counts on /elections/majority (#569, D112): elections whose Electoral College
     # leader had no majority (the flag false), and elections whose popular-vote winner
     # differs from that leader (the flip true).
@@ -59,7 +72,38 @@ METRICS: dict[str, Metric] = {
         "flag_count", Source("ElectionSummary", "ec_determinative"), counted=False
     ),
     "pv_flip_count": Metric(
-        "flag_count", Source("ElectionSummary", "pv_flip"), counted=True
+        "flag_count",
+        Source("ElectionSummary", "pv_flip"),
+        counted=True,
+        reads_pv_window=True,
+    ),
+    # The figures on /elections/over-time (#600, D112(d)): the electors appointed and
+    # the total popular vote in the earliest and latest years shown with a value.
+    "ec_appointed_first": Metric(
+        "select", Source("ElectionSummary", "electoral_denominator"), pick="first"
+    ),
+    "ec_appointed_latest": Metric(
+        "select", Source("ElectionSummary", "electoral_denominator"), pick="latest"
+    ),
+    "pv_total_first": Metric(
+        "select",
+        Source("NationalSummaryRow", "national_pv_denominator"),
+        pick="first",
+        reads_pv_window=True,
+    ),
+    "pv_total_latest": Metric(
+        "select",
+        Source("NationalSummaryRow", "national_pv_denominator"),
+        pick="latest",
+        reads_pv_window=True,
+    ),
+    # The figures on /state/<usps>/per-capita (#600): the state's lowest and highest
+    # people per electoral vote among the years shown.
+    "state_per_capita_lowest": Metric(
+        "select", Source("PerCapitaRow", "persons_per_electoral_vote"), pick="lowest"
+    ),
+    "state_per_capita_highest": Metric(
+        "select", Source("PerCapitaRow", "persons_per_electoral_vote"), pick="highest"
     ),
 }
 
@@ -201,3 +245,113 @@ def flag_count(pairs: Iterable[tuple[int, object]], counted: bool) -> FlagCount:
     if not years:
         return NO_COUNT
     return FlagCount(hits, len(years), min(years), max(years))
+
+
+@dataclass(frozen=True)
+class Selection:
+    """The earliest, latest, lowest and highest of one served field over the years
+    shown, each as the companion table's own cell, with N, the years with a value
+    (#600, D112(d), D114).
+
+    ``first`` and ``latest`` are ``(year, cell)``; ``lowest`` and ``highest`` are
+    ``(cell, years)``, naming every year whose cell equals the extreme's (a tie by the
+    cell the table shows, owner at #600's plan gate). Three states, and no other can be
+    built: values (``n`` ≥ 1, every pick set, the first year no later than the latest,
+    each extreme naming at least one year in ascending order); no value (``n`` 0, no
+    picks); and unrecognized (no ``n``, no picks).
+    """
+
+    n: int
+    first: tuple[int, str] | None
+    latest: tuple[int, str] | None
+    lowest: tuple[str, tuple[int, ...]] | None
+    highest: tuple[str, tuple[int, ...]] | None
+    unrecognized: bool = False
+
+    def __post_init__(self) -> None:
+        picks = (self.first, self.latest, self.lowest, self.highest)
+        if self.unrecognized or self.n == 0:
+            ok = self.n == 0 and all(p is None for p in picks)
+        else:
+            ok = (
+                type(self.n) is int
+                and self.n >= 1
+                and _year_cell(self.first)
+                and _year_cell(self.latest)
+                and _cell_years(self.lowest)
+                and _cell_years(self.highest)
+            )
+            if ok:
+                assert self.first is not None and self.latest is not None
+                ok = self.first[0] <= self.latest[0]
+        if not ok:
+            raise ValueError(f"not a selection: {self!r}")
+
+
+def _year_cell(pick: object) -> bool:
+    return (
+        isinstance(pick, tuple)
+        and len(pick) == 2
+        and type(pick[0]) is int
+        and isinstance(pick[1], str)
+    )
+
+
+def _cell_years(pick: object) -> bool:
+    if not (isinstance(pick, tuple) and len(pick) == 2 and isinstance(pick[0], str)):
+        return False
+    years = pick[1]
+    return (
+        isinstance(years, tuple)
+        and len(years) >= 1
+        and all(type(y) is int for y in years)
+        and list(years) == sorted(set(years))
+    )
+
+
+#: The selection over inputs that hold a value no figure can show.
+UNRECOGNIZED_SELECTION = Selection(0, None, None, None, None, unrecognized=True)
+#: The selection of no year with a value.
+NO_SELECTION = Selection(0, None, None, None, None)
+
+
+def select(triples: Iterable[tuple[int, object, str]]) -> Selection:
+    """The earliest, latest, lowest and highest of the values in ``(year, value,
+    cell)`` triples, already joined on the year, ``cell`` being the companion table's
+    own string for that value (#600, D112(d), D114).
+
+    A null or a blank (:func:`explore.labels.is_blank`) is left out and is never an
+    extreme, whatever its cell says: a cell reading :data:`explore.labels.UNRECOGNIZED`
+    on a null names why the value is missing (an unknown cause code), not a value, and N
+    counts only years with one (owner, #609's review; D114(a)). Any other value
+    :func:`explore.labels.finite` refuses, or a value whose own cell reads
+    :data:`explore.labels.UNRECOGNIZED` (a number the table cannot show, such as a float
+    allotment), makes the whole selection :data:`UNRECOGNIZED_SELECTION`: leaving it out
+    would drop a year and misstate N. The extremes are chosen by value; each names every
+    year whose cell equals the chosen one's, so the figure never names one year where
+    the table shows two equal cells. Each triple is one election; the caller passes each
+    year once (the per-capita page refuses a body that names a year twice, D114(g)), and
+    a repeated year tied at an extreme makes :class:`Selection` raise ``ValueError``.
+    """
+    kept: list[tuple[int, float, str]] = []
+    for year, value, cell in triples:
+        if labels.is_blank(value):
+            continue
+        number = labels.finite(value)
+        if number is None or cell == labels.UNRECOGNIZED:
+            return UNRECOGNIZED_SELECTION
+        kept.append((year, number, cell))
+    if not kept:
+        return NO_SELECTION
+    kept.sort(key=lambda row: row[0])
+
+    def every_year(chosen: tuple[int, float, str]) -> tuple[str, tuple[int, ...]]:
+        return chosen[2], tuple(year for year, _, cell in kept if cell == chosen[2])
+
+    return Selection(
+        len(kept),
+        (kept[0][0], kept[0][2]),
+        (kept[-1][0], kept[-1][2]),
+        every_year(min(kept, key=lambda row: row[1])),
+        every_year(max(kept, key=lambda row: row[1])),
+    )

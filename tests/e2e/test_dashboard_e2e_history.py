@@ -36,6 +36,7 @@ from tests.e2e.dashboard_pages import (
     STATE_SUCCESS,
     UNAVAILABLE,
     WIDE_WIDTHS,
+    assert_figures_inside,
     assert_hover_names_year,
     assert_layout_holds,
     assert_rendered,
@@ -455,3 +456,22 @@ def test_with_plotlyjs_blocked_c7_and_c10_s_titles_captions_and_tables_render(
         expect(page.locator(f"{chart} figcaption a")).to_have_attribute("href", table)
         expect(page.locator(f"{table} tbody tr")).to_have_count(len(served_years()))
     expect(page.locator("#state-history")).to_be_visible()
+
+
+# --- the per-capita page's headline figures (#600, D112(d)) ---------------------------
+
+PER_CAPITA_FIGURES = "#state-per-capita-metrics"
+
+
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_the_per_capita_figures_read_inside_phone_width(page: Page, width: int) -> None:
+    """AC 360 px (#600): the lowest and highest, a tie naming both years, sit inside
+    the width with no sideways scroll in Light, Dark and System, above T7."""
+    open_at(page, PER_CAPITA_PATH, width)
+    expect(page.locator("#state-per-capita-lowest")).to_have_text(
+        "37,888 in 1824 and 1828, among 50 elections with a figure (1824–2024)"
+    )
+    assert_figures_inside(page, PER_CAPITA_FIGURES, width, 4)
+    figures, table = rect(page, PER_CAPITA_FIGURES), rect(page, "#state-per-capita")
+    assert figures["bottom"] <= table["top"], (figures, table)
+

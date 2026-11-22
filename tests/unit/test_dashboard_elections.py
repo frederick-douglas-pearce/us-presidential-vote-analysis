@@ -19,7 +19,7 @@ import sys
 import unicodedata
 import urllib.parse
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, ClassVar, TypeGuard
 
 import dash
 import pytest
@@ -2195,6 +2195,101 @@ class TestMetricLabels:
             else:
                 assert metric.counted is None, key
 
+    def test_a_select_names_its_pick_and_no_other_kind_does(self) -> None:
+        # #600, D114: ``pick`` is set exactly on a select, to one of ``PICKS``.
+        for key, metric in metrics.METRICS.items():
+            if metric.kind == "select":
+                assert metric.pick in metrics.PICKS, key
+            else:
+                assert metric.pick is None, key
+
+    def test_exactly_the_popular_vote_metrics_read_the_window(self) -> None:
+        # #600's cr.9 (D114): the window is the metric's property, never a page table.
+        assert {k for k, m in metrics.METRICS.items() if m.reads_pv_window} == {
+            "pv_margin_mean",
+            "pv_flip_count",
+            "pv_total_first",
+            "pv_total_latest",
+        }
+
+    def test_no_figure_wording_is_keyed_by_exactly_the_counts_and_selects(
+        self,
+    ) -> None:
+        # A mean words its own in ``metric_mean`` (#600, architect S2).
+        assert set(labels.METRIC_NO_FIGURE) == {
+            k for k, m in metrics.METRICS.items() if m.kind in ("flag_count", "select")
+        }
+
+    def test_no_page_keeps_the_retired_per_key_tables(self) -> None:
+        # A tripwire for the two module-level tables #600's cr.9 retired, on every page
+        # with metrics, this one included. It does not see a per-key table under
+        # another name; what each page reads the window from is pinned by
+        # ``test_each_page_reads_the_window_from_the_metric``.
+        for names in (MOD, *(page_globals(p) for p in METRIC_PAGES)):
+            assert "METRIC_NO_FIGURE" not in names and "PV_METRIC" not in names
+
+    #: The kinds each page computes (#609's review, r1.cr.8): a page's ``METRIC_IDS``
+    #: names only metrics of those kinds, so its kind check can never fire in shipped
+    #: code (#610 moves that check off the degraded state).
+    PAGE_KINDS: ClassVar[dict[str, set[str]]] = {
+        "pages.elections": {"count", "mean"},
+        "pages.elections_majority": {"flag_count"},
+        "pages.elections_over_time": {"select"},
+        "pages.state_per_capita": {"select"},
+    }
+
+    def test_each_page_names_only_the_kinds_it_computes(self) -> None:
+        assert set(self.PAGE_KINDS) == {"pages.elections", *METRIC_PAGES}
+        for page, kinds in self.PAGE_KINDS.items():
+            ids = METRIC_IDS if page == "pages.elections" else page_globals(page)["METRIC_IDS"]
+            for key in ids:
+                assert metrics.METRICS[key].kind in kinds, (page, key)
+
+    @pytest.mark.parametrize("page", ["elections", "majority", "over_time"])
+    def test_each_page_reads_the_window_from_the_metric(
+        self, page: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #609's review (r1.cr.6, r1.ge.B1): flipping ``reads_pv_window`` on one
+        # metric changes that page's wording, so the flag, not a page table, decides.
+        query = {"year_from": "1900", "year_to": "1960"}
+        if page == "elections":
+            # The window decides only a mean with no contributing election: no year
+            # from 1900 to 1960 has a popular-vote margin.
+            key = "pv_margin_mean"
+
+            def text() -> str:
+                return metric_text(render_n1(query=query), key)
+        elif page == "majority":
+            key = "ec_no_majority_count"
+
+            def text() -> str:
+                tree = MAJORITY["render"](
+                    copy.deepcopy(BODY),
+                    copy.deepcopy(SUMMARY),
+                    elections_view.parse_filters(query),
+                )
+                return "".join(texts(find(tree, MAJORITY["METRICS_ID"])))
+        else:
+            key = "pv_total_first"
+            over_time = page_globals("pages.elections_over_time")
+
+            def text() -> str:
+                tree = over_time["render"](
+                    copy.deepcopy(BODY),
+                    copy.deepcopy(SUMMARY),
+                    elections_view.parse_filters(query),
+                )
+                return "".join(texts(find(tree, over_time["METRICS_ID"])))
+
+        before = text()
+        metric = metrics.METRICS[key]
+        monkeypatch.setitem(
+            metrics.METRICS,
+            key,
+            metric._replace(reads_pv_window=not metric.reads_pv_window),
+        )
+        assert text() != before, (page, key)
+
     def test_every_source_is_a_public_api_field(self) -> None:
         assert metric_source_problems(metrics.METRICS.values()) == []
 
@@ -2212,7 +2307,11 @@ class TestMetricLabels:
 
 
 #: The pages other than this one that show metrics, each with its ``METRIC_IDS``.
-METRIC_PAGES = ("pages.elections_majority",)
+METRIC_PAGES = (
+    "pages.elections_majority",
+    "pages.elections_over_time",
+    "pages.state_per_capita",
+)
 
 
 def page_globals(module: str) -> dict[str, Any]:
@@ -2753,3 +2852,247 @@ class TestSharedFilters:
         for name in ("parse_filters", "filters", "applied_search", "next_search"):
             assert own[name] is getattr(elections_view, name), name
         assert "on_filter_change" not in own
+
+
+# --- the select kind (#600, D112(d), D114) -------------------------------------------
+
+
+def picked(selection: metrics.Selection) -> tuple[Any, ...]:
+    return (
+        selection.n,
+        selection.first,
+        selection.latest,
+        selection.lowest,
+        selection.highest,
+    )
+
+
+class TestSelect:
+    def test_it_picks_each_extreme_as_its_cell_with_n(self) -> None:
+        result = metrics.select([(1980, 5.0, "5"), (1984, 2.0, "2"), (1988, 9.0, "9")])
+        assert picked(result) == (
+            3,
+            (1980, "5"),
+            (1988, "9"),
+            ("2", (1984,)),
+            ("9", (1988,)),
+        )
+
+    def test_order_of_input_is_not_trusted(self) -> None:
+        rows = [(1988, 9.0, "9"), (1980, 5.0, "5"), (1984, 2.0, "2")]
+        assert metrics.select(rows) == metrics.select(sorted(rows))
+
+    @pytest.mark.parametrize("value", [None, "", "  "])
+    def test_a_null_or_blank_is_never_an_extreme_and_leaves_n(self, value: Any) -> None:
+        result = metrics.select(
+            [(1976, value, "No figure"), (1980, 3.0, "3"), (1984, 4.0, "4")]
+        )
+        assert picked(result) == (
+            2,
+            (1980, "3"),
+            (1984, "4"),
+            ("3", (1980,)),
+            ("4", (1984,)),
+        )
+
+    def test_a_tie_names_every_year(self) -> None:
+        result = metrics.select(
+            [(1852, 1.0, "1"), (1856, 1.0, "1"), (1860, 1.0, "1"), (1864, 2.0, "2")]
+        )
+        assert result.lowest == ("1", (1852, 1856, 1860))
+
+    def test_a_tie_is_by_the_cell_the_table_shows(self) -> None:
+        # Owner at #600's plan gate (architect I2): two raw values T7 shows as one cell
+        # are one tie, so the figure never names one of two equal cells.
+        result = metrics.select(
+            [
+                (1824, 37887.67, "37,888"),
+                (1828, 37888.2, "37,888"),
+                (1832, 40000.0, "40,000"),
+            ]
+        )
+        assert result.lowest == ("37,888", (1824, 1828))
+        assert result.highest == ("40,000", (1832,))
+
+    def test_one_year_is_every_pick(self) -> None:
+        result = metrics.select([(2000, 7.0, "7"), (2004, None, "No figure")])
+        assert picked(result) == (
+            1,
+            (2000, "7"),
+            (2000, "7"),
+            ("7", (2000,)),
+            ("7", (2000,)),
+        )
+
+    @pytest.mark.parametrize(
+        "value", [True, False, "x", float("nan"), float("inf"), 10**400]
+    )
+    def test_a_value_no_figure_can_show_makes_it_unrecognized(self, value: Any) -> None:
+        assert (
+            metrics.select([(1976, 2.0, "2"), (1980, value, "2")])
+            == metrics.UNRECOGNIZED_SELECTION
+        )
+
+    @pytest.mark.parametrize("value", [538.0, 0.3, -5])
+    def test_a_value_whose_cell_is_unrecognized_makes_it_unrecognized(
+        self, value: Any
+    ) -> None:
+        # Architect I1 (D114): ``finite`` accepts these, but the table's cell reads
+        # Unrecognized value, so the figure must too, with no N or years.
+        assert (
+            metrics.select([(1976, 2.0, "2"), (1980, value, labels.UNRECOGNIZED)])
+            == metrics.UNRECOGNIZED_SELECTION
+        )
+
+    def test_no_value_is_no_selection(self) -> None:
+        assert metrics.select([]) == metrics.NO_SELECTION
+        assert metrics.select([(1848, None, "x")]) == metrics.NO_SELECTION
+        assert not metrics.NO_SELECTION.unrecognized
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            (0, (1, "a"), None, None, None),
+            (1, None, None, None, None),
+            (1, (2, "a"), (1, "a"), ("a", (1,)), ("a", (1,))),
+            (1, (1, "a"), (1, "a"), ("a", ()), ("a", (1,))),
+            (1, (1, "a"), (1, "a"), ("a", (2, 1)), ("a", (1,))),
+            (1, (1, 2), (1, "a"), ("a", (1,)), ("a", (1,))),
+            (True, (1, "a"), (1, "a"), ("a", (1,)), ("a", (1,))),
+        ],
+    )
+    def test_no_other_state_can_be_built(self, args: tuple[Any, ...]) -> None:
+        with pytest.raises(ValueError):
+            metrics.Selection(*args)
+
+    @pytest.mark.parametrize(
+        ("args", "unrecognized"),
+        [
+            ((0, (1, "a"), None, None, None), True),
+            ((1, None, None, None, None), True),
+            ((-1, (1, "a"), (1, "a"), ("a", (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, 2), ("a", (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), None, ("a", (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, "a"), ("a", (1,)), ("a", (1, 1))), False),
+            ((1, (1, "a"), (1, "a"), ("a", (1,)), None), False),
+            ((1, (1, "a"), (1, "a"), ("a", (1, 1)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, "a"), (1, (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, "a"), ("a", [1]), ("a", (1,))), False),
+        ],
+    )
+    def test_every_refusal_holds(
+        self, args: tuple[Any, ...], unrecognized: bool
+    ) -> None:
+        # #609's review (r1.ge.B2): with ``test_no_other_state_can_be_built``, each
+        # clause of ``__post_init__`` refuses on its own.
+        with pytest.raises(ValueError):
+            n, first, latest, lowest, highest = args
+            metrics.Selection(n, first, latest, lowest, highest, unrecognized)
+
+    def test_a_null_is_left_out_whatever_its_cell_says(self) -> None:
+        # Owner at #609's review (r1.cr.7, D114(a)): an Unrecognized value cell on a
+        # null names its cause, not a value, so the year leaves N and is no extreme.
+        result = metrics.select(
+            [(1848, None, labels.UNRECOGNIZED), (1852, 3.0, "3"), (1856, 4.0, "4")]
+        )
+        assert picked(result) == (2, (1852, "3"), (1856, "4"), ("3", (1852,)), ("4", (1856,)))
+
+    def test_extremes_are_chosen_by_value_never_by_the_cell_s_text(self) -> None:
+        # #609's review (r1.ge.E1): "9" sorts after "10" as text.
+        result = metrics.select([(1980, 9.0, "9"), (1984, 10.0, "10"), (1988, 999.0, "999")])
+        assert result.lowest == ("9", (1980,))
+        assert result.highest == ("999", (1988,))
+
+
+class TestMetricSelectWording:
+    SPAN = metrics.Selection(
+        3, (1976, "1"), (2024, "3"), ("1", (1976, 1980)), ("3", (2024,))
+    )
+    ONE = metrics.Selection(1, (2000, "7"), (2000, "7"), ("7", (2000,)), ("7", (2000,)))
+
+    @pytest.mark.parametrize(
+        ("pick", "expected"),
+        [
+            ("first", ("1", " in 1976, among 3 elections with a figure (1976–2024)")),
+            ("latest", ("3", " in 2024, among 3 elections with a figure (1976–2024)")),
+            (
+                "lowest",
+                ("1", " in 1976 and 1980, among 3 elections with a figure (1976–2024)"),
+            ),
+            ("highest", ("3", " in 2024, among 3 elections with a figure (1976–2024)")),
+        ],
+    )
+    def test_a_span_names_its_years_and_n(
+        self, pick: str, expected: tuple[str, str]
+    ) -> None:
+        assert labels.metric_select(self.SPAN, pick, [1976, 2024], "none") == expected
+
+    def test_years_join_as_the_owner_wrote_them(self) -> None:
+        assert labels.metric_years([1824]) == "1824"
+        assert labels.metric_years([1824, 1828]) == "1824 and 1828"
+        assert labels.metric_years([1852, 1856, 1860]) == "1852, 1856 and 1860"
+
+    @pytest.mark.parametrize(
+        ("pick", "expected"),
+        [
+            ("first", ("7", " in 2000, the only election shown with a figure")),
+            ("lowest", ("7", " in 2000, the only election shown with a figure")),
+            (
+                "latest",
+                (labels.METRIC_SELECT_SAME.format(other="earliest", year=2000), None),
+            ),
+            (
+                "highest",
+                (labels.METRIC_SELECT_SAME.format(other="lowest", year=2000), None),
+            ),
+        ],
+    )
+    def test_one_election_shows_one_value(
+        self, pick: str, expected: tuple[str, str | None]
+    ) -> None:
+        assert labels.metric_select(self.ONE, pick, [2000], "none") == expected
+
+    def test_no_value_is_worded_by_its_cause_in_order(self) -> None:
+        none = metrics.NO_SELECTION
+        assert labels.metric_select(none, "first", [], "null", (1976, 2024)) == (
+            labels.METRIC_NO_FIGURE_NO_ELECTIONS,
+            None,
+        )
+        assert labels.metric_select(none, "first", [1960], "null", (1976, 2024)) == (
+            labels.METRIC_NO_FIGURE_PV_YEARS.format(first=1976, last=2024),
+            None,
+        )
+        assert labels.metric_select(none, "first", [1980], "null", (1976, 2024)) == (
+            "null",
+            None,
+        )
+        assert labels.metric_select(none, "lowest", [1980], "null") == ("null", None)
+
+    @pytest.mark.parametrize(
+        ("years", "inside"),
+        [([1976], True), ([2024], True), ([1972], False), ([2028], False)],
+    )
+    def test_the_window_is_inclusive_at_both_ends(
+        self, years: list[int], inside: bool
+    ) -> None:
+        # #609's review (r1.ge.B3): a year at either bound is inside the window.
+        expected = (
+            "null"
+            if inside
+            else labels.METRIC_NO_FIGURE_PV_YEARS.format(first=1976, last=2024)
+        )
+        assert labels.metric_select(
+            metrics.NO_SELECTION, "first", years, "null", (1976, 2024)
+        ) == (expected, None)
+
+    def test_unrecognized_names_no_n_or_years(self) -> None:
+        assert labels.metric_select(
+            metrics.UNRECOGNIZED_SELECTION, "highest", [1980], "null"
+        ) == (labels.UNRECOGNIZED, None)
+
+    def test_the_value_is_the_cell_and_rest_its_remainder(self) -> None:
+        value, rest = labels.metric_select(self.SPAN, "first", [1976], "none")
+        assert rest is not None
+        assert value + rest == labels.METRIC_SELECT.format(
+            value="1", years="1976", n=3, first=1976, last=2024
+        )

@@ -19,6 +19,7 @@ import ast
 import copy
 import inspect
 import random
+import re
 from typing import Any
 
 import dash
@@ -2656,3 +2657,155 @@ class TestN2Fixture:
                 assert sum(totals) == N2_FIXTURE_N1_TOTALS[year], year
             else:
                 assert set(totals) == {None}, year
+
+
+# --- the per-capita page's headline figures (#600, D112(d), D114) -----------------------
+
+PC_FIGURES = PC_MOD["METRICS_ID"]
+PC_FIGURE_IDS: dict[str, str] = PC_MOD["METRIC_IDS"]
+LOWEST, HIGHEST = "state_per_capita_lowest", "state_per_capita_highest"
+
+
+def pc_figure(tree: Any, key: str) -> str:
+    dd = find(tree, PC_FIGURE_IDS[key])
+    assert dd is not None, key
+    return "".join(texts(dd))
+
+
+def pc_cells(tree: Any) -> dict[int, str]:
+    """T7's people-per-electoral-vote cell by year."""
+    table = find(tree, PER_CAPITA)
+    assert table is not None
+    column = 1 + list(labels.PER_CAPITA_FIELDS).index("persons_per_electoral_vote")
+    return {
+        int(" ".join(texts(row[0]))): " ".join(texts(row[column]))
+        for row in [list(tr.children) for tr in of_type(of_type(table, "Tbody"), "Tr")]
+    }
+
+
+class TestPerCapitaFigures:
+    @pytest.mark.parametrize(
+        ("usps", "lowest", "highest"),
+        [
+            (
+                "GA",
+                "37,888 in 1824 and 1828, among 50 elections with a figure (1824–2024)",
+                "669,494 in 2024, among 50 elections with a figure (1824–2024)",
+            ),
+            (
+                "TX",
+                "53,148 in 1852, 1856 and 1860, among 42 elections with a figure "
+                "(1852–2024)",
+                "728,638 in 2024, among 42 elections with a figure (1852–2024)",
+            ),
+        ],
+    )
+    def test_the_hand_counts(self, usps: str, lowest: str, highest: str) -> None:
+        # #569's plan recordings (GA 37,887.67 tied in 1824 and 1828; TX 53,148.0 in
+        # 1852, 1856 and 1860; TX null in 1848, 1864, 1868), as T7 writes each value.
+        tree = pc_render(usps=usps)
+        assert pc_figure(tree, LOWEST) == lowest
+        assert pc_figure(tree, HIGHEST) == highest
+
+    @pytest.mark.parametrize(
+        ("usps", "query"),
+        [
+            ("GA", ""),
+            ("TX", ""),
+            ("GA", "year_from=1900&year_to=1960"),
+            ("TX", "year_from=1856"),
+        ],
+    )
+    def test_each_figure_is_its_years_t7_cells(self, usps: str, query: str) -> None:
+        # D097(a)'s reconcile clause, and the tie by cell (owner at the plan gate):
+        # every year named shows the figure's cell, and no other year shown does.
+        tree = pc_render(query, usps=usps)
+        cells = pc_cells(tree)
+        for key in (LOWEST, HIGHEST):
+            text = pc_figure(tree, key)
+            value, years = text.split(" in ", 1)
+            named = [int(y) for y in re.findall(r"\d{4}", years.split(", among")[0])]
+            assert named and all(cells[y] == value for y in named), (key, text)
+            assert sorted(y for y, c in cells.items() if c == value) == named
+
+    def test_the_year_range_narrows_them(self) -> None:
+        tree = pc_render("year_from=1900&year_to=1960")
+        cells = pc_cells(tree)
+        assert set(cells) == set(range(1900, 1961, 4))
+        assert "among 16 elections with a figure (1900–1960)" in pc_figure(tree, LOWEST)
+
+    def test_one_year_keeps_both_figures_and_shows_one_value(self) -> None:
+        tree = pc_render("year_from=2000&year_to=2000")
+        assert pc_figure(tree, LOWEST).endswith(
+            " in 2000, the only election shown with a figure"
+        )
+        assert pc_figure(tree, HIGHEST) == labels.METRIC_SELECT_SAME.format(
+            other="lowest", year=2000
+        )
+
+    def test_every_value_null_names_no_cause(self) -> None:
+        # TX 1864–1868: no electoral votes, so no figure in any year shown (I4).
+        tree = pc_render("year_from=1864&year_to=1868", usps="TX")
+        for key in (LOWEST, HIGHEST):
+            assert pc_figure(tree, key) == labels.METRIC_NO_FIGURE[key]
+
+    def test_a_range_with_no_election_for_the_state_says_so(self) -> None:
+        # TX's first election is 1848; the slider spans the dataset (I4).
+        tree = pc_render("year_from=1824&year_to=1844", usps="TX")
+        for key in (LOWEST, HIGHEST):
+            assert pc_figure(tree, key) == labels.METRIC_NO_FIGURE_NO_ELECTIONS
+
+    @pytest.mark.parametrize("value", ["x", True, -5.0, float("nan")])
+    def test_a_value_no_figure_can_show_makes_both_unrecognized_and_keeps_t7(
+        self, value: Any
+    ) -> None:
+        # Architect I1 and Q4 (D114): one selection, so both figures read it; T7 and
+        # the page stay, the one read being the figures' only input.
+        body = ga_per_capita()
+        body["data"][3]["persons_per_electoral_vote"] = value
+        tree = pc_render(per_capita=body)
+        for key in (LOWEST, HIGHEST):
+            assert pc_figure(tree, key) == labels.UNRECOGNIZED
+            assert find(tree, PC_FIGURE_IDS[key]).title == labels.UNRECOGNIZED_NOTE
+        assert find(tree, PER_CAPITA) is not None and tree.id == PC_PAGE_ID
+
+    @pytest.mark.parametrize("index", [0, -1])
+    def test_a_body_naming_a_year_twice_degrades_the_page(
+        self, index: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Owner at #609's review (r1.cr.1, D114(g)): a repeated year is a malformed
+        # body, which degrades the page, never an uncaught error; the doubled row here
+        # is 1824 (a tied lowest) or 2024 (the highest).
+        body = ga_per_capita()
+        body["data"].append(copy.deepcopy(body["data"][index]))
+        with pytest.raises(TypeError, match="names a year twice"):
+            pc_render(per_capita=body)
+        # Through the layout: the degraded page, not an exception.
+        monkeypatch.setitem(RECORDED, GA_PER_CAPITA_PATH, body)
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route("/state/GA/per-capita"))
+        assert PC_PAGE_ID not in ids and PC_FIGURES not in ids
+        assert "unavailable" in ids
+
+    def test_they_sit_in_the_card_after_the_year_control_and_before_the_count(
+        self,
+    ) -> None:
+        tree = pc_render()
+        card = in_one_card(tree, PC_FIGURES)
+        order = [
+            getattr(n, "id", None) or getattr(n, "className", None)
+            for n in components._within(card.children)
+        ]
+        assert (
+            order.index(PC_MOD["YEARS_ID"])
+            < order.index(PC_FIGURES)
+            < order.index("count")
+        )
+
+    def test_the_page_still_makes_one_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route("/state/GA/per-capita"))
+        assert PC_FIGURES in ids and all(i in ids for i in PC_FIGURE_IDS.values())
+        assert calls == [GA_PER_CAPITA_PATH]

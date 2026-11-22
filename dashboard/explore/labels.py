@@ -715,6 +715,14 @@ METRIC_LABELS: dict[str, str] = {
         "Elections in which the Electoral College leader had no majority"
     ),
     "pv_flip_count": "Elections in which a different candidate won the popular vote",
+    # The figures on /elections/over-time and a state's per-capita page (#600, D112(d);
+    # ba spec, approved by the owner at #600's plan gate, 2026-11-22).
+    "ec_appointed_first": "Electors appointed, earliest election",
+    "ec_appointed_latest": "Electors appointed, latest election",
+    "pv_total_first": "Total popular vote, earliest election with a total",
+    "pv_total_latest": "Total popular vote, latest election with a total",
+    "state_per_capita_lowest": "People per electoral vote, lowest",
+    "state_per_capita_highest": "People per electoral vote, highest",
 }
 #: An average over two or more elections; ``{margin}`` is :func:`margin`'s cell, the
 #: years the earliest and latest whose margin entered it (:func:`metric_mean`).
@@ -758,21 +766,78 @@ METRIC_PV_WINDOW_NOTE = (
     "elections in which a different candidate won the popular vote includes only "
     "elections with a popular-vote winner in this dataset."
 )
-#: No popular-vote count, because no year shown lies inside the popular-vote window.
-METRIC_NO_COUNT_PV_YEARS = (
+#: No popular-vote figure (a count, or an earliest or latest total, #600), because no
+#: year shown lies inside the popular-vote window.
+METRIC_NO_FIGURE_PV_YEARS = (
     "No figure: this dataset's popular-vote figures cover {first}–{last}, "
     "not the years shown"
 )
-#: No count of elections with no Electoral College majority, because every flag among
-#: the elections shown is null (no served year reaches it).
-METRIC_NO_COUNT_NULL_EC = (
-    "No figure: this dataset does not say whether any candidate had a majority in "
-    "the elections shown"
+#: Each count's and select's wording when every value among the elections shown is
+#: null, by metric key (#569, #600, D114); a mean words its own in
+#: :func:`metric_mean`. The two counts' texts are #569's, unchanged.
+METRIC_NO_FIGURE: dict[str, str] = {
+    # No served year reaches it.
+    "ec_no_majority_count": (
+        "No figure: this dataset does not say whether any candidate had a majority in "
+        "the elections shown"
+    ),
+    # No served year in the window reaches it.
+    "pv_flip_count": (
+        "No figure: this dataset has no popular-vote winner for the elections shown"
+    ),
+    # Never "has no electors appointed", which would read as zero electors (1864).
+    "ec_appointed_first": (
+        "No figure: this dataset has no number of electors appointed for the elections "
+        "shown"
+    ),
+    "ec_appointed_latest": (
+        "No figure: this dataset has no number of electors appointed for the elections "
+        "shown"
+    ),
+    "pv_total_first": (
+        "No figure: this dataset has no total popular vote for the elections shown"
+    ),
+    "pv_total_latest": (
+        "No figure: this dataset has no total popular vote for the elections shown"
+    ),
+    # Names no cause: each T7 cell gives its own.
+    "state_per_capita_lowest": (
+        "No figure: none of the elections shown has a people-per-electoral-vote figure"
+    ),
+    "state_per_capita_highest": (
+        "No figure: none of the elections shown has a people-per-electoral-vote figure"
+    ),
+}
+#: A select with no figure because the years shown hold no election for the state (a
+#: state's per-capita page, whose year range spans the dataset; #600). On the elections
+#: pages no year shown shows *No elections match* and no figure instead.
+METRIC_NO_FIGURE_NO_ELECTIONS = (
+    "No figure: this dataset has no elections for this state in the years shown"
 )
-#: No count of elections with a different popular-vote winner, because every flip
-#: among the elections shown is null (no served year in the window reaches it).
-METRIC_NO_COUNT_NULL_PV = (
-    "No figure: this dataset has no popular-vote winner for the elections shown"
+#: A select over two or more elections (#600, D112(d); ba spec, approved at #600's plan
+#: gate): ``{value}`` is the companion table's own cell, ``{years}`` the year or tied
+#: years (:func:`metric_years`), ``{first}``–``{last}`` the earliest and latest years
+#: with a value, never the filter's bounds.
+METRIC_SELECT = "{value} in {years}, among {n} elections with a figure ({first}–{last})"
+#: A select over one election, on the first entry of its pair.
+METRIC_SELECT_ONE = "{value} in {year}, the only election shown with a figure"
+#: A select over one election, on the second entry of its pair: one value, not two
+#: (D112(d)), so the entry and its id stay and name the other.
+METRIC_SELECT_SAME = (
+    "Same as the {other}: {year} is the only election shown with a figure"
+)
+#: The entry :data:`METRIC_SELECT_SAME` names, by pick.
+METRIC_SELECT_OTHER = {"latest": "earliest", "highest": "lowest"}
+#: Tied years: two as "{rest} and {last}"; three or more with a comma between each but
+#: the last pair, as the owner wrote them (#600's issue body).
+METRIC_YEARS_AND = "{rest} and {last}"
+#: Under the over-time figures, while a total popular vote figure shows a number; the
+#: years come from ``coverage``, never a literal. It never says the N years lie inside
+#: the window (#602's review, cr.3, precedent).
+METRIC_PV_TOTAL_WINDOW_NOTE = (
+    "This dataset's popular-vote figures cover {first}–{last}. The earliest and "
+    "latest total popular vote are taken only from elections with a total in this "
+    "dataset."
 )
 #: Follows :data:`METRIC_DIFFERENT_ELECTIONS` while the popular-vote filter is off; it
 #: names the elections page's checkbox by its own text.
@@ -1511,7 +1576,7 @@ def metric_count(
             pv_window[0] <= year <= pv_window[1] for year in years
         ):
             first, last = pv_window
-            return METRIC_NO_COUNT_PV_YEARS.format(first=first, last=last), None
+            return METRIC_NO_FIGURE_PV_YEARS.format(first=first, last=last), None
         return no_figure, None
     text = str(result.count)
     if result.n == 1:
@@ -1521,6 +1586,73 @@ def metric_count(
             count=text, n=result.n, first=result.first, last=result.last
         )
     return text, whole.removeprefix(text)
+
+
+def metric_years(years: Sequence[int]) -> str:
+    """One year, or tied years joined by :data:`METRIC_YEARS_AND` (#600): "1824 and
+    1828", "1852, 1856 and 1860"."""
+    text = [str(year) for year in years]
+    if len(text) == 1:
+        return text[0]
+    return METRIC_YEARS_AND.format(rest=", ".join(text[:-1]), last=text[-1])
+
+
+def metric_select(
+    result: Any,
+    pick: str,
+    years: Sequence[int],
+    no_figure: str,
+    pv_window: tuple[int, int] | None = None,
+) -> tuple[str, str | None]:
+    """A select figure (#600, D112(d)), as ``(value, rest)``: the value text, and the
+    text after it naming the year or years and N, or ``None`` where there is none.
+    ``result`` is an ``explore.metrics.Selection`` (this module imports no
+    ``metrics``, which imports it), whose picks carry the companion table's cells;
+    ``pick`` one of its picks; ``years`` the distinct years shown; ``no_figure`` the
+    figure's own wording for every value null; ``pv_window`` the popular-vote window,
+    given for a figure read against it only.
+
+    Checked in order: an unrecognized selection (:data:`UNRECOGNIZED`, with no N or
+    years); no value, worded by its cause (no year shown, then a popular-vote figure
+    with no year shown inside the window, then every value null); one election (the
+    second of a pair names the first, :data:`METRIC_SELECT_SAME`); else the value
+    with its year or tied years, N and the years with a value.
+    """
+    if result.unrecognized:
+        return UNRECOGNIZED, None
+    if result.n == 0:
+        if not years:
+            return METRIC_NO_FIGURE_NO_ELECTIONS, None
+        if pv_window is not None and not any(
+            pv_window[0] <= year <= pv_window[1] for year in years
+        ):
+            first, last = pv_window
+            return METRIC_NO_FIGURE_PV_YEARS.format(first=first, last=last), None
+        return no_figure, None
+    first_year, last_year = result.first[0], result.latest[0]
+    if pick in ("first", "latest"):
+        year, value = getattr(result, pick)
+        picked: Sequence[int] = (year,)
+    else:
+        value, picked = getattr(result, pick)
+    if result.n == 1:
+        if pick in METRIC_SELECT_OTHER:
+            return (
+                METRIC_SELECT_SAME.format(
+                    other=METRIC_SELECT_OTHER[pick], year=first_year
+                ),
+                None,
+            )
+        whole = METRIC_SELECT_ONE.format(value=value, year=first_year)
+    else:
+        whole = METRIC_SELECT.format(
+            value=value,
+            years=metric_years(picked),
+            n=result.n,
+            first=first_year,
+            last=last_year,
+        )
+    return value, whole.removeprefix(value)
 
 
 def ec_majority(value: object) -> str:
