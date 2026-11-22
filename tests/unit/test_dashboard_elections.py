@@ -2983,7 +2983,8 @@ class TestSelect:
     def test_every_refusal_holds(
         self, args: tuple[Any, ...], unrecognized: bool
     ) -> None:
-        # #609's review (r1.ge.B2): each clause of ``__post_init__`` refuses on its own.
+        # #609's review (r1.ge.B2): with ``test_no_other_state_can_be_built``, each
+        # clause of ``__post_init__`` refuses on its own.
         with pytest.raises(ValueError):
             n, first, latest, lowest, highest = args
             metrics.Selection(n, first, latest, lowest, highest, unrecognized)
