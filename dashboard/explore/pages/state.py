@@ -611,10 +611,12 @@ def _totals_section(
     table and that table's column-name list, for the rows T4 shows from the API path
     ``source``. Rows that cannot be read as one total per election, or a served name
     with nothing in it, show the heading and :data:`C10_UNAVAILABLE` only, with no
-    chart (D096(d)'s rule), while T4 and the page stay. A fault in a total or in the
-    popular-vote window degrades C10 alone; one in what C7 reads too (the years, the
-    state's name, ``pv_status``) degrades both (D113(c), as amended). The ``try``
-    covers everything built from the rows, never ``components.chart`` (D095(f))."""
+    chart (D096(d)'s rule), while T4 and the page stay. A fault in a total, or in the
+    popular-vote window where T4 can still compare it, degrades C10 alone; one in what
+    C7 reads too (the years, the state's name, ``pv_status``) degrades both; one T4
+    cannot read (a window it cannot compare) degrades the page (D113(c), as amended).
+    The ``try`` covers everything built from the rows, never ``components.chart``
+    (D095(f))."""
     heading = html.H2(C10_HEADING)
     try:
         coverage = body["meta"]["provenance"]["coverage"]

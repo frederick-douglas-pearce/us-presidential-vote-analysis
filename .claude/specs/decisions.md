@@ -7522,3 +7522,4 @@ key. Nothing yet labels the hybrid under T3 and the panel (#590).
 - **Not adopted:**
   - One builder for C7's and C10's sections (KISS: about ten parameters).
   - Moving the skip rule into the API in this change; that is #606.
+- **Qualification of (c) (#605's code review, round 2, owner-approved).** "Alone" holds only for a fault T4 does not also read. T4 shows the allotment and compares each year with the popular-vote window. A row missing `state_electoral_votes`, or a window T4 cannot compare (a string or a null bound), degrades the whole page, as any fault in what T4 shows does (`test_a_row_without_the_allotment`, `test_a_window_t4_cannot_compare_degrades_the_page`).

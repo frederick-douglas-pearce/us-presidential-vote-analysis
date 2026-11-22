@@ -211,7 +211,8 @@ class TestC4:
 
     def test_registered_on_their_page_beside_the_shared_table(self) -> None:
         assert charts.CHARTS["C4"] == charts.Chart("/elections/over-time", OVER_TIME)
-        # C5's value axis writes its numbers short, the one exception (#596, D110).
+        # C5's value axis writes its numbers short, one of the chart rule's two
+        # exceptions with C10's (#596, D110; #582, D113).
         assert charts.CHARTS["C5"] == charts.Chart(
             "/elections/over-time", OVER_TIME, short_value_ticks=True
         )

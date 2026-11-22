@@ -2005,11 +2005,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/v1/states/{usps}` rows (`popular_totals` in `pages/state.py`): a year's total is read from
   every row except one whose `popular_votes` and `state_popular_total` are both null (a row
   without a candidate figure carries no state total, per *State's total popular vote*); every
-  other row must carry a total, and those must agree (D113(b), as amended). A fault in a total
-  or in the popular-vote window shows the section's heading and `C10_UNAVAILABLE` only, while C7,
-  T4, the filters and the success marker stay; a fault in what C7 reads too (a year missing after
-  the state's first, the state's name with no text, `pv_status`) degrades both (D113(c), as
-  amended). Bars, band, markers
+  other row must carry a total, and those must agree (D113(b), as amended). A fault in a total,
+  or in the popular-vote window where T4 can still compare it, shows the section's heading and
+  `C10_UNAVAILABLE` only, while C7, T4, the filters and the success marker stay; a fault in what
+  C7 reads too (a year missing after the state's first, the state's name with no text,
+  `pv_status`) degrades both; one T4 cannot read degrades the page (D113(c), as amended). Bars, band, markers
   and year axis are C5's (D100(d), D104), drawn by `over_time.total_figure` (D113(d)); band
   bounds from `meta.provenance.coverage`. Its value axis writes its numbers short, as C5's does
   (D113(e)). Its plot shares C7's left and right margin (`over_time.STATE_MARGIN`, D113(f)).
@@ -2021,7 +2021,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   `C10_TITLE_THIS_STATE`), `C5_VALUE_AXIS`, `C10_HOVER`, the bands `C5_BEFORE_BAND` /
   `C5_AFTER_BAND`, the key entries through `C10_MARKER_LABELS` (`C5_LEGISLATURE`,
   `C5_TOOK_NO_PART`, `C5_NO_TOTAL`, `UNRECOGNIZED`; `C5_NO_TOTAL` is the one entry for a
-  table cell of either `NO_STATE_TOTAL` or `NOT_IN_DATASET`, as on C5), the caption sentences
+  table cell of either `NO_STATE_TOTAL` or `NOT_IN_DATASET`; C5 draws the same entry for its own
+  missing total), the caption sentences
   `C5_BASIS`, `C10_SHORT_TICKS_NOTE`, `C5_BEFORE_NOTE`, `C5_AFTER_NOTE`, `C5_MARKER_NOTE`,
   `C10_FIRST_ELECTION_NOTE` (else `C10_FIRST_ELECTION_NOTE_THIS_STATE`) and `C7_FILTERS_NOTE`;
   the table's cells through `labels.popular_votes(..., no_figure=NO_STATE_TOTAL)` and
