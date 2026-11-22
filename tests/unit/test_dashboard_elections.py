@@ -3179,20 +3179,20 @@ class TestTotalAndElectionsWording:
     def test_a_count_of_elections_never_reads_zero(self) -> None:
         years = list(range(1824, 2025, 4))
         years.remove(1864)
-        assert labels.metric_elections(years, "none") == (
+        assert labels.metric_elections(50, years, "none") == (
             "50",
             " elections (1824–2024)",
         )
-        assert labels.metric_elections([1828, 1828], "none") == (
+        assert labels.metric_elections(1, [1828], "none") == (
             "1",
             " election (1828)",
         )
-        assert labels.metric_elections([], "none") == ("none", None)
+        assert labels.metric_elections(0, [], "none") == ("none", None)
 
     def test_a_count_of_elections_names_the_earliest_and_latest_whatever_the_order(
         self,
     ) -> None:
-        assert labels.metric_elections([1832, 1824, 1828], "none") == (
+        assert labels.metric_elections(3, [1832, 1824, 1828], "none") == (
             "3",
             " elections (1824–1832)",
         )

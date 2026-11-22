@@ -813,6 +813,8 @@ class TestWideLayout:
         assert built(own_row=True) == ["filter", "filter-own-row"]
 
 
+METRICS_MODULE = MOD["metrics"]
+
 # The candidate's headline figures (#601, D112(f), (g), D115).
 FIGURES = MOD["METRICS_ID"]
 FIGURE_IDS: dict[str, str] = MOD["METRIC_IDS"]
@@ -967,6 +969,19 @@ class TestCandidateFigures:
     def test_a_value_no_total_can_hold_is_unrecognized(self, value: Any) -> None:
         tree = render(body=with_year(1828, national_electoral_votes=value))
         assert figure(tree, CAST) == labels.UNRECOGNIZED
+
+    def test_the_count_is_metrics_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # #612's review (r2.recheck.1, D097, D115 amendment): the count is computed in
+        # ``metrics``, over the distinct years, and ``labels`` only words it.
+        seen: list[Any] = []
+
+        def count(rows: Any) -> int:
+            seen.append(rows)
+            return 7
+
+        monkeypatch.setattr(METRICS_MODULE, "count", count)
+        assert figure(render(), COUNT) == "7 elections (1824–1832)"
+        assert seen == [{1824, 1828, 1832}]
 
     def test_they_sit_in_the_card_after_the_controls_and_before_the_count(
         self,

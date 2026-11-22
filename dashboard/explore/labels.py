@@ -1656,19 +1656,21 @@ def metric_count(
     return text, whole.removeprefix(text)
 
 
-def metric_elections(years: Sequence[int], no_figure: str) -> tuple[str, str | None]:
-    """A count of elections with its years (#601, D115), as ``(value, rest)``: the
-    number of distinct ``years``, from the earliest to the latest, or ``no_figure``
-    (with no rest) when there are none, never "0 elections"."""
-    distinct = sorted(set(years))
-    if not distinct:
+def metric_elections(
+    n: int, years: Sequence[int], no_figure: str
+) -> tuple[str, str | None]:
+    """A count of elections with its years (#601, D115), as ``(value, rest)``: ``n``,
+    the count ``explore.metrics.count`` computed (this module only words it, D097), from
+    the earliest to the latest of ``years``, or ``no_figure`` (with no rest) when ``n``
+    is 0, never "0 elections"."""
+    if n == 0:
         return no_figure, None
-    text = str(len(distinct))
-    if len(distinct) == 1:
-        whole = METRIC_COUNT_ELECTIONS_ONE.format(year=distinct[0])
+    text = str(n)
+    if n == 1:
+        whole = METRIC_COUNT_ELECTIONS_ONE.format(year=min(years))
     else:
         whole = METRIC_COUNT_ELECTIONS.format(
-            n=text, first=distinct[0], last=distinct[-1]
+            n=text, first=min(years), last=max(years)
         )
     return text, whole.removeprefix(text)
 

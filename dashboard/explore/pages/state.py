@@ -535,7 +535,7 @@ def _figures(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> html.
             value, rest = labels.UNRECOGNIZED, None
         elif metric.kind == "count":
             value, rest = labels.metric_elections(
-                years, labels.METRIC_NO_FIGURE_NO_ELECTORS
+                metrics.count(set(years)), years, labels.METRIC_NO_FIGURE_NO_ELECTORS
             )
         elif metric.kind == "flag_count" and metric.counted is not None:
             flags = _took_office_flags(rows, years)

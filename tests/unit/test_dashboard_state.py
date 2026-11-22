@@ -2813,6 +2813,8 @@ class TestPerCapitaFigures:
         assert calls == [GA_PER_CAPITA_PATH]
 
 
+METRICS_MODULE = MOD["metrics"]
+
 # The state history's headline figures (#601, D112(e), (g), D115).
 ST_FIGURES = MOD["METRICS_ID"]
 ST_FIGURE_IDS: dict[str, str] = MOD["METRIC_IDS"]
@@ -3005,6 +3007,20 @@ class TestStateFigures:
         tree = render(body=body)
         assert st_figure(tree, ELECTIONS_COUNT) == "1 election (1828)"
         assert st_figure(tree, TOOK_OFFICE).endswith(" of 1 election (1828)")
+
+    def test_the_count_is_metrics_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # #612's review (r2.recheck.1, D097, D115 amendment): the count is computed in
+        # ``metrics``, over the distinct years, and ``labels`` only words it.
+        seen: list[Any] = []
+
+        def count(rows: Any) -> int:
+            seen.append(rows)
+            return 7
+
+        monkeypatch.setattr(METRICS_MODULE, "count", count)
+        tree = render()
+        assert st_figure(tree, ELECTIONS_COUNT) == "7 elections (1824–2024)"
+        assert [len(s) for s in seen] == [50] and all(isinstance(s, set) for s in seen)
 
     def test_they_sit_in_c7_s_card_after_its_heading_and_before_the_chart(
         self,

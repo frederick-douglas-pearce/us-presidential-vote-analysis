@@ -284,7 +284,9 @@ def _figures(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
         rest: str | None
         if metric.kind == "count":
             value, rest = labels.metric_elections(
-                years, labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS
+                metrics.count(set(years)),
+                years,
+                labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS,
             )
         elif metric.kind == "sum":
             pairs = _per_year(rows, metric.source.field)
