@@ -40,8 +40,8 @@ class Chart(NamedTuple):
     """One registered chart: the path template of the page it renders on, the DOM id of
     its companion table (the table on that page holding its values), whether its ID
     is retired, and whether its value axis writes its numbers short
-    (:data:`SHORT_TICKFORMAT`; C5 alone, #596, D110, the one exception to the
-    numbers-in-full rule). A retired ID is never built and never reused."""
+    (:data:`SHORT_TICKFORMAT`; C5, #596, D110, and C10, #582, D113, the two exceptions
+    to the numbers-in-full rule). A retired ID is never built and never reused."""
 
     page: str
     table: str
@@ -55,8 +55,9 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
 #: here once retired. C1 (#433) was the first, C3 (#435) the second, C2 (#434) the
-#: third, C4 and C5 (#436) the fourth and fifth, and C7 (#560) the sixth: IDs follow
-#: the stories' filing order, and C6 (#550) is filed but not yet registered.
+#: third, C4 and C5 (#436) the fourth and fifth, C7 (#560) the sixth and C10 (#582) the
+#: seventh: IDs follow the stories' filing order, and C6 (#550), C8 (#561) and C9 (#563)
+#: are filed but not yet registered.
 #: ``components.chart`` reads it by attribute at call time. ``ISSUED``, a hand-written
 #: literal of every issued ID with its whole row, must equal this
 #: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
@@ -84,6 +85,10 @@ CHARTS: Mapping[str, Chart] = {
     # filters, on the state's history page, beside its own companion table (#560,
     # D106).
     "C7": Chart("/state/<usps>", "state-electors"),
+    # The same state's total popular vote in each election, below C7 on its page, never
+    # narrowed by the page's filters, beside its own companion table; its value axis
+    # writes its numbers short, as C5's does (#582, D113).
+    "C10": Chart("/state/<usps>", "state-popular-total", short_value_ticks=True),
 }
 
 
@@ -268,9 +273,10 @@ FIXED_AXIS_KEYS = ("fixedrange", "exponentformat", "separatethousands")
 _D3_FORMAT_RE = re.compile(r"(?:.?[<>=^])?[-+( ]?[$#]?0?\d*,?(?:\.\d+)?~?([A-Za-z%]?)")
 _FULL_TYPES = frozenset({"d", "f", "r", "%", "p"})
 #: The one short format a chart may name, and only on ``layout.yaxis`` of a chart
-#: whose registry row sets ``short_value_ticks`` (C5, #596, D110): d3's SI form with
-#: trailing zeros trimmed ("50M"). Page-written ``ticktext`` is not checked for
-#: shortened numbers; it is wording, as row names are (D110's accepted residual).
+#: whose registry row sets ``short_value_ticks`` (C5, #596, D110; C10, #582, D113):
+#: d3's SI form with trailing zeros trimmed ("50M"). Page-written ``ticktext`` is not
+#: checked for shortened numbers; it is wording, as row names are (D110's accepted
+#: residual).
 SHORT_TICKFORMAT = "~s"
 
 

@@ -211,7 +211,8 @@ class TestC4:
 
     def test_registered_on_their_page_beside_the_shared_table(self) -> None:
         assert charts.CHARTS["C4"] == charts.Chart("/elections/over-time", OVER_TIME)
-        # C5's value axis writes its numbers short, the one exception (#596, D110).
+        # C5's value axis writes its numbers short, one of the chart rule's two
+        # exceptions with C10's (#596, D110; #582, D113).
         assert charts.CHARTS["C5"] == charts.Chart(
             "/elections/over-time", OVER_TIME, short_value_ticks=True
         )
@@ -327,13 +328,26 @@ class TestC5:
         note = labels.C5_AFTER_NOTE.format(pv_year_max=2016)
         assert any(note in text for text in texts(tree))
 
-    def test_every_marker_label_has_a_symbol(self) -> None:
-        """A C5 marker label with no symbol would be dropped silently (#436's
-        review): inside the band that would read as a held popular vote."""
-        symbols = MOD["_C5_SYMBOLS"]
-        assert set(labels.C5_MARKER_LABELS.values()) | {labels.UNRECOGNIZED} <= set(
-            symbols
-        )
+    @pytest.mark.parametrize(
+        ("marker_labels", "symbols"),
+        [
+            (labels.C5_MARKER_LABELS, MOD["_C5_SYMBOLS"]),
+            # C10 shares C5's figure since #582 (D113(d)).
+            (labels.C10_MARKER_LABELS, over_time.C10_SYMBOLS),
+        ],
+    )
+    def test_every_marker_label_has_a_symbol(
+        self, marker_labels: dict[str, str], symbols: dict[str, str]
+    ) -> None:
+        """A C5 or C10 marker label with no symbol would be dropped silently (#436's
+        review; #582's, cr.13): inside the band that would read as a held popular
+        vote."""
+        assert set(marker_labels.values()) | {labels.UNRECOGNIZED} <= set(symbols)
+
+    def test_c10_draws_c5_s_symbols(self) -> None:
+        """One symbol per meaning (D113, amendment): every label C10 shares with C5
+        keeps C5's symbol, and C10 has no other."""
+        assert MOD["_C5_SYMBOLS"] == over_time.C10_SYMBOLS
 
     def test_a_repeated_nan_total_is_one_unrecognized_value(self) -> None:
         """D100(c) (#498): every 2016 row's total NaN is one value, though NaN is
@@ -941,19 +955,26 @@ class TestGuardsTheGateAdded:
             "Each bar is the national total: every state's total, added up."
         )
 
-    def test_c5_has_no_one_state_hover(self) -> None:
+    def test_the_one_state_total_hover_writes_c10s_cells(self) -> None:
+        """C5 asks for no state; one state's total hover is C10's (#582), and writes
+        its table's cells: the total, then the popular-vote status (until #582 a state
+        here raised, since #562 retired C5's one-state mode)."""
         point = over_time.Point(
             year=2016,
-            appointed=1,
-            appointed_cell="1",
-            total=1,
-            total_cell="1",
-            status=None,
-            status_cell=None,
+            appointed=None,
+            appointed_cell="",
+            total=4114732,
+            total_cell="4,114,732",
+            status="popular_vote",
+            status_cell="Popular vote held",
         )
-        with pytest.raises(ValueError, match="all states only"):
-            over_time.point_hover(point, "Georgia", total=True)
-        assert over_time.point_hover(point, None, total=True).startswith("2016")
+        assert over_time.point_hover(point, "Georgia", total=True) == (
+            "2016: Georgia<br>Total popular vote: 4,114,732<br>"
+            "Popular vote in this state: Popular vote held"
+        )
+        assert over_time.point_hover(point, None, total=True) == (
+            "2016, all states<br>Total popular vote: 4,114,732"
+        )
 
 
 # --- the year filters, C5's short ticks and the narrow band (#596, D110) -----------------

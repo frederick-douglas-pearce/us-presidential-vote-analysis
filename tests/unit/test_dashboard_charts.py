@@ -43,7 +43,8 @@ from tests.unit.test_dashboard_theme import (
 #: table, retired, short value ticks — #596, D110): written by hand, never derived from the registry, so a renumbered,
 #: reused, un-retired or deleted ID fails. An ID is issued when its chart story
 #: registers it: C1 by #433 and C3 by #435; C2, C4 and C5 are assigned to #434 and
-#: #436 by their issues, and C7 to #560 by its own (C6, #550's, is not yet registered).
+#: #436 by their issues, C7 to #560 and C10 to #582 by their own (C6, #550's, is not yet
+#: registered).
 ISSUED: dict[str, tuple[str, str, bool, bool]] = {
     "C1": ("/election/<year>", "election-nation", False, False),
     "C3": ("/election/<year>/per-capita", "election-per-capita", False, False),
@@ -51,6 +52,7 @@ ISSUED: dict[str, tuple[str, str, bool, bool]] = {
     "C4": ("/elections/over-time", "elections-over-time-table", False, False),
     "C5": ("/elections/over-time", "elections-over-time-table", False, True),
     "C7": ("/state/<usps>", "state-electors", False, False),
+    "C10": ("/state/<usps>", "state-popular-total", False, True),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.
@@ -2012,7 +2014,7 @@ class TestTotalityGuards:
             assert figure["layout"]["title"] == TEST_FIGURE["layout"]["title"]
 
 
-# --- C5's short value ticks, the one exception (#596, D110) ----------------------------
+# --- C5's short value ticks, an exception C10 shares (#596, D110; #582, D113) ----------
 
 
 def short_figure(axis: str = "yaxis", tickformat: str = "~s") -> dict[str, Any]:
@@ -2022,9 +2024,10 @@ def short_figure(axis: str = "yaxis", tickformat: str = "~s") -> dict[str, Any]:
 
 
 class TestShortValueTicks:
-    def test_only_c5_s_row_grants_them(self) -> None:
+    def test_only_c5_s_and_c10_s_rows_grant_them(self) -> None:
+        # C10, the same measure for one state, since #582 (D113(e), amending D110(e)).
         granted = {c for c, row in charts.CHARTS.items() if row.short_value_ticks}
-        assert granted == {"C5"}
+        assert granted == {"C5", "C10"}
 
     def test_the_flag_admits_the_one_format_on_the_value_axis(self) -> None:
         assert charts.figure_problems(short_figure(), short_value_ticks=True) == []

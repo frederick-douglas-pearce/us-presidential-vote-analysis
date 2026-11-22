@@ -26,7 +26,6 @@ from dash import dcc, html
 
 from explore import (
     api,
-    charts,
     components,
     election_view,
     elections_view,
@@ -81,8 +80,6 @@ OVER_TIME_UNAVAILABLE = (
     "shown right now. Please try again in a minute."
 )
 
-#: C5's value-axis format (#596, D110): d3's SI form, trailing zeros trimmed ("50M").
-C5_TICKFORMAT = charts.SHORT_TICKFORMAT
 
 #: Each C5 marker label's symbol, so no two marker series differ by color alone.
 _C5_SYMBOLS = {
@@ -165,82 +162,27 @@ def _all_states_points(
     return points
 
 
+#: What C5's figure is drawn with (#582, D113: the figure itself is
+#: :func:`explore.over_time.total_figure`, shared with a state's C10).
+_C5_CHART = over_time.TotalChart(
+    name=labels.LABELS["national_pv_denominator"],
+    marker_labels=labels.C5_MARKER_LABELS,
+    symbols=_C5_SYMBOLS,
+    tick_px=components.YEAR_TICK_NARROW_PX,
+)
+
+
 def _c5_figure(
     points: list[over_time.Point],
     years: list[int],
     title: str,
     window: tuple[int, int],
 ) -> over_time.OverTime:
-    """C5's figure (#436, D100): the total popular vote of each row with one, as a bar
-    at its year. The years before and after the popular-vote window (``window``, read
-    from ``coverage``) are a shaded band, labeled inside it at its top (the band after
-    the window, and a before band under half the axis, above the plot: #593, D109;
-    #596, D110), which alone marks a held popular vote
-    outside it; every other row with nothing to draw is a marker, one
-    series per label (:data:`explore.labels.C5_MARKER_LABELS`), named in the chart's
-    key (#558, D104), wherever it falls, inside the band included. All states only
-    since #562 (D107)."""
-    pv_min, pv_max = window
-    banded = {
-        labels.NOT_APPLICABLE,
-        labels.AFTER_WINDOW,
-        labels.BEFORE_WINDOW.format(pv_year_min=pv_min),
-    }
-    drawn: list[tuple[over_time.Point, int, str, str]] = []
-    marks: dict[str, list[tuple[over_time.Point, str]]] = {}
-    for point in points:
-        hover = over_time.point_hover(point, None, total=True)
-        value = over_time.figure_value(point.total, zero=True)
-        if value is not None and point.total_cell == labels.number(value):
-            drawn.append((point, value, point.total_cell, hover))
-            continue
-        outside = not pv_min <= point.year <= pv_max
-        if outside and point.total_cell in banded:
-            continue
-        label = labels.C5_MARKER_LABELS.get(point.total_cell, labels.UNRECOGNIZED)
-        marks.setdefault(label, []).append((point, hover))
-    name = labels.LABELS["national_pv_denominator"]
-    data: list[dict[str, Any]] = []
-    if drawn:
-        data.append(over_time.bar_trace(name, drawn, charts.PV_COLOR))
-    data += over_time.series(marks, _C5_SYMBOLS)
-    longest = max((value for _, value, _, _ in drawn), default=1)
-    layout = over_time.time_layout(
-        title,
-        labels.C5_VALUE_AXIS,
-        years,
-        longest,
-        marked=bool(marks),
-        tick_px=components.YEAR_TICK_NARROW_PX,
-    )
-    bands = over_time.pv_bands(
-        years,
-        window,
-        labels.C5_BEFORE_BAND.format(pv_year_min=pv_min),
-        labels.C5_AFTER_BAND.format(pv_year_max=pv_max),
-        # One key row per entry, the most rows the key can wrap to (#593's review).
-        key_px=over_time.KEY_ROW_PX * len(marks),
-    )
-    # Short value ticks, C5's exception to the chart rule (#596, D110; its CHARTS row's
-    # short_value_ticks); with no bar drawn the axis runs 0-1 and the SI form would
-    # write "200m", so it writes no value ticks at all.
-    if drawn:
-        layout["yaxis"]["tickformat"] = C5_TICKFORMAT
-    else:
-        layout["yaxis"]["showticklabels"] = False
-    if bands.shapes:
-        layout["shapes"] = bands.shapes
-        layout["annotations"] = bands.annotations
-    if bands.top_px:
-        layout["margin"] = {"t": bands.top_px}
-    return over_time.OverTime(
-        {"data": data, "layout": layout},
-        False,
-        bool(marks),
-        bands.before,
-        bands.after,
-        bool(drawn),
-    )
+    """C5's figure (#436, D100): the nation's total popular vote of each row with one,
+    as a bar at its year, the bands outside the popular-vote window and a marker for
+    every other row with nothing to draw (:func:`explore.over_time.total_figure`, the
+    figure C5 shares with C10 since #582, D113). All states only since #562 (D107)."""
+    return over_time.total_figure(points, years, title, window, None, _C5_CHART)
 
 
 def _c4_caption(c4: over_time.OverTime) -> str:
@@ -343,9 +285,7 @@ def _over_time_section(
         # left and right margin for both, sized for C5's widest value ticks, with no
         # value axis pushing its own; each keeps its own top margin.
         for figure in (c4.figure, c5.figure):
-            layout = figure["layout"]
-            layout["margin"] = {**layout.get("margin", {}), **OVER_TIME_MARGIN}
-            layout["yaxis"]["automargin"] = False
+            over_time.align(figure, OVER_TIME_MARGIN)
         by_row = {id(row): point for row, point in zip(rows, points, strict=True)}
         notes = (
             labels.C4_BASIS,

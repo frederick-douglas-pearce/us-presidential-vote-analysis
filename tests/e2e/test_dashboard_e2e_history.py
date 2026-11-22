@@ -5,9 +5,10 @@ filters share the row below it (``.filter-row``); below 76rem each page is the o
 column it always was. And a state's two pages as one client-side chain (#559, D105):
 the section links move between them carrying the year range, with the URL, tab and
 marks following, and back and forward; an unserved state or an unknown section reads
-as not found. And chart C7 on the state history (#560, D106): readable at phone width
-with the year along the bottom, redrawn on a theme switch with no request, and its
-title, caption and table left when plotly.js cannot load.
+as not found. And charts C7 (#560, D106) and C10 (#582, D113) on the state history:
+readable at phone width with the year along the bottom, their plots aligned at every
+width, redrawn on a theme switch with no request, and their titles, captions and
+tables left when plotly.js cannot load.
 
 The rules are pinned in ``TestLayoutRules`` (``tests/unit/test_dashboard_theme.py``)
 and the markup in each page's ``TestWideLayout``; these check what Chromium draws.
@@ -45,6 +46,7 @@ from tests.e2e.dashboard_pages import (
     year_ticks,
 )
 from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
+from tests.e2e.test_dashboard_e2e_elections_over_time import assert_band_label_inside
 
 pytestmark = pytest.mark.e2e
 
@@ -53,10 +55,13 @@ PER_CAPITA_PATH = "/state/GA/per-capita"
 CANDIDATE_PATH = "/candidate/andrew-jackson"
 #: Each page's success marker and its tables, which must be on it before their scroll
 #: is checked, the table its filters narrow first: T4 on the state history, then C7's
-#: companion table above its filters (#560); T7 on its per-capita page (#559); T5 on
+#: and C10's companion tables above its filters (#560, #582); T7 on its per-capita page (#559); T5 on
 #: the candidate page.
 PAGES = {
-    STATE_PATH: (STATE_SUCCESS, ("#state-history", "#state-electors")),
+    STATE_PATH: (
+        STATE_SUCCESS,
+        ("#state-history", "#state-electors", "#state-popular-total"),
+    ),
     PER_CAPITA_PATH: (STATE_PER_CAPITA_SUCCESS, ("#state-per-capita",)),
     CANDIDATE_PATH: (CANDIDATE_SUCCESS, ("#candidate-history",)),
 }
@@ -76,9 +81,9 @@ DROPDOWNS = {
 
 def open_at(page: Page, path: str, width: int) -> str:
     """``path`` rendered from data at ``width``; returns its success marker. On the
-    state history it waits for C7 to be drawn too (#560): the chart mounts after
-    plotly.js loads, above the filters, so a measurement taken before then can see
-    them move by the chart's height."""
+    state history it waits for C7 and C10 to be drawn too (#560, #582): the charts
+    mount after plotly.js loads, above the filters, so a measurement taken before then
+    can see them move by the charts' height."""
     page.set_viewport_size({"width": width, "height": 900})
     page.goto(path)
     success = PAGES[path][0]
@@ -87,6 +92,7 @@ def open_at(page: Page, path: str, width: int) -> str:
     assert page.evaluate("innerWidth") == width
     if path == STATE_PATH:
         page.locator(f"{C7} .main-svg").first.wait_for()
+        page.locator(f"{C10} .main-svg").first.wait_for()
     return success
 
 
@@ -274,78 +280,145 @@ def test_an_unserved_state_or_an_unknown_section_reads_as_not_found(
     ).to_have_count(0)
 
 
-# --- chart C7 (#560, D106) -------------------------------------------------------
+# --- charts C7 (#560, D106) and C10 (#582, D113) ---------------------------------------
 
 C7 = f"#{charts.dom_id('C7')}"
-#: Every text C7 draws: ticks, axis titles and the key's entries.
-C7_TEXTS = (
+C10 = f"#{charts.dom_id('C10')}"
+#: Every text C7 and C10 draw: ticks, axis titles and the key's entries. C10's band
+#: label is checked apart: it sits inside the band, over the plot (#593, D109).
+CHART_TEXTS = (
     ".xtick text",
     ".ytick text",
     ".g-xtitle text",
     ".g-ytitle text",
     ".legendtext",
 )
+#: Each chart on the state history, checked alike on one page load (#582's architect
+#: review, I-8): its title, value axis, a key entry Georgia's recorded data draws, its
+#: companion table and its bars' color token.
+STATE_CHARTS = {
+    C7: (
+        labels.C4_TITLE_STATE.format(state="Georgia"),
+        labels.C4_VALUE_AXIS,
+        # Georgia took no part in 1864.
+        labels.C4_NO_ELECTORS_TOOK_NO_PART,
+        "#state-electors",
+        "--chart-ec",
+    ),
+    C10: (
+        labels.C10_TITLE_STATE.format(state="Georgia"),
+        labels.C5_VALUE_AXIS,
+        # Georgia's legislature chose its electors in 1824.
+        labels.C5_LEGISLATURE,
+        "#state-popular-total",
+        "--chart-pv",
+    ),
+}
+#: How far inside its chart every value tick and axis title starts (#596's 8 px), with
+#: the value axes' own margins off and one margin shared (#582, D113(f)).
+MARGIN_SLACK_PX = 8
 #: How long a test waits for a request that should not come (as on the charts page).
 SETTLE_MS = 500
 
 
-def open_c7(page: Page, query: str = "", *, width: int = 390) -> None:
+def open_charts(page: Page, query: str = "", *, width: int = 390) -> None:
     page.goto(f"{STATE_PATH}{query}")
     assert_rendered(page, STATE_SUCCESS, width=width)
-    page.locator(f"{C7} .main-svg").first.wait_for()
-    page.locator(f"{C7} .xtick text").first.wait_for()
+    for chart in STATE_CHARTS:
+        page.locator(f"{chart} .main-svg").first.wait_for()
+        page.locator(f"{chart} .xtick text").first.wait_for()
+
+
+def assert_plots_align(page: Page) -> None:
+    """C7's and C10's plot areas start and end at the same x, C7 above (#582, D113)."""
+    c7, c10 = (rect(page, f"{chart} .draglayer .nsewdrag") for chart in (C7, C10))
+    assert abs(c7["left"] - c10["left"]) <= 1, (c7, c10)
+    assert abs(c7["width"] - c10["width"]) <= 1, (c7, c10)
+    assert c7["bottom"] <= c10["top"], (c7, c10)
 
 
 @pytest.mark.plotlyjs_fetches(1)
 @pytest.mark.parametrize("width", PHONE_WIDTHS)
-def test_c7_is_readable_at_phone_width(page: Page, width: int) -> None:
-    """#560's AC6 (#558, D104): the year along the bottom with its sparse ticks apart,
-    every tick, axis title and key entry inside the width and none over another, no bar
-    or marker text, no sideways scroll, and a hover naming its year."""
+def test_c7_and_c10_are_readable_at_phone_width(page: Page, width: int) -> None:
+    """#560's AC6 and #582's (#558, D104): for each chart, the year along the bottom
+    with its sparse ticks apart, every tick, axis title and key entry inside the width
+    and none over another, no bar or marker text, no sideways scroll, and a hover
+    naming its year; C10's value ticks short ("5M"), its band labeled inside it with
+    the label over no other text, and the two plots aligned, every value tick and axis
+    title 8 px inside its chart."""
     page.set_viewport_size({"width": width, "height": 844})
-    open_c7(page, width=width)
-    title = labels.C4_TITLE_STATE.format(state="Georgia")
-    expect(page.locator(f"{C7} .chart-title")).to_have_text(title)
+    open_charts(page, width=width)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    assert_year_ticks_apart(page, C7)
-    expect(page.locator(f"{C7} .bartext")).to_have_count(0)
-    expect(page.locator(f"{C7} .textpoint")).to_have_count(0)
-    drawn = [
-        b
-        for part in C7_TEXTS
-        for b in boxes(page, f"{C7} {part}")
-        if b["w"] > 0 and b["text"]
-    ]
-    found = [b["text"] for b in drawn]
-    assert found.count(labels.C4_VALUE_AXIS) == 1
-    assert found.count(labels.LABELS["year"]) == 1
-    # Georgia took no part in 1864: the key names that marker.
-    assert labels.C4_NO_ELECTORS_TOOK_NO_PART in found
-    assert len(drawn) > len(year_ticks()) + 2
-    for i, a in enumerate(drawn):
-        assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
-        for b in drawn[i + 1 :]:
-            assert not overlaps(a, b), (a, b)
-    bar = f"{C7} .barlayer .point path >> nth=-1"
-    assert_hover_names_year(page, C7, bar, served_years()[-1])
+    for chart, (title, axis, key, _, _) in STATE_CHARTS.items():
+        expect(page.locator(f"{chart} .chart-title")).to_have_text(title)
+        assert_year_ticks_apart(page, chart)
+        expect(page.locator(f"{chart} .bartext")).to_have_count(0)
+        expect(page.locator(f"{chart} .textpoint")).to_have_count(0)
+        drawn = [
+            b
+            for part in (*CHART_TEXTS, ".annotation-text")
+            for b in boxes(page, f"{chart} {part}")
+            if b["w"] > 0 and b["text"]
+        ]
+        found = [b["text"] for b in drawn]
+        assert found.count(axis) == 1, chart
+        assert found.count(labels.LABELS["year"]) == 1, chart
+        assert key in found, chart
+        assert len(drawn) > len(year_ticks()) + 2, chart
+        for i, a in enumerate(drawn):
+            assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, a)
+            for b in drawn[i + 1 :]:
+                assert not overlaps(a, b), (chart, a, b)
+        (svg,) = boxes(page, f"{chart} .main-svg >> nth=0")
+        for b in boxes(page, f"{chart} .ytick text, {chart} .g-ytitle text"):
+            if b["w"] > 0:
+                assert b["x"] - svg["x"] >= MARGIN_SLACK_PX, (chart, b)
+        bar = f"{chart} .barlayer .point path >> nth=-1"
+        assert_hover_names_year(page, chart, bar, served_years()[-1])
+    ticks = [b["text"] for b in boxes(page, f"{C10} .ytick text") if b["w"] > 0]
+    assert ticks[0] == "0" and all(
+        t == "0" or t[-1] in "kM" for t in ticks
+    ), ticks
+    # C10's before band, labeled inside it (as C5's, #593), its label in the pairwise
+    # overlap check above with every tick, axis title and key entry.
+    expect(page.locator(f"{C10} .layer-below .shapelayer path")).to_have_count(1)
+    assert_band_label_inside(page, C10)
+    assert_plots_align(page)
 
 
 @pytest.mark.plotlyjs_fetches(1)
-def test_c7_ignores_the_filters(page: Page) -> None:
-    """D093(a): the page's filters narrow T4, never C7 or its table."""
-    open_c7(page, "?year_from=1900&candidate=jimmy-carter")
-    ticks = [b["text"] for b in boxes(page, f"{C7} .xtick text")]
-    assert ticks == year_ticks()
-    rows = page.locator("#state-electors tbody tr")
-    expect(rows).to_have_count(len(served_years()))
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP])
+def test_c7_and_c10_plots_stay_aligned_when_wide(page: Page, width: int) -> None:
+    """#582 (D113(f)): stacked in two cards, C7's and C10's plots share one left and
+    right edge at every width, C10 below C7."""
+    page.set_viewport_size({"width": width, "height": 900})
+    open_charts(page, width=width)
+    assert_plots_align(page)
 
 
 @pytest.mark.plotlyjs_fetches(1)
-def test_c7_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> None:
-    open_c7(page)
-    bar = page.locator(f"{C7} .barlayer .point path").first
-    light = bar.evaluate("el => getComputedStyle(el).fill")
-    assert light == rgb(token(page, "--chart-ec"))
+def test_c7_and_c10_ignore_the_filters(page: Page) -> None:
+    """D093(a): the page's filters narrow T4, never C7, C10 or their tables."""
+    open_charts(page, "?year_from=1900&candidate=jimmy-carter")
+    for chart, (_, _, _, table, _) in STATE_CHARTS.items():
+        ticks = [b["text"] for b in boxes(page, f"{chart} .xtick text")]
+        assert ticks == year_ticks(), chart
+        expect(page.locator(f"{table} tbody tr")).to_have_count(len(served_years()))
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c7_and_c10_redraw_on_a_theme_switch_with_no_reload_or_request(
+    page: Page,
+) -> None:
+    open_charts(page)
+    bars = {
+        chart: page.locator(f"{chart} .barlayer .point path").first
+        for chart in STATE_CHARTS
+    }
+    light = {}
+    for chart, (_, _, _, _, measure) in STATE_CHARTS.items():
+        light[chart] = bars[chart].evaluate("el => getComputedStyle(el).fill")
+        assert light[chart] == rgb(token(page, measure)), chart
     seen: list[str] = []
 
     def on_request(request: Request) -> None:
@@ -354,10 +427,11 @@ def test_c7_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
     page.on("request", on_request)
     page.evaluate("window.__e2e_mark = 1")
     page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
-    expect(bar).not_to_have_css("fill", light)
-    assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
-        token(page, "--chart-ec")
-    )
+    for chart, (_, _, _, _, measure) in STATE_CHARTS.items():
+        expect(bars[chart]).not_to_have_css("fill", light[chart])
+        assert bars[chart].evaluate("el => getComputedStyle(el).fill") == rgb(
+            token(page, measure)
+        ), chart
     page.wait_for_timeout(SETTLE_MS)
     assert seen == [], seen
     assert page.evaluate("window.__e2e_mark") == 1
@@ -365,7 +439,7 @@ def test_c7_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> N
 
 @pytest.mark.plotlyjs_fetches(1, abort=True)
 @pytest.mark.expected_console_error(RESOURCE_ERROR)
-def test_with_plotlyjs_blocked_c7_s_title_caption_and_table_render(
+def test_with_plotlyjs_blocked_c7_and_c10_s_titles_captions_and_tables_render(
     page: Page,
 ) -> None:
     page.goto(STATE_PATH)
@@ -373,12 +447,11 @@ def test_with_plotlyjs_blocked_c7_s_title_caption_and_table_render(
     memo = f"window.{charts.PLOTLYJS_MEMO}"
     page.wait_for_function(f"{memo} !== undefined")
     assert page.evaluate(f"async () => await {memo}") is False
-    title = labels.C4_TITLE_STATE.format(state="Georgia")
-    expect(page.locator(f"{C7} .chart-title")).to_have_text(title)
-    expect(page.locator(f"{C7} figcaption")).to_contain_text(labels.C7_FILTERS_NOTE)
-    expect(page.locator(f"{C7} figcaption a")).to_have_attribute(
-        "href", "#state-electors"
-    )
-    rows = page.locator("#state-electors tbody tr")
-    expect(rows).to_have_count(len(served_years()))
+    for chart, (title, _, _, table, _) in STATE_CHARTS.items():
+        expect(page.locator(f"{chart} .chart-title")).to_have_text(title)
+        expect(page.locator(f"{chart} figcaption")).to_contain_text(
+            labels.C7_FILTERS_NOTE
+        )
+        expect(page.locator(f"{chart} figcaption a")).to_have_attribute("href", table)
+        expect(page.locator(f"{table} tbody tr")).to_have_count(len(served_years()))
     expect(page.locator("#state-history")).to_be_visible()

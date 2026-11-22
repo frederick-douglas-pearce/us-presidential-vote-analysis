@@ -858,16 +858,18 @@ class TestLede:
         # The split falls at the sentence boundary, so the degraded state offers no part
         # of the filter sentence; people per electoral vote left the lede with T7
         # (#559), and the electors appointed came in with C7, which the filters do not
-        # reach, so the filter sentence names the table they narrow (#560).
+        # reach, so the filter sentence names the table they narrow (#560); C10's total
+        # popular vote came in after it (#582; ba spec, approved at its plan gate).
         assert MOD["FILTER_SENTENCE"] == (
             "Narrow the table of each candidate's electoral votes by year, candidate "
             "or popular-vote status."
         )
         assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" == (
-            "This state's electors appointed and its electoral votes for each "
-            "candidate in every election this dataset holds for it, with the popular "
-            "vote where the dataset has it. Narrow the table of each candidate's "
-            "electoral votes by year, candidate or popular-vote status."
+            "This state's electors appointed, its total popular vote and its "
+            "electoral votes for each candidate in every election this dataset holds "
+            "for it, with popular-vote figures where the dataset has them. Narrow the "
+            "table of each candidate's electoral votes by year, candidate or "
+            "popular-vote status."
         )
 
     def test_success_shows_the_lede_then_the_filter_sentence(
@@ -1574,15 +1576,16 @@ class TestWideLayout:
         # Only the slider's box keeps its own row.
         assert classed(tree, "filter-own-row") == [kids[0]]
 
-    def test_c7_s_section_comes_after_the_section_links_and_before_t4_s(
+    def test_c7_s_and_c10_s_sections_come_after_the_section_links_and_before_t4_s(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # #560, D106: the lede is added by layout(), so the whole page is checked there:
         # the heading, the lede and the page body, nothing between. In the body, the
         # section links first (#559, D105); then C7's section (its heading, the chart,
         # its table's heading, the table in its scroll box, its download, its notes and
-        # its column-name list); then T4's, under its own heading, with the page's
-        # Location and the filters that narrow it. One chart, and it is C7.
+        # its column-name list); then C10's, laid out alike (#582, D113); then T4's,
+        # under its own heading, with the page's Location and the filters that narrow
+        # it. Two charts, C7 and C10.
         cached_client(monkeypatch)
         page = MOD["layout"](usps="GA")
         heading, lede, content = page.children
@@ -1591,8 +1594,8 @@ class TestWideLayout:
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
         assert kids[0].id == state_view.SECTIONS_ID
-        # Two cards, one per section (#567, D111): C7's, then T4's.
-        assert cards(content) == kids[1:3]
+        # Three cards, one per section (#567, D111): C7's, C10's, then T4's.
+        assert cards(content) == kids[1:4]
         c7 = card_children(content, 1)
         assert type(c7[0]).__name__ == "H2"
         assert c7[0].children == MOD["C7_HEADING"]
@@ -1604,14 +1607,26 @@ class TestWideLayout:
         assert find(c7, MOD["ELECTORS_TABLE_ID"]) is not None
         assert find(c7, MOD["ELECTORS_GLOSSARY_ID"]) is not None
         assert find(c7, MOD["TABLE_ID"]) is None
-        t4 = card_children(content, 2)
+        c10 = card_children(content, 2)
+        assert [type(k).__name__ for k in c10[:3]] == ["H2", "Figure", "H2"]
+        assert c10[0].children == MOD["C10_HEADING"]
+        assert c10[1].id == charts.dom_id(MOD["C10_ID"])
+        assert c10[2].children == MOD["C10_TABLE_HEADING"]
+        assert find(c10, MOD["TOTALS_TABLE_ID"]) is not None
+        assert find(c10, MOD["TOTALS_GLOSSARY_ID"]) is not None
+        assert find(c10, MOD["TABLE_ID"]) is None
+        t4 = card_children(content, 3)
         assert type(t4[0]).__name__ == "H2"
         assert t4[0].children == MOD["HISTORY_TABLE_HEADING"]
         assert type(t4[1]).__name__ == "Location"
         assert t4[2].className.split()[:1] == ["filters"]
         assert find(t4, MOD["TABLE_ID"]) is not None
         assert find(t4, MOD["ELECTORS_TABLE_ID"]) is None
-        assert [f.id for f in of_type(page, "Figure")] == [charts.dom_id("C7")]
+        assert find(t4, MOD["TOTALS_TABLE_ID"]) is None
+        assert [f.id for f in of_type(page, "Figure")] == [
+            charts.dom_id("C7"),
+            charts.dom_id("C10"),
+        ]
 
     def test_the_per_capita_page_s_slider_has_its_own_row_and_no_slot(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1706,13 +1721,22 @@ class TestC7:
         (bars,) = [tr for tr in figure["data"] if tr["type"] == "bar"]
         assert bars["marker"]["color"] == "var(--chart-ec)"
         assert figure["layout"]["xaxis"]["tickfont"] == {"size": 14}
-        (figcaption,) = of_type(tree, "Figcaption")
+        figcaption, _ = of_type(tree, "Figcaption")
         assert type(figcaption.children[0]).__name__ == "Details"
+
+    def test_its_plot_shares_c10_s_left_and_right_margin(self) -> None:
+        """#582 (D113(f)): stacked above C10, C7 takes the state page's one fixed left
+        and right margin, keeps its own top, and its value axis pushes none."""
+        figure = c7_figure(render())
+        margin = figure["layout"]["margin"]
+        assert {k: margin[k] for k in ("l", "r")} == over_time.STATE_MARGIN
+        assert margin["t"] == over_time.TOP_PX
+        assert figure["layout"]["yaxis"]["automargin"] is False
 
     def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
         assert charts.CHARTS["C7"] == charts.Chart("/state/<usps>", ELECTORS)
         tree = render()
-        (figure,) = of_type(tree, "Figure")
+        figure, _ = of_type(tree, "Figure")
         assert figure.id == C7_DOM == "c7"
         assert find(tree, ELECTORS) is not None
         csv = download(tree, ELECTORS)
@@ -1745,6 +1769,8 @@ class TestC7:
             labels.C4_TITLE_STATE.format(state="Georgia"),
             "Georgia",
         ).figure
+        # Aligned with C10 on the state page's one margin (#582, D113(f)).
+        over_time.align(expected, over_time.STATE_MARGIN)
         # ``components.chart`` takes the title out of the figure into page text.
         title = expected["layout"].pop("title")["text"]
         assert figure == expected
@@ -1946,49 +1972,67 @@ class TestC7Degraded:
     """A body T4 accepts that C7 cannot read as one allotment per election degrades
     C7's section alone (D096(d)'s rule, #560's AC5 as D106(e) reads it): its heading
     and :data:`C7_UNAVAILABLE`, no chart and no ``c7`` id, while T4, its filters and the
-    page's success marker stay."""
+    page's success marker stay. Which faults also degrade C10 is exact per test (#582,
+    D113(c) as amended): a fault in the allotment C7 alone; one in what both read (the
+    years, the state's name, ``pv_status``) both."""
 
-    def assert_degraded(self, body: dict[str, Any]) -> None:
+    def assert_degraded(self, body: dict[str, Any], *, both: bool) -> None:
         tree = render(body=body)
         assert getattr(tree, "id", None) == PAGE_ID
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
-        assert of_type(tree, "Figure") == []
+        assert (find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None) is both
+        assert [f.id for f in of_type(tree, "Figure")] == ([] if both else [C10_DOM])
         assert c7_figure(tree) is None
         assert find(tree, ELECTORS) is None
         assert find(tree, TABLE) is not None
         assert find(tree, MOD["YEARS_ID"]) is not None
         headings = [h.children for h in of_type(tree, "H2")]
-        assert headings[:2] == [MOD["C7_HEADING"], MOD["HISTORY_TABLE_HEADING"]]
+        assert headings[:2] == [MOD["C7_HEADING"], MOD["C10_HEADING"]]
+        assert headings.index(MOD["HISTORY_TABLE_HEADING"]) > 1
         assert MOD["C7_TABLE_HEADING"] not in headings
-        # C7's note is in C7's card, the first of the page's two, and T4 in the
-        # second (#567).
-        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=2)
-        assert in_one_card(tree, TABLE, total=2) is not c7
+        # C7's note is in C7's card, the first of the page's three, C10's in the
+        # second (#582) and T4 in the third (#567).
+        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=3)
+        assert in_one_card(tree, TABLE, total=3) is not c7
         assert every_card(tree)[0] is c7
 
     def test_two_allotments_in_one_election(self) -> None:
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
         first["state_electoral_votes"] = 99
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=False)
 
     def test_a_figure_beside_a_null_or_true_beside_one(self) -> None:
         for value in (None, True):
             body = with_year(ga_body(), 1900, state_electoral_votes=1)
             (first, *_) = [r for r in body["data"] if r["year"] == 1900]
             first["state_electoral_votes"] = value
-            self.assert_degraded(body)
+            self.assert_degraded(body, both=False)
 
     def test_two_statuses_in_one_election(self) -> None:
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
         first["pv_status"] = "legislature_chosen"
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=True)
+
+    def test_two_allotments_leave_c10_exactly_as_it_was(self) -> None:
+        """#582 (D113(c)), AC5's converse: an allotment C7 cannot read degrades C7
+        alone; C10 and its table are the undoctored render's (T4 shows the allotment,
+        so its file changes, and T4 stays)."""
+        plain = render()
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["state_electoral_votes"] = 99
+        tree = render(body=body)
+        assert c7_figure(tree) is None
+        assert c10_figure(tree) == c10_figure(plain)
+        assert download(tree, TOTALS).raw == download(plain, TOTALS).raw
+        assert find(tree, TABLE) is not None
 
     def test_a_gap_after_the_first_election(self) -> None:
         body = ga_body()
         body["data"] = [r for r in body["data"] if r["year"] != 1900]
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=True)
 
     @pytest.mark.parametrize("name", [None, 7, "", "   "])
     def test_a_served_name_with_nothing_in_it(self, name: Any) -> None:
@@ -1997,7 +2041,7 @@ class TestC7Degraded:
         body = ga_body()
         for row in body["data"]:
             row["state"] = name
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=True)
 
     def test_a_row_without_the_allotment(self) -> None:
         body = ga_body()
@@ -2029,6 +2073,497 @@ class TestC7Degraded:
         assert find(content, MOD["C7_UNAVAILABLE_ID"]) is not None
         assert find(content, C7_DOM) is None
         assert find(content, TABLE) is not None
+
+
+# --- chart C10: the state's total popular vote in each election (#582, D113) ----------
+
+C10_DOM = charts.dom_id("C10")
+TOTALS = MOD["TOTALS_TABLE_ID"]
+#: The years the narrowed one-value rule decides for Georgia (D113(b)): each has a
+#: candidate row with no popular-vote record, whose total is null, beside the figure.
+GA_SKIPPED_YEARS = (1976, 1988, 2004, 2016)
+COVERAGE: dict[str, Any] = INDEX["meta"]["provenance"]["coverage"]
+WINDOW = (COVERAGE["pv_year_min"], COVERAGE["pv_year_max"])
+#: The states whose history is recorded (``/v1/states/{usps}``): C10's oracle runs
+#: over each, so #575's TX recording joins it with no edit.
+RECORDED_STATES = sorted(
+    path.rsplit("/", 1)[1]
+    for path in RECORDED
+    if path.startswith("/v1/states/") and path.count("/") == 3
+)
+
+
+def c10_figure(tree: Any) -> Any:
+    """C10's unresolved figure in a rendered tree, or ``None`` where it is not built."""
+    source = repr(charts.source_id(C10_DOM))
+    stores = [
+        s for s in of_type(tree, "Store") if repr(getattr(s, "id", None)) == source
+    ]
+    return stores[0].data if stores else None
+
+
+def c10_title(tree: Any) -> str:
+    (title,) = [
+        p for p in of_type(tree, "P") if getattr(p, "id", None) == "c10-title"
+    ]
+    return str(title.children)
+
+
+def c10_caption(tree: Any) -> str:
+    (figure,) = [f for f in of_type(tree, "Figure") if f.id == C10_DOM]
+    (caption,) = of_type(figure, "Figcaption")
+    return caption_text(caption)
+
+
+def totals_cells(tree: Any) -> list[tuple[str, str, str]]:
+    """C10's companion table's body: each row's year, total and status texts."""
+    return [
+        tuple(" ".join(texts(cell)) for cell in tr.children)  # type: ignore[misc]
+        for tr in body_rows(tree, TOTALS)
+    ]
+
+
+def bars_of(figure: dict[str, Any]) -> dict[int, int]:
+    (bars,) = [t for t in figure["data"] if t["type"] == "bar"]
+    return dict(zip(bars["x"], bars["y"], strict=True))
+
+
+def hovers_by_year(figure: dict[str, Any]) -> dict[int, str]:
+    return {
+        x: h for t in figure["data"] for x, h in zip(t["x"], t["hovertext"], strict=True)
+    }
+
+
+def popular_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = MOD["popular_totals"](
+        rows, set(SERVED), "GA", GA_PATH
+    )
+    return records
+
+
+class TestC10:
+    def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
+        assert charts.CHARTS["C10"] == charts.Chart(
+            "/state/<usps>", TOTALS, short_value_ticks=True
+        )
+        tree = render()
+        figures = [f.id for f in of_type(tree, "Figure")]
+        assert figures == [C7_DOM, C10_DOM] and C10_DOM == "c10"
+        csv = download(tree, TOTALS)
+        assert csv.header == ["year", "state_popular_total", "pv_status", "state_usps"]
+        assert {r["state_usps"] for r in csv.rows} == {"GA"}
+
+    def test_its_bars_are_popular_vote_blue_on_c7_s_axis_and_margin(self) -> None:
+        """#593's colors; #582 (D113(e), (f)): short value ticks, C7's year-tick size
+        and the state page's one left and right margin, with no automargin."""
+        tree = render()
+        figure = c10_figure(tree)
+        (bars,) = [t for t in figure["data"] if t["type"] == "bar"]
+        assert bars["marker"]["color"] == "var(--chart-pv)"
+        layout = figure["layout"]
+        assert layout["xaxis"] == c7_figure(tree)["layout"]["xaxis"]
+        assert layout["xaxis"]["tickfont"] == {"size": 14}
+        assert layout["yaxis"]["tickformat"] == charts.SHORT_TICKFORMAT
+        assert layout["yaxis"]["automargin"] is False
+        margin = layout["margin"]
+        assert {k: margin[k] for k in ("l", "r")} == over_time.STATE_MARGIN
+        # Its own top margin stays (the template's, or the room for a label above).
+        assert margin["t"] >= over_time.TOP_PX
+        assert not any("text" in t for t in figure["data"])
+
+    @pytest.mark.parametrize("usps", RECORDED_STATES)
+    def test_each_year_s_bar_is_n2_s_total(self, usps: str) -> None:
+        """AC2's oracle (B-1 of #582's architect review): each recorded state's N2
+        totals, read straight from the recording and never through C10's collapse or
+        figure builder, against the bars and hovers C10 draws from its history."""
+        body = copy.deepcopy(RECORDED[f"/v1/states/{usps}"])
+        content, _ = MOD["render"](body, copy.deepcopy(INDEX), usps, [])
+        figure = c10_figure(content)
+        bars = bars_of(figure)
+        hovers = hovers_by_year(figure)
+        n2 = {r["year"]: r["state_popular_total"] for r in n2_state(usps)}
+        assert n2
+        for year, total in n2.items():
+            if total is None:
+                assert year not in bars, year
+            else:
+                assert bars[year] == total, year
+                assert labels.number(total) in hovers[year], year
+        assert set(bars) == {y for y, t in n2.items() if t is not None}
+        if usps == "GA":
+            assert set(GA_SKIPPED_YEARS) <= set(bars)
+
+    def test_every_n2_state_s_cells_word_its_totals(self) -> None:
+        """Across the recorded N2 fixture, C10's points carry each state's N2 total
+        and status and choose ``NO_STATE_TOTAL`` as the cell inside the window: the
+        field mapping only, not AC2's oracle, which is
+        :meth:`test_each_year_s_bar_is_n2_s_total` (Georgia's rendered history; TX's is
+        #575's). No N2 row goes through the collapse (B-1)."""
+        states = {r["state_usps"] for r in N2["data"]}
+        assert len(states) == 51
+        for usps in sorted(states):
+            n2 = n2_state(usps)
+            points = over_time.total_points(n2, COVERAGE)
+            assert [
+                (p.year, p.total, p.total_cell, p.status, p.status_cell)
+                for p in points
+            ] == [
+                (
+                    r["year"],
+                    r["state_popular_total"],
+                    labels.popular_votes(
+                        r["state_popular_total"],
+                        r["pv_status"],
+                        r["year"],
+                        COVERAGE,
+                        no_figure=labels.NO_STATE_TOTAL,
+                    ),
+                    r["pv_status"],
+                    labels.pv_status(r["pv_status"]),
+                )
+                for r in n2
+            ], usps
+
+    def test_the_chart_equals_its_table_s_cells(self) -> None:
+        tree = render()
+        figure = c10_figure(tree)
+        rows = download(tree, TOTALS).rows
+        cells = {int(r["year"]): r for r in rows}
+        assert set(cells) == set(range(1824, 2025, 4))
+        for year, value in bars_of(figure).items():
+            assert cells[year]["state_popular_total"] == str(value), year
+        # Each hover writes the table's cells (D091), one per drawn point.
+        hovers = hovers_by_year(figure)
+        for shown, total, status in totals_cells(tree):
+            if int(shown) in hovers:
+                assert hovers[int(shown)] == labels.C10_HOVER.format(
+                    year=shown, state="Georgia", total=total, pv_status=status
+                )
+
+    def test_the_band_comes_from_coverage_never_a_literal(self) -> None:
+        figure = c10_figure(render())
+        (before,) = figure["layout"]["shapes"]
+        low, high = components.year_edges(SERVED, 1824, WINDOW[0] - 4)
+        assert (before["x0"], before["x1"]) == (low, high)
+        body = ga_body()
+        body["meta"]["provenance"]["coverage"]["pv_year_min"] = 1984
+        (moved,) = c10_figure(render(body=body))["layout"]["shapes"]
+        assert moved["x1"] == components.year_edges(SERVED, 1824, 1980)[1]
+        # A year held before the window draws nothing: the band says why.
+        assert 1900 not in hovers_by_year(figure)
+
+    def test_recorded_causes_are_markers(self) -> None:
+        """AC3 on recorded data: Georgia's legislature chose its electors in 1824 and
+        it took no part in 1864; neither draws a bar."""
+        tree = render()
+        figure = c10_figure(tree)
+        assert traces(figure)[labels.C5_LEGISLATURE] == [1824]
+        assert traces(figure)[labels.C5_TOOK_NO_PART] == [1864]
+        assert not {1824, 1864} & set(bars_of(figure))
+        assert labels.C5_MARKER_NOTE in c10_caption(tree)
+
+    @pytest.mark.parametrize(
+        ("fields", "label", "cell"),
+        [
+            # AC3 by doctoring: no recorded year has these causes.
+            (
+                {"state_popular_total": None, "popular_votes": None},
+                labels.C5_NO_TOTAL,
+                labels.NO_STATE_TOTAL,
+            ),
+            ({"state_popular_total": "12"}, labels.UNRECOGNIZED, labels.UNRECOGNIZED),
+            # A number no bar draws is written as served, as C5 writes it.
+            ({"state_popular_total": -1}, labels.UNRECOGNIZED, labels.number(-1)),
+            # One key entry for both null-total cells (D113, amendment); the cell and
+            # the hover still say which it is.
+            (
+                {"state_popular_total": None, "popular_votes": None, "pv_status": None},
+                labels.C5_NO_TOTAL,
+                labels.NOT_IN_DATASET,
+            ),
+        ],
+    )
+    def test_a_missing_or_unrecognized_total_is_its_own_marker(
+        self, fields: dict[str, Any], label: str, cell: str
+    ) -> None:
+        tree = render(body=with_year(ga_body(), 2000, **fields))
+        figure = c10_figure(tree)
+        assert figure is not None
+        assert traces(figure)[label] == [2000]
+        assert 2000 not in bars_of(figure)
+        (got,) = [t for y, t, _ in totals_cells(tree) if y == "2000"]
+        assert got == cell
+        assert got in hovers_by_year(figure)[2000]
+        symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
+        assert symbols[label] == over_time.C10_SYMBOLS[label]
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "",
+            "year_from=1900",
+            "year_to=1900",
+            "candidate=jimmy-carter",
+            "pv_status=not_participating",
+            "year_from=1700&year_to=1800",
+        ],
+    )
+    def test_no_filter_changes_the_chart_or_its_table(self, query: str) -> None:
+        plain = render()
+        tree = render(query)
+        assert c10_figure(tree) == c10_figure(plain)
+        assert download(tree, TOTALS).raw == download(plain, TOTALS).raw
+        assert c10_caption(tree) == c10_caption(plain)
+
+    def test_the_caption_describes_the_series(self) -> None:
+        caption = c10_caption(render())
+        assert caption.startswith(labels.C5_BASIS)
+        assert labels.C10_SHORT_TICKS_NOTE in caption
+        assert labels.C5_BEFORE_NOTE.format(pv_year_min=WINDOW[0]) in caption
+        assert labels.C5_MARKER_NOTE in caption
+        assert caption.index(labels.C7_FILTERS_NOTE) > caption.index(
+            labels.C5_MARKER_NOTE
+        )
+        assert "The first election in this dataset" not in caption
+
+    def test_a_later_first_election_and_a_name_that_is_not_plain_text(self) -> None:
+        body = ga_body()
+        body["data"] = [r for r in body["data"] if r["year"] >= 1832]
+        tree = render(body=body)
+        assert labels.C10_TITLE_STATE.format(state="Georgia") == c10_title(tree)
+        assert labels.C10_FIRST_ELECTION_NOTE.format(state="Georgia", year=1832) in (
+            c10_caption(tree)
+        )
+        assert c10_figure(tree)["layout"]["xaxis"] == components.year_axis(SERVED)
+        for row in body["data"]:
+            row["state"] = "<b>Georgia"
+        tree = render(body=body)
+        assert c10_title(tree) == labels.C10_TITLE_THIS_STATE
+        assert labels.C10_FIRST_ELECTION_NOTE_THIS_STATE.format(year=1832) in (
+            c10_caption(tree)
+        )
+        hovers = hovers_by_year(c10_figure(tree)).values()
+        assert all(charts.escaped("<b>Georgia") in h for h in hovers)
+
+    def test_the_table_s_links_view_and_notes(self) -> None:
+        tree = render("year_from=1900&candidate=jimmy-carter")
+        for tr in body_rows(tree, TOTALS):
+            (link,) = of_type(tr.children[0], "Link")
+            assert link.href == f"/election/{link.children}"
+        lines = download(tree, TOTALS).lines
+        assert "View: https://explore.us-presidential-election-center.org/state/GA" in (
+            lines
+        )
+        assert labels.C5_BASIS in lines
+        # C10 and its table share the page's second card (#567, #582).
+        card = in_one_card(tree, TOTALS, total=3)
+        assert in_one_card(tree, C10_DOM, total=3) is card
+        assert every_card(tree)[1] is card
+
+
+class TestPopularTotals:
+    """C10's collapse (#582, D113(b)): a row is skipped only when its candidate
+    ``popular_votes`` and its ``state_popular_total`` are both null; every other row's
+    total is read, and those must be one value."""
+
+    def rows(self) -> list[dict[str, Any]]:
+        return state_view.rows(ga_body(), "GA", set(SERVED), GA_PATH)
+
+    def test_a_null_null_row_beside_figures_is_skipped(self) -> None:
+        records = {r["year"]: r for r in popular_totals(self.rows())}
+        for year in GA_SKIPPED_YEARS:
+            (figure,) = {
+                r["state_popular_total"]
+                for r in self.rows()
+                if r["year"] == year and r["popular_votes"] is not None
+            }
+            assert records[year]["state_popular_total"] == figure, year
+
+    def test_a_year_where_every_row_is_skipped_reads_a_null_total(self) -> None:
+        records = {r["year"]: r for r in popular_totals(self.rows())}
+        assert records[1972]["state_popular_total"] is None
+        assert records[1824]["pv_status"] == "legislature_chosen"
+        assert sorted(records) == SERVED
+
+    def test_a_different_total_on_a_row_with_no_figure_is_read(self) -> None:
+        rows = self.rows()
+        (skipped,) = [
+            r for r in rows if r["year"] == 1988 and r["popular_votes"] is None
+        ]
+        skipped["state_popular_total"] = 1
+        with pytest.raises(TypeError, match="two values of state_popular_total"):
+            popular_totals(rows)
+
+    def test_a_figure_row_with_a_null_total_is_refused(self) -> None:
+        rows = self.rows()
+        (first, *_) = [r for r in rows if r["year"] == 1988 and r["popular_votes"]]
+        first["state_popular_total"] = None
+        with pytest.raises(TypeError, match="figure with no state_popular_total"):
+            popular_totals(rows)
+
+    def test_a_lone_figure_row_with_a_null_total_is_refused(self) -> None:
+        """D113, amendment (wording.5): the year's only row read, with a candidate
+        figure and no total, refuses rather than reading a null total."""
+        rows = [
+            r
+            for r in self.rows()
+            if r["year"] != 1988 or r["popular_votes"] is not None
+        ]
+        (only, *rest) = [r for r in rows if r["year"] == 1988]
+        rows = [r for r in rows if r not in rest]
+        only["state_popular_total"] = None
+        with pytest.raises(TypeError, match="figure with no state_popular_total"):
+            popular_totals(rows)
+
+    @pytest.mark.parametrize("total", ["", 0, float("nan")])
+    def test_a_blank_zero_or_nan_total_is_read_never_skipped(self, total: Any) -> None:
+        # ``is None`` on the total's side too (ge.1): a row with no candidate figure
+        # whose total is a value, not a null, is read, and differs from the figure.
+        rows = self.rows()
+        (skipped,) = [
+            r for r in rows if r["year"] == 1988 and r["popular_votes"] is None
+        ]
+        skipped["state_popular_total"] = total
+        with pytest.raises(TypeError, match="two values of state_popular_total"):
+            popular_totals(rows)
+
+    @pytest.mark.parametrize("value", ["", float("nan")])
+    def test_a_blank_or_nan_figure_is_read_never_skipped(self, value: Any) -> None:
+        # ``is None``, never ``is_blank``: a blank or NaN ``popular_votes`` is a value,
+        # so the row is read, and a figure with no total refuses.
+        rows = self.rows()
+        (skipped,) = [
+            r for r in rows if r["year"] == 1988 and r["popular_votes"] is None
+        ]
+        skipped["popular_votes"] = value
+        with pytest.raises(TypeError, match="figure with no state_popular_total"):
+            popular_totals(rows)
+
+    def test_a_row_without_popular_votes_is_refused(self) -> None:
+        rows = self.rows()
+        del rows[0]["popular_votes"]
+        with pytest.raises(KeyError):
+            popular_totals(rows)
+
+    def test_the_states_recording_s_premise(self) -> None:
+        """The rule's premise in the recording (I-6): a recorded state's row carries no
+        total exactly when it carries no candidate figure. A re-recording that changes
+        the field's meaning fails here, not silently in the oracle."""
+        for usps in RECORDED_STATES:
+            for row in RECORDED[f"/v1/states/{usps}"]["data"]:
+                assert (row["popular_votes"] is None) == (
+                    row["state_popular_total"] is None
+                ), (usps, row["year"], row["candidate"])
+
+
+class TestC10Degraded:
+    """AC5: a body T4 accepts whose total popular vote C10 cannot read as one per
+    election degrades C10's section alone: its heading and :data:`C10_UNAVAILABLE`, no
+    chart, no ``c10`` id and no table, while C7 (exactly as it was), T4, its filters and
+    the page's success marker stay (D113(c))."""
+
+    def assert_degraded(self, body: dict[str, Any], *, t4_file: bool = True) -> None:
+        """``t4_file``: T4's CSV equals the undoctored render's; false only where the
+        doctoring is in the provenance its preamble writes (the window)."""
+        plain = render()
+        tree = render(body=body)
+        assert getattr(tree, "id", None) == PAGE_ID
+        assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
+        assert c10_figure(tree) is None
+        assert find(tree, C10_DOM) is None
+        assert find(tree, TOTALS) is None
+        assert [f.id for f in of_type(tree, "Figure")] == [C7_DOM]
+        assert c7_figure(tree) == c7_figure(plain)
+        assert download(tree, ELECTORS).rows == download(plain, ELECTORS).rows
+        if t4_file:
+            assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
+            assert download(tree, TABLE).raw == download(plain, TABLE).raw
+        else:
+            assert download(tree, TABLE).rows == download(plain, TABLE).rows
+        assert find(tree, MOD["YEARS_ID"]) is not None
+        headings = [h.children for h in of_type(tree, "H2")]
+        assert MOD["C10_HEADING"] in headings
+        assert MOD["C10_TABLE_HEADING"] not in headings
+        card = in_one_card(tree, MOD["C10_UNAVAILABLE_ID"], total=3)
+        assert every_card(tree)[1] is card
+
+    def test_two_totals_in_one_election(self) -> None:
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 2016]
+        first["state_popular_total"] = 99
+        self.assert_degraded(body)
+
+    def test_a_figure_row_with_a_null_total_beside_the_figure(self) -> None:
+        body = ga_body()
+        (first, *_) = [
+            r for r in body["data"] if r["year"] == 2016 and r["popular_votes"]
+        ]
+        first["state_popular_total"] = None
+        self.assert_degraded(body)
+
+    @pytest.mark.parametrize("window", [(2000, 1990), (True, 2024), (1976, 1976.5)])
+    def test_a_malformed_popular_vote_window(self, window: tuple[Any, Any]) -> None:
+        """cr.1: C10 checks the window as C2 and C5 do (``query.year_span``), so an
+        inverted or mistyped one that T4 can still compare degrades C10 alone, never
+        a self-contradicting caption."""
+        body = ga_body()
+        coverage = body["meta"]["provenance"]["coverage"]
+        coverage["pv_year_min"], coverage["pv_year_max"] = window
+        self.assert_degraded(body, t4_file=False)
+
+    @pytest.mark.parametrize("window", [(1976, "2024"), (None, 2024)])
+    def test_a_window_t4_cannot_compare_degrades_the_page(
+        self, window: tuple[Any, Any]
+    ) -> None:
+        # T4's popular-vote cells compare each year with the window first, so a fault
+        # in what T4 shows is never swallowed by C10's section (as C7's
+        # ``test_a_row_without_the_allotment``).
+        body = ga_body()
+        coverage = body["meta"]["provenance"]["coverage"]
+        coverage["pv_year_min"], coverage["pv_year_max"] = window
+        with pytest.raises(TypeError):
+            render(body=body)
+
+    def test_a_row_without_the_total(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            if row["year"] == 2016:
+                del row["state_popular_total"]
+        self.assert_degraded(body)
+
+    def test_two_statuses_degrade_both_charts(self) -> None:
+        """D113(c): ``pv_status`` is read by both, so its disagreement degrades both."""
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["pv_status"] = "legislature_chosen"
+        tree = render(body=body)
+        assert getattr(tree, "id", None) == PAGE_ID
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
+        assert of_type(tree, "Figure") == []
+        assert find(tree, TABLE) is not None
+
+    def test_the_try_never_wraps_the_chart_call(self) -> None:
+        """D095(f): ``components.chart`` is called after the ``try``, never in it, so a
+        figure the chart rules refuse is logged, never swallowed as a degraded
+        section."""
+        tree = ast.parse(inspect.getsource(MOD["_totals_section"]).lstrip())
+        (handler,) = [n for n in ast.walk(tree) if isinstance(n, ast.Try)]
+        inside = [
+            n
+            for n in ast.walk(ast.Module(body=handler.body, type_ignores=[]))
+            if isinstance(n, ast.Attribute) and n.attr == "chart"
+        ]
+        assert inside == []
+        after = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute)
+            and n.attr == "chart"
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "components"
+        ]
+        assert len(after) == 1
 
 
 class TestStateSeries:

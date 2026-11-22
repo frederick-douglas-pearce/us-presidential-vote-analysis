@@ -414,9 +414,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   drawn is no image, only its title and caption as text. Either way the companion table carries the
   numbers. Pointing at a mark shows only the hover text written for that series, for the nearest
   point. Axis numbers are written in full with thousands separators, as the tables write them, never
-  shortened ("80M", "1.2B"), with one exception: C5's value axis (the total popular vote) writes its
-  numbers short, as "0, 50M, 100M, 150M" ("M" is millions), and its hover text and companion table
-  still write each total in full. The legend is only a key: clicking it hides nothing. A reader
+  shortened ("80M", "1.2B"), with two exceptions: C5's and C10's value axes (the total popular
+  vote, the nation's and a state's) write their numbers short, as "0, 50M, 100M, 150M" ("M" is
+  millions, "k" thousands), and their hover text and companion tables still write each total in
+  full. The legend is only a key: clicking it hides nothing. A reader
   cannot zoom or drag a chart, and no toolbar shows on it. Every chart has a **chart ID**, `C<n>`,
   issued in order of story filing. An ID is never renumbered or reused, and a retired ID stays
   retired. The closed registry `CHARTS` in `dashboard/explore/charts.py` maps each ID to its page
@@ -437,8 +438,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   (`html.P`, class `chart-title`, id `<chart element id>-title`) and its caption below it;
   `labels.CHART_TABLE_POINTER`; `labels.CHART_CAPTION_SUMMARY`; each chart's own wording (title,
   axis titles, trace names, legend title, hover text, annotations, caption) in `labels.py`; the axis
-  number format, the hover behavior and the inert legend in `charts.TEMPLATE`, and C5's short
-  value-axis numbers, the one exception, named on C5's `CHARTS` row (`short_value_ticks`), and the
+  number format, the hover behavior and the inert legend in `charts.TEMPLATE`, and C5's and C10's
+  short value-axis numbers, the two exceptions, named on their `CHARTS` rows (`short_value_ticks`),
+  and the
   absent toolbar in `charts.CHART_CONFIG`, both in `dashboard/explore/charts.py`. C1, on the
   election overview (`/election/<year>`), is the first chart a page renders. C3 is on an election's
   People per electoral vote page (`/election/<year>/per-capita`). The home page's lede
@@ -446,7 +448,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   page's year filters and followed by its companion table. C4 and C5 are on `/elections/over-time`,
   after the page's year filters, C4 above C5 with their year axes lined up, followed by the one
   companion table they share. C7 is on a state's history page (`/state/<usps>`), before the filters,
-  with its own companion table.
+  with its own companion table; C10 is below C7, with its own companion table, their plots lined
+  up (#582).
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
   caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
@@ -471,8 +474,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Precise:** The table that each chart's registry row names by its element id. Two charts can
   share one companion table (C4 and C5). C4 and C5's table, on `/elections/over-time`, shows all
   states; the page's year filters narrow it and both charts alike, as they narrow C2 and its table
-  on `/elections/majority` (#596). On a state's history page, C7's companion table is its own; the
-  page's filters narrow T4 only. `components.chart` refuses any other table. The table pointer links
+  on `/elections/majority` (#596). On a state's history page, C7's and C10's companion tables are
+  each their own; the page's filters narrow T4 only. `components.chart` refuses any other table. The table pointer links
   to `#<table id>`, the table element itself, below the table's heading. Every chart's pointer has
   the same text; the caption it ends tells the reader which chart it belongs to. Like every table,
   it is built by `components.table` with its own CSV. A filter on the page can narrow the table
@@ -627,7 +630,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year axis of C2 on `/elections/majority`, of C4 and C5 on
-  `/elections/over-time` and of C7 on `/state/<usps>`, a numeric axis with a tick every 4, 8, 10, 20
+  `/elections/over-time` and of C7 and C10 on `/state/<usps>`, a numeric axis with a tick every 4, 8, 10, 20
   or 40 years, the smallest of those that goes into the span of years shown at most five times, so
   the axis writes at most five ticks (every 40 years over every served year); the year-range slider
   (`/elections`, `/elections/majority`, `/elections/over-time`, `/state/<usps>`,
@@ -1043,8 +1046,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   on the page holds both charts' numbers. With no filter they show every election in this dataset; a
   reader can narrow the charts and the table together to a range of years, or to the years with a
   popular vote in this dataset. The second chart writes the numbers up its side short ("150M" is 150
-  million); its hover and the table give them in full. A state's own electors appointed are on that
-  state's page (chart C7).
+  million); its hover and the table give them in full. A state's own electors appointed and total
+  popular vote are on that state's page (charts C7 and C10).
 - **Precise:**
   - C4 and C5 are in `CHARTS` on `/elections/over-time`, ids `c4` and `c5`, sharing one companion
     table. They sit under the page's heading (`HEADING`), after the section links and the page's
@@ -1065,9 +1068,9 @@ articles and announcements). Every rule binds all three unless the rule states a
     and D107), with a tick every 4, 8, 10, 20 or 40 years, the smallest of those that goes into the
     span of years shown at most five times, so the axis writes at most five ticks (every 40 years
     over every served year). The value axis runs up the side: C4's ticks are full numbers; C5's are
-    short (d3's SI form with trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"), the one exception
-    to the chart rule (C5's `CHARTS` row, `short_value_ticks`,
-    #596, D110), and with no bar drawn C5 writes no value ticks. Their shared left margin is sized
+    short (d3's SI form with trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"), one of the chart
+    rule's two exceptions, with C10 (C5's `CHARTS` row, `short_value_ticks`, #596, D110; C10's,
+    #582, D113), and with no bar drawn C5 writes no value ticks. Their shared left margin is sized
     for C5's short ticks. C5's band is vertical, spanning the years outside the window, and its
     label sits inside the band at its top when the band spans at least half the year axis, and
     otherwise above the plot at the band's left edge (only a year filter leaves it that narrow;
@@ -1098,7 +1101,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   - electoral votes cast or counted;
   - turnout;
   - a candidate's popular votes;
-  - one state's figures (C7, on the state's page, has its electors appointed);
+  - one state's figures (C7 and C10, on the state's page);
   - "no popular vote", which the band is not;
   - a missing figure, which a C4 zero-allotment marker is not;
   - a zero, which a C5 marker is not.
@@ -1342,7 +1345,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   of C1's marker, `labels.C1_NO_FIGURE_HOVER`); in C1, the label of the marker drawn in place of a
   popular-vote bar, `labels.C1_NO_FIGURE`, and the caption sentence `labels.C1_NO_FIGURE_NOTE`,
   shown only when such a marker is drawn; `labels.NO_NATIONAL_TOTAL` and `labels.C5_NO_TOTAL`
-  (the C4/C5 table and C5). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and crossbar's marker hovers.
+  (the C4/C5 table and C5); `labels.NO_STATE_TOTAL` (C10's table) and `labels.C5_NO_TOTAL`
+  (C10's key, through `labels.C10_MARKER_LABELS`, #582, which also gives it to a total with no
+  status, *Not in this dataset*). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and crossbar's marker hovers.
 - **Source:** `EcPvRow` docstring and `pv_status` description; `NationalSummaryRow` docstring;
   `.claude/specs/backlog-dashboard.md`, E9-S3 null table;
   `posts/2026-08-18-presidential-elections-are-messy.md`, "One empty cell, five different
@@ -1375,7 +1380,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   borders cell the caption adds `labels.C3_PLAIN_MIXED`. In C4,
   `labels.NOT_IN_DATASET` names, in the chart's key, the series of markers drawn in place of a bar
   for a null allotment, with `labels.C4_NO_FIGURE_NOTE` in the caption; its hover
-  (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell. In C2 (#564): `labels.C2_NO_FIGURE`, C2's one open-circle key entry for any missing share or score, and `labels.C2_NO_SHARE_NOTE`.
+  (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell. In C2 (#564): `labels.C2_NO_FIGURE`, C2's one open-circle key entry for any missing share or score, and `labels.C2_NO_SHARE_NOTE`. In C10 (#582),
+  `labels.NOT_IN_DATASET` is the table cell, and its hover's, for a total with no status to
+  explain it; the chart's key names that marker `labels.C5_NO_TOTAL`, the same entry as a
+  missing total inside the window.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -1448,7 +1456,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   and `labels.C5_AFTER_BAND`, above the plot, with `labels.C5_BEFORE_NOTE` and
   `labels.C5_AFTER_NOTE`. In C2 (#564): the bands (`labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`,
   reused), `labels.C2_BEFORE_NOTE`, `labels.C5_AFTER_NOTE`, and `labels.NOT_APPLICABLE` in its four
-  appended columns.
+  appended columns. In C10 (#582): the bands `labels.C5_BEFORE_BAND` / `labels.C5_AFTER_BAND`, with
+  `labels.C5_BEFORE_NOTE` and `labels.C5_AFTER_NOTE`. Its table names the window's side
+  (`labels.BEFORE_WINDOW`, `labels.AFTER_WINDOW`), as T4 does.
 - **Source:** `ElectionSummary` docstring; `labels.in_pv_window`; `.claude/specs/backlog-dashboard.md`,
   E9-S3, "Election panel"; wording: owner decision, 2026-10-10, #348.
 - **Not:** "No" (a false flip). A null inside the window, which names no cause.
@@ -1642,10 +1652,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `FILTER_SENTENCE` names it "popular-vote status". On the API's `/docs` page, the
   `EcPvRow.pv_status` and `ElectionStateRow.pv_status` field descriptions in
   `src/usvote/api/models.py`. The hover line in `labels.C4_STATE_HOVER` (C7) and the C7 key
-  entry `labels.C4_NO_ELECTORS_TOOK_NO_PART`. `labels.C5_LEGISLATURE` and
-  `labels.C5_TOOK_NO_PART` are not shown: C5 draws all states only since #562, so
-  `labels.national_total` never returns the cells their key entries map from. They are kept,
-  unreachable, for C10 (#582) to reuse (D107, Residuals).
+  entry `labels.C4_NO_ELECTORS_TOOK_NO_PART`; the hover line in `labels.C10_HOVER` (C10) and
+  C10's key entries `labels.C5_LEGISLATURE` and `labels.C5_TOOK_NO_PART` (#582). C5 draws all
+  states only since #562, so `labels.national_total` never returns the cells those two key
+  entries map from there.
 - **Source:** `src/usvote/pv/status.py`, `PV_STATUS_VALUES` and its comment; `EcPvRow.pv_status`;
   D024 §4; D048 §2–3; `posts/2026-08-18-presidential-elections-are-messy.md`, "How the record
   keeps them apart" (the three values as readers see them: held, the legislature chose the
@@ -1856,7 +1866,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/state/<usps>` (T4), and its people per electoral vote, `/state/<usps>/per-capita` (T7); an
   election outside the years this dataset covers (*Years covered*) is on neither.
 - **Shown as:** `LABELS["state"]`; `labels.C4_TITLE_STATE` (C7) and `labels.FIRST_ELECTION_NOTE`
-  (C7); the state filter on `/election/<year>/states`, named by that page's `FILTER_SENTENCE`
+  (C7); `labels.C10_TITLE_STATE` and `labels.C10_FIRST_ELECTION_NOTE` (C10, #582); the state filter on `/election/<year>/states`, named by that page's `FILTER_SENTENCE`
   (`pages/election_states.py`), and on `/election/<year>/per-capita`, named by its `FILTER_SENTENCE`
   (`pages/election_per_capita.py`), both with the placeholder "All states" (a literal in `_controls`
   in `pages/election_states.py` and in `_control` in `pages/election_per_capita.py`), and on
@@ -1877,14 +1887,15 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### State pages (state history, people per electoral vote)
 - **Plain:** Each state in this dataset has two pages. The state history shows the state's
   electoral votes for each candidate in every election this dataset holds for it, with the popular
-  vote where the dataset has it; a chart of the state's electors appointed in each election comes
-  first, and the filters narrow only the table of each candidate's electoral votes, by year,
+  vote where the dataset has it; charts of the state's electors appointed and of its total popular
+  vote in each election come first, and the filters narrow only the table of each candidate's electoral votes, by year,
   candidate or popular-vote status.
   People per electoral vote shows how many people the state's electoral votes stood for in each of
   those elections; a reader can narrow it by year. Links near the top of each page go between the
   two, and the page being read is marked. Following one keeps the years chosen.
 - **Precise:** Two registered pages: `/state/<usps>`, the state history (chart C7 and its
-  companion table `state-electors`, which no filter reaches; then T4, its three filters
+  companion table `state-electors`, then chart C10 and its companion table `state-popular-total`,
+  neither of which any filter reaches; then T4, its three filters
   `year_from`/`year_to`, `candidate` and `pv_status`, T4's party notes, and the provenance footer),
   filled from `/v1/states/{usps}`; and `/state/<usps>/per-capita` (T7 and the year range only),
   filled from `/v1/states/{usps}/per-capita` and registered with `order=` ahead of the history
@@ -1900,8 +1911,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   their landmark name `labels.STATE_SECTIONS_LABEL` (read by assistive technology, not shown); in
   `pages/state.py`, the history page's heading (the state's name as served, from `render`; on the
   degraded state "State history", a literal in `layout`), `LEDE` (success and degraded),
-  `FILTER_SENTENCE` (success only; both reworded by #560), the section headings `C7_HEADING`,
-  `C7_TABLE_HEADING` and `HISTORY_TABLE_HEADING`, C7's `C7_UNAVAILABLE`, its title (`title`: the
+  `FILTER_SENTENCE` (success only; both reworded by #560, and `LEDE` again by #582), the section
+  headings `C7_HEADING`, `C7_TABLE_HEADING`, `C10_HEADING`, `C10_TABLE_HEADING` and
+  `HISTORY_TABLE_HEADING`, C7's `C7_UNAVAILABLE`, C10's `C10_UNAVAILABLE`, its title (`title`: the
   code, then "state history", then the site title once the code is checked, and before then "State
   history" and the site title; never the state's name), its `description`, and T4's download, named
   "this state's history" in the file `state-{usps}-history.csv`; in `pages/state_per_capita.py`,
@@ -1965,8 +1977,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   `EcPvRow.state_popular_total` field descriptions and the `ElectionStateRow` model docstring in
   `src/usvote/api/models.py`; the `/v1/elections/states` summary and docstring in
   `src/usvote/api/routes.py`; and the API description's **Persons per electoral vote.** paragraph
-  (`_DESCRIPTION_TEMPLATE` in `src/usvote/api/app.py`). The dashboard shows it nowhere since
-  #562 (D107), which retired C5's one-state mode; #582 plans it for the state history page.
+  (`_DESCRIPTION_TEMPLATE` in `src/usvote/api/app.py`). On the dashboard,
+  `LABELS["state_popular_total"]` and chart C10 with its companion table on `/state/<usps>`
+  (*State's total popular vote over time*), its null-inside-the-window cell
+  `labels.NO_STATE_TOTAL` (#582; C5's one-state mode showed it until #562).
 - **Source:** `EcPvRow.state_popular_total`, `ElectionStateRow.state_popular_total`;
   `_aggregate_fusion_lines`, `assert_totals_reconcile` and `assert_totals_not_exceeded` in
   `src/usvote/mit/transform.py`; `docs/api-snapshot.md` (`national_pv_denominator`); #428 plan
@@ -1975,6 +1989,52 @@ articles and announcements). Every rule binds all three unless the rule states a
   in the state. Zero where a total is missing.
 - **Status:** settled; wording pending (#379: the `EcPvRow.state_popular_total` description
   writes "None" and "PV")
+
+### State's total popular vote over time (chart C10)
+- **Plain:** A chart on each state's history page, below the chart of its electors appointed,
+  with election years running left to right; each bar is the state's total popular vote in one
+  election. The shaded years are those before this dataset's popular-vote figures begin (and any
+  after they end); shading does not mean no popular vote was held. Where an election has no
+  total to draw, a marker stands in the bar's place, never a bar of zero length, and the chart's
+  key says why: the legislature chose the electors, the state took no part, or this dataset has
+  no total. A table below it holds its numbers, with its own download. The page's filters narrow
+  only the table of each candidate's electoral votes, never this chart or its table.
+- **Precise:** `CHARTS["C10"]` on `/state/<usps>`, id `c10`, in its own card after C7's;
+  companion table `state-popular-total` (fields `year`, `state_popular_total`, `pv_status`; CSV
+  extra `state_usps`). One point per served year from the state's first, collapsed from
+  `/v1/states/{usps}` rows (`popular_totals` in `pages/state.py`): a year's total is read from
+  every row except one whose `popular_votes` and `state_popular_total` are both null (a row
+  without a candidate figure carries no state total, per *State's total popular vote*); every
+  other row must carry a total, and those must agree (D113(b), as amended). A fault in a total,
+  or in the popular-vote window where T4 can still compare it, shows the section's heading and
+  `C10_UNAVAILABLE` only, while C7, T4, the filters and the success marker stay; a fault in what
+  C7 reads too (a year missing after the state's first, the state's name with no text,
+  `pv_status`) degrades both; one T4 cannot read degrades the page (D113(c), as amended). Bars, band, markers
+  and year axis are C5's (D100(d), D104), drawn by `over_time.total_figure` (D113(d)); band
+  bounds from `meta.provenance.coverage`. Its value axis writes its numbers short, as C5's does
+  (D113(e)). Its plot shares C7's left and right margin (`over_time.STATE_MARGIN`, D113(f)).
+  Never filtered (D093(a)). Bars `--chart-pv`; key above the plot. Values equal N2's
+  `state_popular_total` for the state.
+- **Shown as:** in `pages/state.py`, `C10_HEADING`, `C10_TABLE_HEADING`, `C10_UNAVAILABLE` and
+  the download "this state's total popular vote in each election"
+  (`state-<USPS>-total-popular-vote.csv`); in `labels.py`, `C10_TITLE_STATE` (else
+  `C10_TITLE_THIS_STATE`), `C5_VALUE_AXIS`, `C10_HOVER`, the bands `C5_BEFORE_BAND` /
+  `C5_AFTER_BAND`, the key entries through `C10_MARKER_LABELS` (`C5_LEGISLATURE`,
+  `C5_TOOK_NO_PART`, `C5_NO_TOTAL`, `UNRECOGNIZED`; `C5_NO_TOTAL` is the one entry for a
+  table cell of either `NO_STATE_TOTAL` or `NOT_IN_DATASET`; C5 draws the same entry for its own
+  missing total), the caption sentences
+  `C5_BASIS`, `C10_SHORT_TICKS_NOTE`, `C5_BEFORE_NOTE`, `C5_AFTER_NOTE`, `C5_MARKER_NOTE`,
+  `C10_FIRST_ELECTION_NOTE` (else `C10_FIRST_ELECTION_NOTE_THIS_STATE`) and `C7_FILTERS_NOTE`;
+  the table's cells through `labels.popular_votes(..., no_figure=NO_STATE_TOTAL)` and
+  `labels.pv_status`, its notes `C5_BASIS` and `OVER_TIME_WINDOW_NOTE`; `LABELS["year"]`; then
+  `labels.CHART_TABLE_POINTER`.
+- **Source:** #582 ACs; D091, D093(a), D096(d), D100(c)(d), D104, D106, D113;
+  `EcPvRow.state_popular_total`, `EcPvRow.pv_status`, `EcPvRow.popular_votes`; reader wording:
+  `ba` spec for #582 (C5's one-state wording approved at #436), approved by the owner at its
+  plan gate (2026-11-21).
+- **Not:** turnout; a candidate's popular votes; the national total (C5); a zero, which no
+  marker is; "no popular vote", which the band is not; anything the page's filters narrow.
+- **Status:** settled.
 
 ### Theme choice (Dark, Auto or Light)
 - **Plain:** How the site looks: dark pages, light pages, or Auto, which follows the light or
@@ -2154,10 +2214,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
   value's help text (set by `labels.cell`). `labels.metric_count` writes it for a count on
-  `/elections/majority`. In C2, C4, C5 and C7, `labels.UNRECOGNIZED`
+  `/elections/majority`. In C2, C4, C5, C7 and C10, `labels.UNRECOGNIZED`
   names, in the chart's key, the series of markers drawn in place of a point or bar for such a
-  value (C5 through `labels.C5_MARKER_LABELS`), and
-  `labels.C4_HOVER`, `labels.C4_STATE_HOVER` and `labels.C5_HOVER` write
+  value (C5 and C10 through `labels.C5_MARKER_LABELS` and `labels.C10_MARKER_LABELS`), and
+  `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C10_HOVER` write
   it with `labels.UNRECOGNIZED_NOTE`.
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
@@ -2214,6 +2274,7 @@ Every `LABELS` key and the entry that defines it.
 | `electoral_count_status_reason` | Count status |
 | `pv_status` | Popular vote held in this state |
 | `popular_votes` | Popular votes |
+| `state_popular_total` | State's total popular vote |
 | `national_electoral_votes` | Electoral votes cast |
 | `national_electoral_votes_counted` | Electoral votes counted |
 | `national_electoral_denominator` | Appointed electors |
@@ -2269,7 +2330,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "in force", "governs", "apportionment" | used; redistribute House seats | `LABELS["governing_census_year"]`, `labels.GOVERNING_CENSUS_NOTE` | Legal register. Do not swap them for "set the state's electoral votes" when describing the census used: that is false for a state at the elections between its admission and the first redistribution of House seats that included it, for California 1852–1860, and for DC from 1964 (`docs/governing-census.md`). |
 | "footprint" | borders | `LABELS["boundary_basis"]`, `labels.BOUNDARY_BASIS`, `labels.BOUNDARY_NOTE` | Survey jargon. |
 | "the Archives" | the National Archives | `LABELS["electoral_count_status_reason"]` | A reader may not know which archive. |
-| "the selected state" on a state's own page | this state, or the state's name | `labels.C7_TITLE_THIS_STATE`, `labels.FIRST_ELECTION_NOTE_THIS_STATE` | The state comes from the page address; no one selected it. |
+| "the selected state" on a state's own page | this state, or the state's name | `labels.C7_TITLE_THIS_STATE`, `labels.FIRST_ELECTION_NOTE_THIS_STATE`, `labels.C10_TITLE_THIS_STATE`, `labels.C10_FIRST_ELECTION_NOTE_THIS_STATE` | The state comes from the page address; no one selected it. |
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
@@ -2289,7 +2350,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | an arrow character ("←", "→", "«", "»") typed into a link's text | a drawn chevron beside the text, with the words unchanged | a rule (`.neighbor-nav` in `dashboard/explore/assets/style.css`) | A typed arrow is read aloud ("left arrow") and becomes part of the link's name; the words already say which way the link goes. |
 | "win margin", "winning margin" | margin | `labels.METRIC_LABELS`, `LABELS["ec_margin"]`, `LABELS["pv_margin"]` | A margin is first place's lead over second under one method; in 1824 the Electoral College leader did not win. |
 | "mean" in reader text | average | `labels.METRIC_LABELS` | The plain word; "mean" stays in code and D097. |
-| "turnout" | "total popular vote" | `labels.C5_*` | Turnout is a share of eligible voters, which this dataset doesn't have. |
+| "turnout" | "total popular vote" | `labels.C5_*`, `labels.C10_*` | Turnout is a share of eligible voters, which this dataset doesn't have. |
 | "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_NOTE`, `labels.C2_BEFORE_NOTE` | The band label, `labels.C5_BEFORE_BAND`, says "no popular-vote figures in this dataset" and leaves the year to these notes (#593). |
 
 ## Open decisions
