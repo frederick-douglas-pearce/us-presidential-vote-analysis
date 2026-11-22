@@ -28,7 +28,6 @@ The first table, and the one that sets the conventions later tables reuse (#306)
 
 from __future__ import annotations
 
-import functools
 from typing import Any
 
 import dash
@@ -80,8 +79,9 @@ METRIC_IDS = {
     "ec_margin_mean": "elections-ec-margin-mean",
     "pv_margin_mean": "elections-pv-margin-mean",
 }
-#: The averages, in the order they show.
-MEANS = ("ec_margin_mean", "pv_margin_mean")
+#: The averages, in the order they show: the page's means, read off ``METRIC_IDS``
+#: by kind (#600's cr.9: ``METRIC_IDS`` is each page's one per-key table).
+MEANS = tuple(key for key in METRIC_IDS if metrics.METRICS[key].kind == "mean")
 #: The averages when N1 cannot be read or is malformed; the count still shows (ba spec,
 #: #437). Never ``UNAVAILABLE_MESSAGE``'s wording: the D070(b) guard's success run
 #: asserts that absent from every page.
@@ -182,19 +182,11 @@ def _averages(
         return [
             html.P(METRICS_UNAVAILABLE, id=METRICS_UNAVAILABLE_ID, className="note")
         ]
-    windows = {"ec_margin_mean": None, "pv_margin_mean": pv_window}
     entries: list[Any] = []
     for key in MEANS:
-        value, over = labels.metric_mean(means[key], years, windows[key])
-        children: Any = (
-            value
-            if over is None
-            else [html.Span(value, className="metric-value"), html.Span(over)]
-        )
-        entries += [
-            html.Dt(labels.METRIC_LABELS[key]),
-            labels.cell(children, functools.partial(html.Dd, id=METRIC_IDS[key])),
-        ]
+        window = pv_window if metrics.METRICS[key].reads_pv_window else None
+        value, over = labels.metric_mean(means[key], years, window)
+        entries += components.metric_entry(key, METRIC_IDS[key], value, over)
     notes = [html.P(labels.MARGIN_NOTE, className="note")]
     ec, pv = (means[key] for key in MEANS)
     # The note names the popular-vote window as the reason the two differ, so it shows

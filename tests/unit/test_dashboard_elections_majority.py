@@ -1715,7 +1715,7 @@ class TestMajorityCounts:
             elections_view.parse_filters({"year_from": "1960", "year_to": "1972"}),
         )
         assert count_text(early, PV_COUNT) == (
-            labels.METRIC_NO_COUNT_PV_YEARS.format(first=1980, last=2016)
+            labels.METRIC_NO_FIGURE_PV_YEARS.format(first=1980, last=2016)
         )
 
     def test_every_flip_null_in_the_window_is_no_figure_and_no_note(self) -> None:
@@ -1729,7 +1729,7 @@ class TestMajorityCounts:
             }
         )
         tree = filtered_c2({"year_from": "2000", "year_to": "2000"}, summary)
-        assert count_text(tree, PV_COUNT) == labels.METRIC_NO_COUNT_NULL_PV
+        assert count_text(tree, PV_COUNT) == labels.METRIC_NO_FIGURE["pv_flip_count"]
         assert notes_in(tree) == []
 
     @pytest.mark.parametrize(
@@ -1788,18 +1788,18 @@ class TestMetricCountWording:
             (
                 [1900],
                 (1976, 2024),
-                labels.METRIC_NO_COUNT_PV_YEARS.format(first=1976, last=2024),
+                labels.METRIC_NO_FIGURE_PV_YEARS.format(first=1976, last=2024),
             ),
             (
                 [2028],
                 (1976, 2024),
-                labels.METRIC_NO_COUNT_PV_YEARS.format(first=1976, last=2024),
+                labels.METRIC_NO_FIGURE_PV_YEARS.format(first=1976, last=2024),
             ),
-            ([1900, 1980], (1976, 2024), labels.METRIC_NO_COUNT_NULL_PV),
-            ([1900], None, labels.METRIC_NO_COUNT_NULL_EC),
+            ([1900, 1980], (1976, 2024), labels.METRIC_NO_FIGURE["pv_flip_count"]),
+            ([1900], None, labels.METRIC_NO_FIGURE["ec_no_majority_count"]),
             # Both bounds are inside the window (ge.4).
-            ([1976], (1976, 2024), labels.METRIC_NO_COUNT_NULL_PV),
-            ([2024], (1976, 2024), labels.METRIC_NO_COUNT_NULL_PV),
+            ([1976], (1976, 2024), labels.METRIC_NO_FIGURE["pv_flip_count"]),
+            ([2024], (1976, 2024), labels.METRIC_NO_FIGURE["pv_flip_count"]),
         ],
     )
     def test_no_count_is_worded_by_its_cause(
@@ -1808,7 +1808,9 @@ class TestMetricCountWording:
         from explore import metrics
 
         no_figure = (
-            labels.METRIC_NO_COUNT_NULL_PV if window else labels.METRIC_NO_COUNT_NULL_EC
+            labels.METRIC_NO_FIGURE["pv_flip_count"]
+            if window
+            else labels.METRIC_NO_FIGURE["ec_no_majority_count"]
         )
         assert labels.metric_count(metrics.NO_COUNT, years, no_figure, window) == (
             text,

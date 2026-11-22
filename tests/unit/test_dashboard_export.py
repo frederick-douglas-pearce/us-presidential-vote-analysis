@@ -2383,8 +2383,13 @@ UNRECOGNIZED_CELLS = {
         # One per average whose field a doctored item holds (#437).
         "elections-metrics": len(AVERAGED_FIELDS),
     },
-    # The first year's allotment and 2016's national total (#436).
-    "/elections/over-time": {"elections-over-time-table": 2},
+    # The first year's allotment and 2016's national total (#436); each makes its
+    # field's two figures read it (#600, D114: a selection over a value its cell
+    # cannot show is unrecognized).
+    "/elections/over-time": {
+        "elections-over-time-table": 2,
+        "elections-over-time-metrics": 4,
+    },
     # One per doctored field, ``ec_determinative`` and the two winners from the year's
     # item (#434, #564).
     "/elections/majority": {
@@ -2411,7 +2416,11 @@ UNRECOGNIZED_CELLS = {
         "state-electors": 2,
         "state-popular-total": 2,
     },
-    "/state/<usps>/per-capita": {"state-per-capita": len(PER_CAPITA_ROW_FIELDS)},
+    # The doctored ratio makes both figures read it (#600, D114: one selection).
+    "/state/<usps>/per-capita": {
+        "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
+        "state-per-capita-metrics": 2,
+    },
     "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 1},
 }
 
@@ -2597,7 +2606,13 @@ class TestNoRawValues:
                 d.id: d
                 for d in of_type(tree, "Div")
                 if getattr(d, "id", None)
-                in ("election-panel", "elections-metrics", "majority-metrics")
+                in (
+                    "election-panel",
+                    "elections-metrics",
+                    "majority-metrics",
+                    "elections-over-time-metrics",
+                    "state-per-capita-metrics",
+                )
             },
         }
         assert set(UNRECOGNIZED_CELLS[key]) >= on_page

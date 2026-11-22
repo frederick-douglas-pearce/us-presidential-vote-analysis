@@ -23,6 +23,7 @@ from tests.e2e.dashboard_pages import (
     RESOURCE_ERROR,
     UNAVAILABLE,
     WIDE_WIDTHS,
+    assert_figures_inside,
     assert_hover_names_year,
     assert_layout_holds,
     assert_rendered,
@@ -380,3 +381,28 @@ def test_a_filter_leaving_no_year_shows_the_note(page: Page) -> None:
         labels.NO_ELECTIONS_MATCH
     )
     expect(page.locator(f"{C4}, {C5}, #elections-over-time-table")).to_have_count(0)
+
+
+# --- the headline figures (#600, D112(d)) ----------------------------------------------
+
+FIGURES = "#elections-over-time-metrics"
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_the_figures_read_inside_phone_width(page: Page, width: int) -> None:
+    """AC 360 px (#600): the four figures, their labels and the window note sit inside
+    the width with no sideways scroll in Light, Dark and System, read the recording's
+    hand counts, and sit between the filters and C4."""
+    page.set_viewport_size({"width": width, "height": 844})
+    open_over_time(page, width=width)
+    expect(page.locator("#elections-over-time-ec-appointed-first")).to_have_text(
+        "261 in 1824, among 51 elections with a figure (1824–2024)"
+    )
+    expect(page.locator("#elections-over-time-pv-total-latest")).to_have_text(
+        "155,410,204 in 2024, among 13 elections with a figure (1976–2024)"
+    )
+    assert_figures_inside(page, FIGURES, width, 9)
+    figures, chart = rect(page, FIGURES), rect(page, C4)
+    assert figures["bottom"] <= chart["top"], (figures, chart)
+

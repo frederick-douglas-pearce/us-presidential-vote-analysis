@@ -1154,3 +1154,140 @@ class TestOverTimeReviewGuards:
             tree = MOD["render"](copy.deepcopy(BODY), copy.deepcopy(summary), pairs)
             assert find(tree, MOD["OVER_TIME_UNAVAILABLE_ID"]) is not None, pairs
             assert find(tree, C4) is None and find(tree, C5) is None, pairs
+
+
+# --- the headline figures (#600, D112(d), D114) ----------------------------------------
+
+FIGURES = MOD["METRICS_ID"]
+FIGURE_IDS: dict[str, str] = MOD["METRIC_IDS"]
+
+
+def figure_text(tree: Any, key: str) -> str:
+    """A figure's ``dd`` text, its value and the rest run together."""
+    dd = find(tree, FIGURE_IDS[key])
+    assert dd is not None, key
+    return "".join(texts(dd))
+
+
+def figure_notes(tree: Any) -> list[str]:
+    block = find(tree, FIGURES)
+    return ["".join(texts(p)) for p in of_type(block, "P")]
+
+
+class TestOverTimeFigures:
+    def test_the_hand_counts(self) -> None:
+        # #569's plan recordings, as the companion table writes each value.
+        tree = render_over_time()
+        span = "among 51 elections with a figure (1824–2024)"
+        pv = "among 13 elections with a figure (1976–2024)"
+        assert {key: figure_text(tree, key) for key in FIGURE_IDS} == {
+            "ec_appointed_first": f"261 in 1824, {span}",
+            "ec_appointed_latest": f"538 in 2024, {span}",
+            "pv_total_first": f"81,601,344 in 1976, {pv}",
+            "pv_total_latest": f"155,410,204 in 2024, {pv}",
+        }
+        assert figure_notes(tree) == [
+            labels.METRIC_PV_TOTAL_WINDOW_NOTE.format(first=PV_MIN, last=PV_MAX)
+        ]
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            {},
+            {"year_from": "1900", "year_to": "1990"},
+            {"pv": "1"},
+            {"year_from": "2000"},
+        ],
+    )
+    def test_each_figure_is_its_year_s_table_cell(self, query: dict[str, str]) -> None:
+        # D097(a)'s reconcile clause: the figure's value is the cell the table shows.
+        tree = filtered_over_time(query)
+        rows = {int(row[0]): row for row in over_time_rows(tree)}
+        for key, column in (
+            ("ec_appointed_first", 1),
+            ("ec_appointed_latest", 1),
+            ("pv_total_first", 2),
+            ("pv_total_latest", 2),
+        ):
+            text = figure_text(tree, key)
+            if text.startswith("No figure"):
+                continue
+            value, year = re.fullmatch(r"(\S+) in (\d{4}),.*", text).groups()  # type: ignore[union-attr]
+            assert rows[int(year)][column] == value, (query, key)
+
+    def test_the_filters_set_the_years_and_the_window_wording(self) -> None:
+        tree = filtered_over_time({"year_from": "1900", "year_to": "1960"})
+        assert figure_text(tree, "ec_appointed_first").startswith(
+            "447 in 1900, among 16"
+        )
+        window = labels.METRIC_NO_FIGURE_PV_YEARS.format(first=PV_MIN, last=PV_MAX)
+        assert figure_text(tree, "pv_total_first") == window
+        assert figure_text(tree, "pv_total_latest") == window
+        # No total shows a number, so no window note.
+        assert figure_notes(tree) == []
+
+    def test_the_popular_vote_filter_moves_the_earliest_electors(self) -> None:
+        tree = filtered_over_time({"pv": "1"})
+        assert figure_text(tree, "ec_appointed_first").startswith(
+            "538 in 1976, among 13"
+        )
+
+    def test_one_year_keeps_every_figure_and_shows_one_value(self) -> None:
+        tree = filtered_over_time({"year_from": "2000", "year_to": "2000"})
+        assert all(find(tree, ident) is not None for ident in FIGURE_IDS.values())
+        assert figure_text(tree, "ec_appointed_first") == (
+            "538 in 2000, the only election shown with a figure"
+        )
+        assert figure_text(tree, "ec_appointed_latest") == (
+            labels.METRIC_SELECT_SAME.format(other="earliest", year=2000)
+        )
+
+    def test_they_sit_in_the_charts_card_after_the_filters_and_before_c4(self) -> None:
+        tree = render_over_time()
+        in_one_card(tree, FIGURES)
+        ids = ids_of(tree)
+        assert ids.index(elections_view.YEARS_ID) < ids.index(FIGURES) < ids.index(C4)
+
+    def test_no_year_shown_shows_no_figure(self) -> None:
+        tree = filtered_over_time({"pv": "1", "year_from": "1824", "year_to": "1960"})
+        assert find(tree, FIGURES) is None
+
+    @pytest.mark.parametrize("summary", [None, "malformed"])
+    def test_a_failed_or_malformed_n1_removes_them_with_the_section(
+        self, summary: Any
+    ) -> None:
+        if summary == "malformed":
+            summary = copy.deepcopy(SUMMARY)
+            summary["data"][0]["national_pv_denominator"] = 5  # two values in 1824
+            tree = render_over_time(summary=summary)
+        else:
+            tree = MOD["render"](copy.deepcopy(BODY), None)
+        assert find(tree, FIGURES) is None
+        assert find(tree, MOD["OVER_TIME_UNAVAILABLE_ID"]) is not None
+
+    def test_a_value_its_cell_cannot_show_makes_that_field_unrecognized(self) -> None:
+        # Architect I1 (D114): a float allotment, which the table reads Unrecognized
+        # value, makes both electors figures unrecognized; the totals and charts stay.
+        summary = copy.deepcopy(SUMMARY)
+        item = next(i for i in summary["elections"] if i["year"] == 1900)
+        item["electoral_denominator"] = 447.0
+        tree = render_over_time(summary=summary)
+        for key in ("ec_appointed_first", "ec_appointed_latest"):
+            dd = find(tree, FIGURE_IDS[key])
+            assert figure_text(tree, key) == labels.UNRECOGNIZED
+            assert dd.title == labels.UNRECOGNIZED_NOTE
+        assert figure_text(tree, "pv_total_first").startswith("81,601,344 in 1976")
+        assert find(tree, C4) is not None and find(tree, OVER_TIME) is not None
+
+    def test_og_url_reopens_the_same_figures(self) -> None:
+        from explore import app as appmod
+
+        query = "year_from=1980&year_to=2010&pv=1"
+        resolution = appmod.resolve("/elections/over-time", query, None)
+        assert resolution.og_url is not None
+        normal = urllib.parse.urlsplit(resolution.og_url).query
+        raw, reopened = (
+            filtered_over_time(dict(urllib.parse.parse_qsl(q))) for q in (query, normal)
+        )
+        for key in FIGURE_IDS:
+            assert figure_text(raw, key) == figure_text(reopened, key), key

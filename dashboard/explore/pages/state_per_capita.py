@@ -20,7 +20,7 @@ from typing import Any
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, query, state_view
+from explore import api, components, export, labels, metrics, query, state_view
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filter leaves in T7.
@@ -57,6 +57,17 @@ LEDE = (
     "dataset holds for it: the state's population divided by its electors appointed."
 )
 FILTER_SENTENCE = "Narrow the table to a range of years."
+
+#: The headline figures (#600, D112(d)): the block and each figure's value, by metric
+#: key, in display order, the page's one per-key table (#600's cr.9); DOM ids are
+#: stable and never renamed (D097(g)).
+METRICS_ID = "state-per-capita-metrics"
+METRIC_IDS = {
+    "state_per_capita_lowest": "state-per-capita-lowest",
+    "state_per_capita_highest": "state-per-capita-highest",
+}
+#: The served field the figures select over, and T7's column for it.
+FIGURE_FIELD = "persons_per_electoral_vote"
 
 VALIDATE: api.Validate = (api.ROSTER_PATH, state_view.on_roster)
 
@@ -152,15 +163,39 @@ def _controls(chosen: tuple[int, int], span: tuple[int, int]) -> html.Div:
     )
 
 
-def _row(row: dict[str, Any]) -> html.Tr:
+def _row(row: dict[str, Any], strings: dict[str, str]) -> html.Tr:
     year = row["year"]
     # A year links to its one-election view (#307), as in T4.
     return html.Tr(
         [
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
-            *labels.per_capita_cells(row),
+            *labels.per_capita_cells(row, strings),
         ]
     )
+
+
+def _figures(shown: list[dict[str, Any]], strings: list[dict[str, str]]) -> html.Div:
+    """The state's lowest and highest people per electoral vote over the rows T7
+    shows (#600, D112(d), (g)), as a ``dl``. One selection over the rows' served values,
+    each shown as T7's own cell (``strings``, :func:`labels.per_capita_strings` per
+    row), so the figures and the table cannot disagree. A value no figure can show
+    makes both figures read unrecognized, T7 kept; the page's one read is their only
+    input, so a failed read degrades the page (D114)."""
+    years = [row["year"] for row in shown]
+    selection = metrics.select(
+        (row["year"], row[FIGURE_FIELD], cells[FIGURE_FIELD])
+        for row, cells in zip(shown, strings, strict=True)
+    )
+    entries: list[Any] = []
+    for key, ident in METRIC_IDS.items():
+        metric = metrics.METRICS[key]
+        if metric.kind != "select" or metric.pick is None:
+            raise TypeError(f"{key} is no select")
+        value, rest = labels.metric_select(
+            selection, metric.pick, years, labels.METRIC_NO_FIGURE[key]
+        )
+        entries += components.metric_entry(key, ident, value, rest)
+    return html.Div(html.Dl(entries, className="metrics"), id=METRICS_ID)
 
 
 def _download(
@@ -197,6 +232,8 @@ def render(
     chosen = query.year_range(pairs, *span)
     search = state_view.year_search(*chosen, span)
     shown = [r for r in rows if chosen[0] <= r["year"] <= chosen[1]]
+    # Each shown row's cells, worded once and read by T7 and the figures (#600).
+    strings = {id(row): labels.per_capita_strings(row) for row in shown}
     content = html.Div(
         [
             state_view.section_nav(usps, state_view.PER_CAPITA, search),
@@ -205,12 +242,15 @@ def render(
             components.card(
                 [
                     _controls(chosen, span),
+                    # The headline figures over the rows shown (#600): after the year
+                    # control and before the count line.
+                    _figures(shown, [strings[id(row)] for row in shown]),
                     html.P(
                         f"Showing {len(shown)} of {len(rows)} rows", className="count"
                     ),
                     *components.table(
                         shown,
-                        _row,
+                        lambda r: _row(r, strings[id(r)]),
                         PER_CAPITA_FIELDS,
                         PER_CAPITA_TABLE_ID,
                         _download(usps, per_capita, search),

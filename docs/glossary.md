@@ -180,7 +180,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   on the state history: its bars, `labels.C4_TITLE_STATE` or `labels.C7_TITLE_THIS_STATE`,
   `labels.C4_VALUE_AXIS`, the hover line "Electors appointed" (`labels.C4_STATE_HOVER`), the key
   entries, `labels.C4_BASIS` and `labels.C4_ZERO_NOTE`, and `LABELS["state_electoral_votes"]` in its
-  companion table.
+  companion table. On `/elections/over-time`, the figures `labels.METRIC_LABELS["ec_appointed_first"]` and `["ec_appointed_latest"]` (*Earliest and latest electors appointed*).
 - **Source:** `EcPvRow.state_electoral_votes`, `PerCapitaRow.state_electoral_votes` and
   `NationalSummaryRow.national_electoral_denominator` in `src/usvote/api/models.py`;
   `ElectionSummary.electoral_denominator`;
@@ -572,6 +572,22 @@ articles and announcements). Every rule binds all three unless the rule states a
   count of elections shown and the rest of the page still show.
 - **Status:** settled
 
+### Earliest and latest electors appointed (figures)
+- **Plain:** On the page of electors appointed and the total popular vote over time: the electors appointed across all states in the earliest and in the latest election shown, each with its year, and how many elections they are taken from.
+- **Precise:** `metrics.select` over (year, `electoral_denominator`) pairs from the `elections` items of `/v1/elections/summary`, for the years the over-time companion table shows under the parsed `year_from`/`year_to`/`pv` filters (D110, D112(g)), picking `first` and `latest`. N is the number of those years whose value is not null or blank (`labels.is_blank`); a null is never an extreme. The value is that year's own cell in the companion table (`labels.number`), so figure and table cannot disagree; never a difference, ratio or percentage change (D112(d)). With N = 1 the earliest names its one year and the latest reads `labels.METRIC_SELECT_SAME`. A value `labels.finite` refuses, or a chosen cell that reads *Unrecognized value*, makes the figure read *Unrecognized value* with no N or years. With N = 0 it reads *No figure*. The figures read the same checked summary rows as charts C4 and C5, so a failed or malformed read removes the section, figures included; when the filters leave no year, *No elections match* shows and no figure does.
+- **Shown as:** `labels.METRIC_LABELS["ec_appointed_first"]` and `["ec_appointed_latest"]`; the value through `labels.metric_select` (`labels.METRIC_SELECT`, `labels.METRIC_SELECT_ONE`, `labels.METRIC_SELECT_SAME`); `labels.METRIC_NO_FIGURE["ec_appointed_first"]`; `labels.UNRECOGNIZED`. On `/elections/over-time`, in the `dl.metrics` block `elections-over-time-metrics` inside the charts' card, after the filters and before chart C4 (`pages/elections_over_time.py`).
+- **Source:** #569 (figure set approved by the owner, 2026-11-18); #600; D112(d), (g) and its addendum; `ElectionSummary.electoral_denominator` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #600, approved at its plan gate.
+- **Not:** The change between the two years, or any ratio of them. A state's electors appointed (chart C7). Electoral votes cast or counted.
+- **Status:** settled
+
+### Earliest and latest total popular vote (figures)
+- **Plain:** On the same page: the total popular vote across the country in the earliest and in the latest election shown that has a total in this dataset, each with its year. This dataset's popular-vote figures begin later than its Electoral College results, so the earliest total shown is the earliest this dataset has, not the earliest election; a note under the figures names the years they cover.
+- **Precise:** `metrics.select` over (year, `national_pv_denominator`) pairs, the year's one distinct value across `NationalSummaryRow`s (the same value chart C5 reads), for the years the over-time companion table shows (D110, D112(g)), picking `first` and `latest`. N, nulls, the value as the table's cell (`labels.national_total`), N = 1 and *Unrecognized value* follow *Earliest and latest electors appointed*. `coverage` supplies only the window (`pv_year_min`–`pv_year_max`), never the first year (D112(d)). While the figures show a number, `labels.METRIC_PV_TOTAL_WINDOW_NOTE` names the window under the block; it does not say the N years lie inside it. With N = 0 it reads *No figure*: `labels.METRIC_NO_FIGURE_PV_YEARS` when no year shown lies inside the window, otherwise `labels.METRIC_NO_FIGURE["pv_total_first"]`.
+- **Shown as:** `labels.METRIC_LABELS["pv_total_first"]` and `["pv_total_latest"]`; the value through `labels.metric_select`; `labels.METRIC_PV_TOTAL_WINDOW_NOTE`; `labels.METRIC_NO_FIGURE_PV_YEARS`; `labels.METRIC_NO_FIGURE["pv_total_first"]`; `labels.UNRECOGNIZED`. In `elections-over-time-metrics` on `/elections/over-time`.
+- **Source:** #569; #600; D112(b), (d), (g) and its addendum; `NationalSummaryRow.national_pv_denominator`; `METRICS`; reader wording: `ba` spec for #600, approved at its plan gate.
+- **Not:** The first election held by popular vote. Turnout. A change or growth rate between the two years. Zero where missing.
+- **Status:** settled
+
 ### Election pages (overview, results by state, people per electoral vote)
 - **Plain:** Each election in this dataset has three pages. The overview shows who led under each
   method and the national results, with a chart. Results by state shows every state's electoral
@@ -691,8 +707,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 
 ### Elections with a different popular-vote winner (count)
 - **Plain:** On the Electoral College majority page: how many of the elections shown had a popular-vote winner other than the Electoral College leader. It is out of the elections shown that have a popular-vote winner in this dataset, and names the earliest and latest of those years. A note under it names the years this dataset's popular-vote figures cover. Those begin later than its Electoral College results, so this number usually covers fewer elections than the count beside it. It says nothing about elections without a popular-vote winner in this dataset.
-- **Precise:** `metrics.flag_count` over (year, `pv_flip`) pairs for the years C2's companion table shows under the parsed `year_from`/`year_to`/`pv` filters (D110), counting true. N is the number of those years whose flag is true or false. A null or a blank (`labels.is_blank`) is never counted as false and is left out of N. C2's own check (`_agrees` in `pages/elections_majority.py`) makes `pv_flip` true or false exactly when the year has a `pv_winner_slug`, so N is the years shown that have a popular-vote winner in this dataset, whatever their year. First and last are the earliest and latest of the N years, not the filter bounds (D112(b)). It is never a percentage (D097(a)). While the figure shows a number, a note under the block says the count includes only elections with a popular-vote winner in this dataset and names the popular-vote window from `meta.provenance.coverage` (`pv_year_min`–`pv_year_max`), never a literal; the note does not say the N years lie inside that window. When N is zero it reads *No figure*: `labels.METRIC_NO_COUNT_PV_YEARS` when no year shown lies inside the window, otherwise `labels.METRIC_NO_COUNT_NULL_PV`. A `pv_flip` that is not true, false or null, a blank included, fails C2's own check first, so the section reads `C2_UNAVAILABLE`; for this figure, both the blank-as-null rule and the *Unrecognized value* reading are defensive. It reads the same checked summary rows as C2, so a failed or malformed read removes the section, figure included. When the filters leave no year, *No elections match* shows and no figure does.
-- **Shown as:** `labels.METRIC_LABELS["pv_flip_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); the note `labels.METRIC_PV_WINDOW_NOTE`; `labels.METRIC_NO_COUNT_PV_YEARS`, `labels.METRIC_NO_COUNT_NULL_PV`. On `/elections/majority`, in the `dl.metrics` block `majority-metrics` inside C2's card, after the filters and before the chart; the value `majority-pv-flip-count` (`pages/elections_majority.py`).
+- **Precise:** `metrics.flag_count` over (year, `pv_flip`) pairs for the years C2's companion table shows under the parsed `year_from`/`year_to`/`pv` filters (D110), counting true. N is the number of those years whose flag is true or false. A null or a blank (`labels.is_blank`) is never counted as false and is left out of N. C2's own check (`_agrees` in `pages/elections_majority.py`) makes `pv_flip` true or false exactly when the year has a `pv_winner_slug`, so N is the years shown that have a popular-vote winner in this dataset, whatever their year. First and last are the earliest and latest of the N years, not the filter bounds (D112(b)). It is never a percentage (D097(a)). While the figure shows a number, a note under the block says the count includes only elections with a popular-vote winner in this dataset and names the popular-vote window from `meta.provenance.coverage` (`pv_year_min`–`pv_year_max`), never a literal; the note does not say the N years lie inside that window. When N is zero it reads *No figure*: `labels.METRIC_NO_FIGURE_PV_YEARS` when no year shown lies inside the window, otherwise `labels.METRIC_NO_FIGURE["pv_flip_count"]`. A `pv_flip` that is not true, false or null, a blank included, fails C2's own check first, so the section reads `C2_UNAVAILABLE`; for this figure, both the blank-as-null rule and the *Unrecognized value* reading are defensive. It reads the same checked summary rows as C2, so a failed or malformed read removes the section, figure included. When the filters leave no year, *No elections match* shows and no figure does.
+- **Shown as:** `labels.METRIC_LABELS["pv_flip_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); the note `labels.METRIC_PV_WINDOW_NOTE`; `labels.METRIC_NO_FIGURE_PV_YEARS`, `labels.METRIC_NO_FIGURE["pv_flip_count"]`. On `/elections/majority`, in the `dl.metrics` block `majority-metrics` inside C2's card, after the filters and before the chart; the value `majority-pv-flip-count` (`pages/elections_majority.py`).
 - **Source:** #569 (figure set approved by the owner, 2026-11-18); D097; D112; `ElectionSummary.pv_flip` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #569, approved at its plan gate.
 - **Not:** A percentage or share. A claim that no different popular-vote winner occurred before the popular-vote window. The hybrid's flip. *Flip* for one election. A popular-vote "leader".
 - **Status:** settled
@@ -700,7 +716,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Elections with no Electoral College majority (count)
 - **Plain:** On the Electoral College majority page: how many of the elections shown had an Electoral College leader with no majority of the electors appointed. It is out of the elections shown for which this dataset says whether there was one, and names the earliest and latest of those years.
 - **Precise:** `metrics.flag_count` over (year, `ec_determinative`) pairs for the years C2's companion table shows under the parsed `year_from`/`year_to`/`pv` filters (D110), counting false. N is the number of those years whose flag is true or false. A null or a blank (`labels.is_blank`) is never counted as false and is left out of N. First and last are the earliest and latest of the N years, not the filter bounds (D112(b)). It is never a share compared with one half and never a percentage (D097(a)). Any other value that is not true or false among the years shown makes this figure alone read *Unrecognized value*, with no N or years; the other figure, the chart and the table stay. With every flag null or blank it reads *No figure*. Failure and empty-filter behavior are the same as for *Elections with a different popular-vote winner*.
-- **Shown as:** `labels.METRIC_LABELS["ec_no_majority_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); `labels.METRIC_NO_COUNT_NULL_EC`; `labels.UNRECOGNIZED`. In `majority-metrics` on `/elections/majority`, the value `majority-ec-no-majority-count`.
+- **Shown as:** `labels.METRIC_LABELS["ec_no_majority_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); `labels.METRIC_NO_FIGURE["ec_no_majority_count"]`; `labels.UNRECOGNIZED`. In `majority-metrics` on `/elections/majority`, the value `majority-ec-no-majority-count`.
 - **Source:** #569; D097; D112; `ElectionSummary.ec_determinative`; `METRICS`; reader wording: `ba` spec for #569, approved at its plan gate.
 - **Not:** *Electoral College majority*, the yes or no for one election. The leader's electoral share. A count of elections decided by the House. A percentage.
 - **Status:** settled
@@ -1192,6 +1208,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   clearly labeled opinion tab (#275, E9-S7).
 - **Status:** settled
 
+### Lowest and highest people per electoral vote (figures)
+- **Plain:** On a state's People per electoral vote page: the fewest and the most people one of the state's electoral votes stood for, among the elections in the years shown, each with the election or elections that hold it, and how many elections have a figure.
+- **Precise:** `metrics.select` over (year, `persons_per_electoral_vote`) pairs from T7's shown rows (the page's year range, D112(g)), picking `lowest` and `highest`. N is the number of those rows whose value is not null or blank; a null (no census figure, or a zero allotment) is never an extreme. A tie names every year that holds it, joined "1824 and 1828" or "1852, 1856 and 1860". The value is T7's own cell (`labels.per_capita_strings`), to a whole person. With N = 1 the lowest names its one year and the highest reads `labels.METRIC_SELECT_SAME`. A value `labels.finite` refuses, or a chosen cell that reads *Unrecognized value* (a figure of zero or less), makes both figures read *Unrecognized value* with no N or years, since they share one selection; T7 and the page stay. With N = 0 it reads *No figure*: `labels.METRIC_NO_FIGURE_NO_ELECTIONS` when the range holds no row, otherwise `labels.METRIC_NO_FIGURE["state_per_capita_lowest"]`. Never a difference, ratio or percentage change (D112(d)).
+- **Shown as:** `labels.METRIC_LABELS["state_per_capita_lowest"]` and `["state_per_capita_highest"]`; the value through `labels.metric_select` (`labels.METRIC_SELECT`, `labels.METRIC_SELECT_ONE`, `labels.METRIC_SELECT_SAME`, the tie join `labels.METRIC_YEARS_AND`); `labels.METRIC_NO_FIGURE_NO_ELECTIONS`; `labels.METRIC_NO_FIGURE["state_per_capita_lowest"]`; `labels.UNRECOGNIZED`. On `/state/<usps>/per-capita`, in `state-per-capita-metrics` inside the page's card, after the year control and before the count line (`pages/state_per_capita.py`).
+- **Source:** #569; #600; D112(d), (g) and its addendum; `PerCapitaRow.persons_per_electoral_vote`; `METRICS`; reader wording: `ba` spec for #600, approved at its plan gate.
+- **Not:** A ranking of states. A claim about whose vote counts more. The lowest or highest across states in one election (a different grain, which would need its own keys).
+- **Status:** settled
+
+(Orchestrator note: "makes that figure alone read" — under architect Q4 both per-capita figures share one Selection, so the wording becomes "makes both figures read"; to confirm with ba during implementation.)
+
 ### Margin
 - **Plain:** How far the leader was ahead of the runner-up under one method, in percentage points.
   Each method has its own top two.
@@ -1326,12 +1352,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   ("rows"). *No average*. "No data": the elections are in this dataset; the filters leave none shown.
 - **Status:** settled
 
-### No figure (a count with no election to include)
-- **Plain:** The page shows no number because none of the elections shown can enter it. Either all of them fall in years this dataset has no popular-vote figures for, or this dataset has no answer for any of them. It is not zero: a count of zero shows 0.
-- **Precise:** `labels.metric_count` with N = 0 and no unrecognized value. Causes are checked in order. First, for the popular-vote count, no year shown lies inside the popular-vote window of `meta.provenance.coverage` (`labels.METRIC_NO_COUNT_PV_YEARS`). Otherwise, every flag among the years shown is null (`labels.METRIC_NO_COUNT_NULL_EC`, `labels.METRIC_NO_COUNT_NULL_PV`; no year in the current data triggers either). No year shown is not a cause here: the page shows *No elections match* and no figure. It is never 0, "nan" or an empty cell.
-- **Shown as:** `labels.METRIC_NO_COUNT_PV_YEARS`, `labels.METRIC_NO_COUNT_NULL_EC`, `labels.METRIC_NO_COUNT_NULL_PV`, through `labels.metric_count`.
-- **Source:** #569 acceptance criteria; D097; reader wording: `ba` spec for #569.
-- **Not:** Zero. *No average* (a mean). *No popular-vote figure in this dataset* (a cell). *Unrecognized value*. The "no figure" of D097's rule for a sum with a null, which slice B words; if it reuses these words, this entry is extended to cover it.
+### No figure (a figure with no election to include)
+- **Plain:** The page shows no number because none of the elections shown can enter it. Either all of them fall in years this dataset has no popular-vote figures for, or this dataset has no value for any of them, or, on a state's page, the years shown hold no election for that state. It is not zero: a count of zero shows 0.
+- **Precise:** `labels.metric_count` or `labels.metric_select` with N = 0 and no unrecognized value. Causes are checked in order. First, on a state's People per electoral vote page, no row in the year range (`labels.METRIC_NO_FIGURE_NO_ELECTIONS`). Then, for a figure read against the popular-vote window, no year shown inside the window of `meta.provenance.coverage` (`labels.METRIC_NO_FIGURE_PV_YEARS`). Otherwise every value among the years shown is null, worded per metric key (`labels.METRIC_NO_FIGURE`); on served data only the people-per-electoral-vote figures reach this. On the elections pages no year shown is not a cause: the page shows *No elections match* and no figure. It is never 0, "nan" or an empty cell.
+- **Shown as:** `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE_PV_YEARS`, and `labels.METRIC_NO_FIGURE` (keyed by metric key), through `labels.metric_count` and `labels.metric_select`.
+- **Source:** #569 acceptance criteria; D097; D112; reader wording: `ba` specs for #569 and #600.
+- **Not:** Zero. *No average* (a mean). *No popular-vote figure in this dataset* (a cell). *Unrecognized value*. The "no figure" of D097's rule for a sum with a null, which #601 words; if it reuses these words, this entry is extended to cover it.
 - **Status:** settled
 
 ### No popular-vote figure in this dataset (inside the window)
@@ -1576,7 +1602,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.C3_TITLE_NO_CENSUS`, the axis title (`LABELS["persons_per_electoral_vote"]`), each bar's
   text (T6's cell), the hover text `labels.C3_BAR_HOVER` and `labels.C3_NO_FIGURE_HOVER`, the marker
   label `labels.C3_NO_ELECTORAL_VOTES` with `labels.NO_ELECTORAL_VOTES` in its hover, and the
-  caption sentences `labels.C3_RATIO` and `labels.C3_NO_FIGURE_NOTE`.
+  caption sentences `labels.C3_RATIO` and `labels.C3_NO_FIGURE_NOTE`. On a state's People per electoral vote page, the figures `labels.METRIC_LABELS["state_per_capita_lowest"]` and `["state_per_capita_highest"]` (*Lowest and highest people per electoral vote*).
 - **Source:** `PerCapitaRow`; `ElectionStateRow` (the same field, on `/v1/elections/states`);
   D064(c), (d); D069. `posts/2026-09-03-how-did-we-get-to-538-electors.md`
   names the same measure "persons per electoral vote"; readers see "people" (owner decision, 2026-10-11, #348).
@@ -2135,9 +2161,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   of a year; null outside the window. Inside the window it equals the year's
   `state_popular_total` added up, each state once. It is the base of `pv_share`, and the
   dashboard reads the year's one distinct value.
-- **Shown as:** `LABELS["national_pv_denominator"]`; in C5, the bars,
-  `labels.C5_HOVER` and `labels.C5_ALL_STATES`; the null cells `labels.NOT_APPLICABLE` and
-  `labels.NO_NATIONAL_TOTAL`; and the API `/docs` field description.
+- **Shown as:** `LABELS["national_pv_denominator"]`; in C5, the bars, `labels.C5_HOVER` and `labels.C5_ALL_STATES`; the null cells `labels.NOT_APPLICABLE` and `labels.NO_NATIONAL_TOTAL`; on `/elections/over-time`, the figures `labels.METRIC_LABELS["pv_total_first"]` and `["pv_total_latest"]` (*Earliest and latest total popular vote*); and the API `/docs` field description.
 - **Source:** `NationalSummaryRow.national_pv_denominator`; `docs/api-snapshot.md`; the #428 and
   #436 surveys (snapshot `37af4064`).
 - **Not:**
@@ -2194,7 +2218,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   when a margin among the years shown is of the wrong type or not finite, or when the average is a
   number no margin cell could show; it then names no number of elections or years (*Average
   margin*). On `/elections/majority`, a count of elections reads it too when a flag among the years
-  shown is neither yes, no nor null; it then names no number of elections or years. In a CSV download the field is written as the API
+  shown is neither yes, no nor null; on `/elections/over-time` and a state's People per electoral
+  vote page, an earliest, latest, lowest or highest figure reads it when a value among the years
+  shown is not a finite number, or when the chosen year's own table cell reads it; each then names
+  no number of elections or years. In a CSV download the field is written as the API
   served it; for a null figure with an unrecognized cause, the figure's column is empty and the
   cause field carries the code.
 - **Shown as:** `labels.UNRECOGNIZED`, with `labels.UNRECOGNIZED_NOTE` as each such cell's help text
@@ -2214,7 +2241,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   the cell, and for the borders cell the caption adds `labels.C3_PLAIN_MIXED`. On `/elections`,
   `labels.metric_mean` writes it for an average margin, with `labels.UNRECOGNIZED_NOTE` as the
   value's help text (set by `labels.cell`). `labels.metric_count` writes it for a count on
-  `/elections/majority`. In C2, C4, C5, C7 and C10, `labels.UNRECOGNIZED`
+  `/elections/majority`, and `labels.metric_select` for a figure on `/elections/over-time` and a
+  state's People per electoral vote page. In C2, C4, C5, C7 and C10, `labels.UNRECOGNIZED`
   names, in the chart's key, the series of markers drawn in place of a point or bar for such a
   value (C5 and C10 through `labels.C5_MARKER_LABELS` and `labels.C10_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C10_HOVER` write
@@ -2239,13 +2267,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Precise:** `meta.provenance.coverage`: `year_min` / `year_max` for every year served and
   `pv_year_min` / `pv_year_max` for the years that also carry popular votes. It describes the
   data; it is not a promise. Pages read it from the response, never from a literal.
-- **Shown as:** the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`; the CSV
-  preamble; `labels.BEFORE_WINDOW`; `NO_PV_SENTENCE` in `pages/election.py`; C1's caption sentence
-  `labels.C1_NO_PV_CAPTION`, and on `/elections` `labels.METRIC_NO_AVERAGE_PV_YEARS` and
-  `labels.METRIC_DIFFERENT_ELECTIONS`, and on `/elections/majority` `labels.METRIC_PV_WINDOW_NOTE`
-  and `labels.METRIC_NO_COUNT_PV_YEARS`, each of which names the years the popular-vote figures
-  cover; `labels.C5_BEFORE_BAND`, `labels.C5_AFTER_BAND`, `labels.C5_BEFORE_NOTE`,
-  `labels.C5_AFTER_NOTE` and `labels.OVER_TIME_WINDOW_NOTE`.
+- **Shown as:** the coverage list (`COVERAGE_ID`) built by `render` in `pages/home.py`; the CSV preamble; `labels.BEFORE_WINDOW`; `NO_PV_SENTENCE` in `pages/election.py`; C1's caption sentence `labels.C1_NO_PV_CAPTION`, and on `/elections` `labels.METRIC_NO_AVERAGE_PV_YEARS` and `labels.METRIC_DIFFERENT_ELECTIONS`, on `/elections/majority` `labels.METRIC_PV_WINDOW_NOTE` and `labels.METRIC_NO_FIGURE_PV_YEARS`, and on `/elections/over-time` `labels.METRIC_PV_TOTAL_WINDOW_NOTE` and `labels.METRIC_NO_FIGURE_PV_YEARS`, each of which names the years the popular-vote figures cover; `labels.C5_BEFORE_BAND`, `labels.C5_AFTER_BAND`, `labels.C5_BEFORE_NOTE`, `labels.C5_AFTER_NOTE` and `labels.OVER_TIME_WINDOW_NOTE`.
 - **Source:** `Coverage` in `src/usvote/api/models.py`; D048 §1;
   `posts/2026-08-06-222-votes-away.md` (both windows published on every response).
 - **Not:** *Census figure* (per-capita `coverage`); *Share of electors from popular-vote states*.
@@ -2305,7 +2327,11 @@ Every `LABELS` key and the entry that defines it.
 Metric keys (`labels.METRIC_LABELS`) are not `LABELS` keys; each is named under its entry's
 **Shown as**: `elections_shown` (*Elections shown*), `ec_margin_mean` and `pv_margin_mean`
 (*Average margin*), `ec_no_majority_count` (*Elections with no Electoral College majority*),
-`pv_flip_count` (*Elections with a different popular-vote winner*).
+`pv_flip_count` (*Elections with a different popular-vote winner*), `ec_appointed_first` and
+`ec_appointed_latest` (*Earliest and latest electors appointed*), `pv_total_first` and
+`pv_total_latest` (*Earliest and latest total popular vote*), and `state_per_capita_lowest` and
+`state_per_capita_highest` (*Lowest and highest people per electoral vote*).
+`labels.METRIC_NO_FIGURE` is keyed by the same metric keys.
 
 ---
 
@@ -2334,7 +2360,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "EC", "PV" in the prose of the API's published text | Electoral College; popular vote | a rule (see Wording rules) | A reader may not know the abbreviations; `ec_` and `pv_` stay inside API field names (owner decision, 2026-10-15, #374). |
 | "snapshot" | data version | `components.provenance_footer` (its version line); `export.preamble`; in the API's published text, a rule until #379 rewrites it | Engineering term (owner decision, 2026-10-10). The API's prose follows it too; the field name `snapshot_version` stays (owner decision, 2026-10-15, #374). |
 | "No" for a missing value | Not in this dataset | `labels.NOT_IN_DATASET` | "No" is a recorded answer. |
-| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`); on `/elections/majority`, a count with no election to include reads *No figure* (`labels.METRIC_NO_COUNT_PV_YEARS`, `labels.METRIC_NO_COUNT_NULL_EC`, `labels.METRIC_NO_COUNT_NULL_PV`) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
+| 0 for a missing figure | never | a rule; in C1, a labeled marker in the bar's place (`labels.C1_NO_FIGURE` for a missing popular-vote figure, `labels.C1_NO_SHARE` for a missing electoral share, or `labels.UNRECOGNIZED` for a value the page has no label for), never a bar of zero length; in C3, a marker with a short label looked up by T6's cell (`labels.C3_MARKER_LABELS`), the full cell in its hover, never a bar of zero length or an infinity; on `/elections`, an average with no contributing election reads *No average* (`labels.METRIC_NO_AVERAGE_FILTERS`, `labels.METRIC_NO_AVERAGE_PV_YEARS`, `labels.METRIC_NO_AVERAGE_NULL`); on `/elections/majority`, a count with no election to include, and on `/elections/over-time` and a state's People per electoral vote page, a figure with none, reads *No figure* (`labels.METRIC_NO_FIGURE_PV_YEARS`, `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE`) | Zero is a measurement; a missing figure is not. A real zero is still a drawn, labeled bar. |
 | "the state you chose" for a filter's state | Selected state | `labels.C3_SELECTED`, `labels.C3_SELECTED_NOTE` | A shared link carries the filter; the reader who opens it chose nothing. |
 | a party code with underscores or in capitals | the party's display form | `labels.NOMINATING_PARTY` | Owner decision, 2026-10-10; closed table since #389. |
 | "party" alone where both are meant | name which: the party (the nominating party); the popular-vote source's party | a rule | The API serves both; they differ in vocabulary, years and source. |
@@ -2352,6 +2378,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "mean" in reader text | average | `labels.METRIC_LABELS` | The plain word; "mean" stays in code and D097. |
 | "turnout" | "total popular vote" | `labels.C5_*`, `labels.C10_*` | Turnout is a share of eligible voters, which this dataset doesn't have. |
 | "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_NOTE`, `labels.C2_BEFORE_NOTE` | The band label, `labels.C5_BEFORE_BAND`, says "no popular-vote figures in this dataset" and leaves the year to these notes (#593). |
+| "first popular vote", "the first total popular vote" for the earliest figure | the earliest total popular vote in this dataset, with the window named | `labels.METRIC_LABELS["pv_total_first"]`, `labels.METRIC_PV_TOTAL_WINDOW_NOTE` | The dataset's popular-vote figures begin later than its elections; "first" alone reads as the first election held by popular vote, a historical claim the page does not make. |
 
 ## Open decisions
 

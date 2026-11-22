@@ -11,7 +11,6 @@ heading, lede and success marker stay.
 
 from __future__ import annotations
 
-import functools
 from typing import Any, NamedTuple
 
 import dash
@@ -81,20 +80,16 @@ LEADER_WORDED = LEADER_FIELDS[2:]
 #: Exported though not shown: the key of the candidate's history link.
 LEADER_EXTRA = ("candidate_slug",)
 
-#: The headline counts (#569, D112): the block and each count's value, by metric key;
-#: DOM ids are stable and never renamed (D097(g)).
+#: The headline counts (#569, D112): the block and each count's value, by metric key,
+#: in display order; DOM ids are stable and never renamed (D097(g)). The page's one
+#: per-key table (#600's cr.9): each count's no-figure wording is
+#: ``labels.METRIC_NO_FIGURE``'s, and whether it reads the popular-vote window is the
+#: metric's (``Metric.reads_pv_window``).
 METRICS_ID = "majority-metrics"
 METRIC_IDS = {
     "ec_no_majority_count": "majority-ec-no-majority-count",
     "pv_flip_count": "majority-pv-flip-count",
 }
-#: Each count's wording for every flag null among the years shown.
-METRIC_NO_FIGURE = {
-    "ec_no_majority_count": labels.METRIC_NO_COUNT_NULL_EC,
-    "pv_flip_count": labels.METRIC_NO_COUNT_NULL_PV,
-}
-#: The count read against the popular-vote window.
-PV_METRIC = "pv_flip_count"
 
 C2_TABLE_HEADING = "Each election's Electoral College leader"
 #: C2's section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
@@ -696,19 +691,11 @@ def _counts(rows: list[dict[str, Any]], window: tuple[int, int]) -> html.Div:
         result = metrics.flag_count(
             ((row["year"], row[metric.source.field]) for row in rows), metric.counted
         )
-        pv_window = window if key == PV_METRIC else None
+        pv_window = window if metric.reads_pv_window else None
         value, rest = labels.metric_count(
-            result, years, METRIC_NO_FIGURE[key], pv_window
+            result, years, labels.METRIC_NO_FIGURE[key], pv_window
         )
-        children: Any = (
-            value
-            if rest is None
-            else [html.Span(value, className="metric-value"), html.Span(rest)]
-        )
-        entries += [
-            html.Dt(labels.METRIC_LABELS[key]),
-            labels.cell(children, functools.partial(html.Dd, id=ident)),
-        ]
+        entries += components.metric_entry(key, ident, value, rest)
         note = note or (pv_window is not None and rest is not None)
     content: list[Any] = [html.Dl(entries, className="metrics")]
     if note:

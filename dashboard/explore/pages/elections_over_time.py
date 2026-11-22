@@ -31,6 +31,7 @@ from explore import (
     elections_view,
     export,
     labels,
+    metrics,
     over_time,
 )
 from explore.config import CANONICAL_HOST, SITE_TITLE
@@ -72,6 +73,22 @@ OVER_TIME_UNAVAILABLE_ID = "elections-over-time-unavailable"
 OVER_TIME_MARGIN = {"l": 72, "r": 16}
 #: The companion table's columns, in display order, by public field name.
 OVER_TIME_FIELDS = ("year", "electoral_denominator", "national_pv_denominator")
+#: The headline figures (#600, D112(d)): the block and each figure's value, by metric
+#: key, in display order, the page's one per-key table (#600's cr.9); DOM ids are
+#: stable and never renamed (D097(g)).
+METRICS_ID = "elections-over-time-metrics"
+METRIC_IDS = {
+    "ec_appointed_first": "elections-over-time-ec-appointed-first",
+    "ec_appointed_latest": "elections-over-time-ec-appointed-latest",
+    "pv_total_first": "elections-over-time-pv-total-first",
+    "pv_total_latest": "elections-over-time-pv-total-latest",
+}
+#: Each select's input on a point: the served value and the companion table's cell
+#: for it, by the field its metric reads.
+_POINT_FIELDS = {
+    "electoral_denominator": ("appointed", "appointed_cell"),
+    "national_pv_denominator": ("total", "total_cell"),
+}
 OVER_TIME_TABLE_HEADING = "Each election's electors appointed and total popular vote"
 #: The section when N1 cannot be read or is malformed. Never ``UNAVAILABLE_MESSAGE``'s
 #: wording: the D070(b) guard's success run asserts that absent from every page.
@@ -223,6 +240,51 @@ def _over_time_row(point: over_time.Point) -> html.Tr:
     )
 
 
+def _figures(points: list[over_time.Point], window: tuple[int, int]) -> html.Div:
+    """The four figures over the years C4, C5 and their table show (#600, D112(d)), as
+    a ``dl`` and, while a total popular vote figure shows a number, the note naming the
+    popular-vote window. Each figure selects over the points' served values and shows
+    the companion table's own cell, so the two cannot disagree. Raises ``TypeError``
+    for a figure that is no select, which :func:`_over_time_section`'s ``try`` shows as
+    the section's unavailable state."""
+    years = [point.year for point in points]
+    selections: dict[str, metrics.Selection] = {}
+    entries: list[Any] = []
+    note = False
+    for key, ident in METRIC_IDS.items():
+        metric = metrics.METRICS[key]
+        if metric.kind != "select" or metric.pick is None:
+            raise TypeError(f"{key} is no select")
+        field = metric.source.field
+        if field not in selections:
+            value, cell = _POINT_FIELDS[field]
+            selections[field] = metrics.select(
+                (point.year, getattr(point, value), getattr(point, cell))
+                for point in points
+            )
+        pv_window = window if metric.reads_pv_window else None
+        shown, rest = labels.metric_select(
+            selections[field],
+            metric.pick,
+            years,
+            labels.METRIC_NO_FIGURE[key],
+            pv_window,
+        )
+        entries += components.metric_entry(key, ident, shown, rest)
+        note = note or (pv_window is not None and rest is not None)
+    content: list[Any] = [html.Dl(entries, className="metrics")]
+    if note:
+        content.append(
+            html.P(
+                labels.METRIC_PV_TOTAL_WINDOW_NOTE.format(
+                    first=window[0], last=window[1]
+                ),
+                className="note",
+            )
+        )
+    return html.Div(content, id=METRICS_ID)
+
+
 def _over_time_section(
     index: dict[str, Any],
     summary: Any,
@@ -287,6 +349,9 @@ def _over_time_section(
         for figure in (c4.figure, c5.figure):
             over_time.align(figure, OVER_TIME_MARGIN)
         by_row = {id(row): point for row, point in zip(rows, points, strict=True)}
+        # The headline figures (#600, D112(d)), inside the try: they read the same
+        # checked N1 points, so a failed or malformed N1 removes them with the section.
+        figures = _figures(points, window)
         notes = (
             labels.C4_BASIS,
             labels.C5_BASIS,
@@ -310,6 +375,9 @@ def _over_time_section(
         ], False
     return [
         controls,
+        # The headline figures over the years shown (#600): inside the charts' card,
+        # after the filters and before C4 (D111(b)); absent when no year is shown.
+        figures,
         components.chart(C4_ID, c4.figure, OVER_TIME_TABLE_ID, _c4_caption(c4)),
         components.chart(
             C5_ID, c5.figure, OVER_TIME_TABLE_ID, _c5_caption(c5, window)
