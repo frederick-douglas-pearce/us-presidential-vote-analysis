@@ -19,7 +19,7 @@ import sys
 import unicodedata
 import urllib.parse
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, ClassVar, TypeGuard
 
 import dash
 import pytest
@@ -2220,11 +2220,75 @@ class TestMetricLabels:
             k for k, m in metrics.METRICS.items() if m.kind in ("flag_count", "select")
         }
 
-    def test_each_page_keeps_one_per_key_table(self) -> None:
-        # #600's cr.9: no page keeps a second per-key table beside ``METRIC_IDS``.
-        for page in METRIC_PAGES:
-            names = page_globals(page)
-            assert "METRIC_NO_FIGURE" not in names and "PV_METRIC" not in names, page
+    def test_no_page_keeps_the_retired_per_key_tables(self) -> None:
+        # A tripwire for the two module-level tables #600's cr.9 retired, on every page
+        # with metrics, this one included. It does not see a per-key table under
+        # another name; what each page reads the window from is pinned by
+        # ``test_each_page_reads_the_window_from_the_metric``.
+        for names in (MOD, *(page_globals(p) for p in METRIC_PAGES)):
+            assert "METRIC_NO_FIGURE" not in names and "PV_METRIC" not in names
+
+    #: The kinds each page computes (#609's review, r1.cr.8): a page's ``METRIC_IDS``
+    #: names only metrics of those kinds, so its kind check can never fire in shipped
+    #: code (#610 moves that check off the degraded state).
+    PAGE_KINDS: ClassVar[dict[str, set[str]]] = {
+        "pages.elections": {"count", "mean"},
+        "pages.elections_majority": {"flag_count"},
+        "pages.elections_over_time": {"select"},
+        "pages.state_per_capita": {"select"},
+    }
+
+    def test_each_page_names_only_the_kinds_it_computes(self) -> None:
+        assert set(self.PAGE_KINDS) == {"pages.elections", *METRIC_PAGES}
+        for page, kinds in self.PAGE_KINDS.items():
+            ids = METRIC_IDS if page == "pages.elections" else page_globals(page)["METRIC_IDS"]
+            for key in ids:
+                assert metrics.METRICS[key].kind in kinds, (page, key)
+
+    @pytest.mark.parametrize("page", ["elections", "majority", "over_time"])
+    def test_each_page_reads_the_window_from_the_metric(
+        self, page: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #609's review (r1.cr.6, r1.ge.B1): flipping ``reads_pv_window`` on one
+        # metric changes that page's wording, so the flag, not a page table, decides.
+        query = {"year_from": "1900", "year_to": "1960"}
+        if page == "elections":
+            # The window decides only a mean with no contributing election: no year
+            # from 1900 to 1960 has a popular-vote margin.
+            key = "pv_margin_mean"
+
+            def text() -> str:
+                return metric_text(render_n1(query=query), key)
+        elif page == "majority":
+            key = "ec_no_majority_count"
+
+            def text() -> str:
+                tree = MAJORITY["render"](
+                    copy.deepcopy(BODY),
+                    copy.deepcopy(SUMMARY),
+                    elections_view.parse_filters(query),
+                )
+                return "".join(texts(find(tree, MAJORITY["METRICS_ID"])))
+        else:
+            key = "pv_total_first"
+            over_time = page_globals("pages.elections_over_time")
+
+            def text() -> str:
+                tree = over_time["render"](
+                    copy.deepcopy(BODY),
+                    copy.deepcopy(SUMMARY),
+                    elections_view.parse_filters(query),
+                )
+                return "".join(texts(find(tree, over_time["METRICS_ID"])))
+
+        before = text()
+        metric = metrics.METRICS[key]
+        monkeypatch.setitem(
+            metrics.METRICS,
+            key,
+            metric._replace(reads_pv_window=not metric.reads_pv_window),
+        )
+        assert text() != before, (page, key)
 
     def test_every_source_is_a_public_api_field(self) -> None:
         assert metric_source_problems(metrics.METRICS.values()) == []
@@ -2900,8 +2964,43 @@ class TestSelect:
     def test_no_other_state_can_be_built(self, args: tuple[Any, ...]) -> None:
         with pytest.raises(ValueError):
             metrics.Selection(*args)
+
+    @pytest.mark.parametrize(
+        ("args", "unrecognized"),
+        [
+            ((0, (1, "a"), None, None, None), True),
+            ((1, None, None, None, None), True),
+            ((-1, (1, "a"), (1, "a"), ("a", (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, 2), ("a", (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), None, ("a", (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, "a"), ("a", (1,)), ("a", (1, 1))), False),
+            ((1, (1, "a"), (1, "a"), ("a", (1,)), None), False),
+            ((1, (1, "a"), (1, "a"), ("a", (1, 1)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, "a"), (1, (1,)), ("a", (1,))), False),
+            ((1, (1, "a"), (1, "a"), ("a", [1]), ("a", (1,))), False),
+        ],
+    )
+    def test_every_refusal_holds(
+        self, args: tuple[Any, ...], unrecognized: bool
+    ) -> None:
+        # #609's review (r1.ge.B2): each clause of ``__post_init__`` refuses on its own.
         with pytest.raises(ValueError):
-            metrics.Selection(0, (1, "a"), None, None, None, unrecognized=True)
+            n, first, latest, lowest, highest = args
+            metrics.Selection(n, first, latest, lowest, highest, unrecognized)
+
+    def test_a_null_is_left_out_whatever_its_cell_says(self) -> None:
+        # Owner at #609's review (r1.cr.7, D114(a)): an Unrecognized value cell on a
+        # null names its cause, not a value, so the year leaves N and is no extreme.
+        result = metrics.select(
+            [(1848, None, labels.UNRECOGNIZED), (1852, 3.0, "3"), (1856, 4.0, "4")]
+        )
+        assert picked(result) == (2, (1852, "3"), (1856, "4"), ("3", (1852,)), ("4", (1856,)))
+
+    def test_extremes_are_chosen_by_value_never_by_the_cell_s_text(self) -> None:
+        # #609's review (r1.ge.E1): "9" sorts after "10" as text.
+        result = metrics.select([(1980, 9.0, "9"), (1984, 10.0, "10"), (1988, 999.0, "999")])
+        assert result.lowest == ("9", (1980,))
+        assert result.highest == ("999", (1988,))
 
 
 class TestMetricSelectWording:
@@ -2967,6 +3066,23 @@ class TestMetricSelectWording:
             None,
         )
         assert labels.metric_select(none, "lowest", [1980], "null") == ("null", None)
+
+    @pytest.mark.parametrize(
+        ("years", "inside"),
+        [([1976], True), ([2024], True), ([1972], False), ([2028], False)],
+    )
+    def test_the_window_is_inclusive_at_both_ends(
+        self, years: list[int], inside: bool
+    ) -> None:
+        # #609's review (r1.ge.B3): a year at either bound is inside the window.
+        expected = (
+            "null"
+            if inside
+            else labels.METRIC_NO_FIGURE_PV_YEARS.format(first=1976, last=2024)
+        )
+        assert labels.metric_select(
+            metrics.NO_SELECTION, "first", years, "null", (1976, 2024)
+        ) == (expected, None)
 
     def test_unrecognized_names_no_n_or_years(self) -> None:
         assert labels.metric_select(

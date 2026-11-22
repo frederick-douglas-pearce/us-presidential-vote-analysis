@@ -321,13 +321,17 @@ def select(triples: Iterable[tuple[int, object, str]]) -> Selection:
     own string for that value (#600, D112(d), D114).
 
     A null or a blank (:func:`explore.labels.is_blank`) is left out and is never an
-    extreme. Any other value :func:`explore.labels.finite` refuses, or a value whose
-    own cell reads :data:`explore.labels.UNRECOGNIZED` (a number the table cannot show,
-    such as a float allotment), makes the whole selection
-    :data:`UNRECOGNIZED_SELECTION`: leaving it out would drop a year and misstate N. The
-    extremes are chosen by value; each names every year whose cell equals the chosen
-    one's, so the figure never names one year where the table shows two equal cells.
-    Each triple is one election; the caller passes each year once.
+    extreme, whatever its cell says: a cell reading :data:`explore.labels.UNRECOGNIZED`
+    on a null names why the value is missing (an unknown cause code), not a value, and N
+    counts only years with one (owner, #609's review; D114(a)). Any other value
+    :func:`explore.labels.finite` refuses, or a value whose own cell reads
+    :data:`explore.labels.UNRECOGNIZED` (a number the table cannot show, such as a float
+    allotment), makes the whole selection :data:`UNRECOGNIZED_SELECTION`: leaving it out
+    would drop a year and misstate N. The extremes are chosen by value; each names every
+    year whose cell equals the chosen one's, so the figure never names one year where
+    the table shows two equal cells. Each triple is one election; the caller passes each
+    year once (the per-capita page refuses a body that names a year twice, D114(g)), and
+    a repeated year tied at an extreme makes :class:`Selection` raise ``ValueError``.
     """
     kept: list[tuple[int, float, str]] = []
     for year, value, cell in triples:

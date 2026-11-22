@@ -405,4 +405,6 @@ def test_the_figures_read_inside_phone_width(page: Page, width: int) -> None:
     assert_figures_inside(page, FIGURES, width, 9)
     figures, chart = rect(page, FIGURES), rect(page, C4)
     assert figures["bottom"] <= chart["top"], (figures, chart)
+    years = rect(page, f"#{elections_view.YEARS_ID}")
+    assert years["bottom"] <= figures["top"], (years, figures)
 

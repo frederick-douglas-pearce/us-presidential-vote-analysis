@@ -229,6 +229,12 @@ def render(
     span = query.year_span(coverage["year_min"], coverage["year_max"])
     source = f"/v1/states/{usps}/per-capita"
     rows = state_view.rows(per_capita, usps, state_view.served_years(index), source)
+    # One row per year, or the body is malformed and the page degrades (#609's review,
+    # D114(g)): T7 and its figures read each year once, so a repeated year would
+    # misstate N, or name a year twice in a tie. ``state_view.rows`` cannot refuse it,
+    # since T4 holds many rows per year.
+    if len({row["year"] for row in rows}) != len(rows):
+        raise TypeError(f"{source} names a year twice")
     chosen = query.year_range(pairs, *span)
     search = state_view.year_search(*chosen, span)
     shown = [r for r in rows if chosen[0] <= r["year"] <= chosen[1]]

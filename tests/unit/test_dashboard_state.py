@@ -2769,6 +2769,24 @@ class TestPerCapitaFigures:
             assert find(tree, PC_FIGURE_IDS[key]).title == labels.UNRECOGNIZED_NOTE
         assert find(tree, PER_CAPITA) is not None and tree.id == PC_PAGE_ID
 
+    @pytest.mark.parametrize("index", [0, -1])
+    def test_a_body_naming_a_year_twice_degrades_the_page(
+        self, index: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Owner at #609's review (r1.cr.1, D114(g)): a repeated year is a malformed
+        # body, which degrades the page, never an uncaught error; the doubled row here
+        # is 1824 (a tied lowest) or 2024 (the highest).
+        body = ga_per_capita()
+        body["data"].append(copy.deepcopy(body["data"][index]))
+        with pytest.raises(TypeError, match="names a year twice"):
+            pc_render(per_capita=body)
+        # Through the layout: the degraded page, not an exception.
+        monkeypatch.setitem(RECORDED, GA_PER_CAPITA_PATH, body)
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route("/state/GA/per-capita"))
+        assert PC_PAGE_ID not in ids and PC_FIGURES not in ids
+        assert "unavailable" in ids
+
     def test_they_sit_in_the_card_after_the_year_control_and_before_the_count(
         self,
     ) -> None:
