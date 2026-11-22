@@ -1972,14 +1972,16 @@ class TestC7Degraded:
     """A body T4 accepts that C7 cannot read as one allotment per election degrades
     C7's section alone (D096(d)'s rule, #560's AC5 as D106(e) reads it): its heading
     and :data:`C7_UNAVAILABLE`, no chart and no ``c7`` id, while T4, its filters and the
-    page's success marker stay."""
+    page's success marker stay. Which faults also degrade C10 is exact per test (#582,
+    D113(c) as amended): a fault in the allotment C7 alone; one in what both read (the
+    years, the state's name, ``pv_status``) both."""
 
-    def assert_degraded(self, body: dict[str, Any]) -> None:
+    def assert_degraded(self, body: dict[str, Any], *, both: bool) -> None:
         tree = render(body=body)
         assert getattr(tree, "id", None) == PAGE_ID
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
-        # C10 stays unless the fault is in what both read (#582, D113(c)).
-        assert [f.id for f in of_type(tree, "Figure")] in ([], [C10_DOM])
+        assert (find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None) is both
+        assert [f.id for f in of_type(tree, "Figure")] == ([] if both else [C10_DOM])
         assert c7_figure(tree) is None
         assert find(tree, ELECTORS) is None
         assert find(tree, TABLE) is not None
@@ -1998,20 +2000,20 @@ class TestC7Degraded:
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
         first["state_electoral_votes"] = 99
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=False)
 
     def test_a_figure_beside_a_null_or_true_beside_one(self) -> None:
         for value in (None, True):
             body = with_year(ga_body(), 1900, state_electoral_votes=1)
             (first, *_) = [r for r in body["data"] if r["year"] == 1900]
             first["state_electoral_votes"] = value
-            self.assert_degraded(body)
+            self.assert_degraded(body, both=False)
 
     def test_two_statuses_in_one_election(self) -> None:
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
         first["pv_status"] = "legislature_chosen"
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=True)
 
     def test_two_allotments_leave_c10_exactly_as_it_was(self) -> None:
         """#582 (D113(c)), AC5's converse: an allotment C7 cannot read degrades C7
@@ -2030,7 +2032,7 @@ class TestC7Degraded:
     def test_a_gap_after_the_first_election(self) -> None:
         body = ga_body()
         body["data"] = [r for r in body["data"] if r["year"] != 1900]
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=True)
 
     @pytest.mark.parametrize("name", [None, 7, "", "   "])
     def test_a_served_name_with_nothing_in_it(self, name: Any) -> None:
@@ -2039,7 +2041,7 @@ class TestC7Degraded:
         body = ga_body()
         for row in body["data"]:
             row["state"] = name
-        self.assert_degraded(body)
+        self.assert_degraded(body, both=True)
 
     def test_a_row_without_the_allotment(self) -> None:
         body = ga_body()
@@ -2150,11 +2152,6 @@ class TestC10:
         csv = download(tree, TOTALS)
         assert csv.header == ["year", "state_popular_total", "pv_status", "state_usps"]
         assert {r["state_usps"] for r in csv.rows} == {"GA"}
-        link = of_type(tree, "A")
-        assert any(
-            getattr(a, "download", None) == "state-GA-total-popular-vote.csv"
-            for a in link
-        ) or "state-GA-total-popular-vote.csv" in repr(tree)
 
     def test_its_bars_are_popular_vote_blue_on_c7_s_axis_and_margin(self) -> None:
         """#593's colors; #582 (D113(e), (f)): short value ticks, C7's year-tick size
@@ -2197,9 +2194,11 @@ class TestC10:
             assert set(GA_SKIPPED_YEARS) <= set(bars)
 
     def test_every_n2_state_s_cells_word_its_totals(self) -> None:
-        """AC2 across the recorded N2 fixture (TX's history is #575's): each state's
-        N2 rows, one per election, worded by C10's points exactly as its table writes
-        each total and status. No N2 row goes through the collapse (B-1)."""
+        """Across the recorded N2 fixture, C10's points carry each state's N2 total
+        and status and choose ``NO_STATE_TOTAL`` as the cell inside the window: the
+        field mapping only, not AC2's oracle, which is
+        :meth:`test_each_year_s_bar_is_n2_s_total` (Georgia's rendered history; TX's is
+        #575's). No N2 row goes through the collapse (B-1)."""
         states = {r["state_usps"] for r in N2["data"]}
         assert len(states) == 51
         for usps in sorted(states):
@@ -2275,9 +2274,11 @@ class TestC10:
             ({"state_popular_total": "12"}, labels.UNRECOGNIZED, labels.UNRECOGNIZED),
             # A number no bar draws is written as served, as C5 writes it.
             ({"state_popular_total": -1}, labels.UNRECOGNIZED, labels.number(-1)),
+            # One key entry for both null-total cells (D113, amendment); the cell and
+            # the hover still say which it is.
             (
                 {"state_popular_total": None, "popular_votes": None, "pv_status": None},
-                labels.NOT_IN_DATASET,
+                labels.C5_NO_TOTAL,
                 labels.NOT_IN_DATASET,
             ),
         ],
@@ -2393,22 +2394,49 @@ class TestPopularTotals:
         with pytest.raises(TypeError, match="two values of state_popular_total"):
             popular_totals(rows)
 
-    def test_a_figure_row_with_a_null_total_is_a_second_value(self) -> None:
+    def test_a_figure_row_with_a_null_total_is_refused(self) -> None:
         rows = self.rows()
         (first, *_) = [r for r in rows if r["year"] == 1988 and r["popular_votes"]]
         first["state_popular_total"] = None
+        with pytest.raises(TypeError, match="figure with no state_popular_total"):
+            popular_totals(rows)
+
+    def test_a_lone_figure_row_with_a_null_total_is_refused(self) -> None:
+        """D113, amendment (wording.5): the year's only row read, with a candidate
+        figure and no total, refuses rather than reading a null total."""
+        rows = [
+            r
+            for r in self.rows()
+            if r["year"] != 1988 or r["popular_votes"] is not None
+        ]
+        (only, *rest) = [r for r in rows if r["year"] == 1988]
+        rows = [r for r in rows if r not in rest]
+        only["state_popular_total"] = None
+        with pytest.raises(TypeError, match="figure with no state_popular_total"):
+            popular_totals(rows)
+
+    @pytest.mark.parametrize("total", ["", 0, float("nan")])
+    def test_a_blank_zero_or_nan_total_is_read_never_skipped(self, total: Any) -> None:
+        # ``is None`` on the total's side too (ge.1): a row with no candidate figure
+        # whose total is a value, not a null, is read, and differs from the figure.
+        rows = self.rows()
+        (skipped,) = [
+            r for r in rows if r["year"] == 1988 and r["popular_votes"] is None
+        ]
+        skipped["state_popular_total"] = total
         with pytest.raises(TypeError, match="two values of state_popular_total"):
             popular_totals(rows)
 
     @pytest.mark.parametrize("value", ["", float("nan")])
     def test_a_blank_or_nan_figure_is_read_never_skipped(self, value: Any) -> None:
-        # ``is None``, never ``is_blank``: a blank or NaN ``popular_votes`` is a value.
+        # ``is None``, never ``is_blank``: a blank or NaN ``popular_votes`` is a value,
+        # so the row is read, and a figure with no total refuses.
         rows = self.rows()
         (skipped,) = [
             r for r in rows if r["year"] == 1988 and r["popular_votes"] is None
         ]
         skipped["popular_votes"] = value
-        with pytest.raises(TypeError, match="two values of state_popular_total"):
+        with pytest.raises(TypeError, match="figure with no state_popular_total"):
             popular_totals(rows)
 
     def test_a_row_without_popular_votes_is_refused(self) -> None:
@@ -2434,7 +2462,9 @@ class TestC10Degraded:
     chart, no ``c10`` id and no table, while C7 (exactly as it was), T4, its filters and
     the page's success marker stay (D113(c))."""
 
-    def assert_degraded(self, body: dict[str, Any]) -> None:
+    def assert_degraded(self, body: dict[str, Any], *, t4_file: bool = True) -> None:
+        """``t4_file``: T4's CSV equals the undoctored render's; false only where the
+        doctoring is in the provenance its preamble writes (the window)."""
         plain = render()
         tree = render(body=body)
         assert getattr(tree, "id", None) == PAGE_ID
@@ -2444,8 +2474,12 @@ class TestC10Degraded:
         assert find(tree, TOTALS) is None
         assert [f.id for f in of_type(tree, "Figure")] == [C7_DOM]
         assert c7_figure(tree) == c7_figure(plain)
-        assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
-        assert download(tree, TABLE).raw == download(plain, TABLE).raw
+        assert download(tree, ELECTORS).rows == download(plain, ELECTORS).rows
+        if t4_file:
+            assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
+            assert download(tree, TABLE).raw == download(plain, TABLE).raw
+        else:
+            assert download(tree, TABLE).rows == download(plain, TABLE).rows
         assert find(tree, MOD["YEARS_ID"]) is not None
         headings = [h.children for h in of_type(tree, "H2")]
         assert MOD["C10_HEADING"] in headings
@@ -2466,6 +2500,29 @@ class TestC10Degraded:
         ]
         first["state_popular_total"] = None
         self.assert_degraded(body)
+
+    @pytest.mark.parametrize("window", [(2000, 1990), (True, 2024), (1976, 1976.5)])
+    def test_a_malformed_popular_vote_window(self, window: tuple[Any, Any]) -> None:
+        """cr.1: C10 checks the window as C2 and C5 do (``query.year_span``), so an
+        inverted or mistyped one that T4 can still compare degrades C10 alone, never
+        a self-contradicting caption."""
+        body = ga_body()
+        coverage = body["meta"]["provenance"]["coverage"]
+        coverage["pv_year_min"], coverage["pv_year_max"] = window
+        self.assert_degraded(body, t4_file=False)
+
+    @pytest.mark.parametrize("window", [(1976, "2024"), (None, 2024)])
+    def test_a_window_t4_cannot_compare_degrades_the_page(
+        self, window: tuple[Any, Any]
+    ) -> None:
+        # T4's popular-vote cells compare each year with the window first, so a fault
+        # in what T4 shows is never swallowed by C10's section (as C7's
+        # ``test_a_row_without_the_allotment``).
+        body = ga_body()
+        coverage = body["meta"]["provenance"]["coverage"]
+        coverage["pv_year_min"], coverage["pv_year_max"] = window
+        with pytest.raises(TypeError):
+            render(body=body)
 
     def test_a_row_without_the_total(self) -> None:
         body = ga_body()

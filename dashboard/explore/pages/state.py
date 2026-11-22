@@ -429,17 +429,17 @@ def popular_totals(
 
     ``state_popular_total`` is a joined field, null on any candidate row with no
     popular-vote record in the state (``EcPvRow``'s own description, "None if no PV"),
-    so a year's total is read from every row except one whose ``popular_votes`` and
-    ``state_popular_total`` are both null (D113(b), narrowing D077 and D098 for this
-    field alone): those it reads must be one value, and a row with a figure beside a
-    null total, or a different total, still refuses. A year where every row is skipped
-    reads a null total, which its cell then names the cause of. ``pv_status`` keeps
-    C7's rule (:func:`_per_year`).
+    so a row whose ``popular_votes`` and ``state_popular_total`` are both null is
+    skipped (D113(b), narrowing D077 and D098 for this field alone). Every other row
+    must carry a total, and those must be one value: a candidate figure beside a null
+    total contradicts the field's meaning and refuses, alone in its year or not (D113,
+    amendment). A year where every row is skipped reads a null total, which its cell
+    then names the cause of. ``pv_status`` keeps C7's rule (:func:`_per_year`).
 
-    Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a year's
-    two totals or two statuses, or a gap after the state's first election
-    (:func:`explore.over_time.state_series`), so C10 draws one value per election or
-    nothing.
+    Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a row
+    with a figure and no total, a year's two totals or two statuses, or a gap after the
+    state's first election (:func:`explore.over_time.state_series`), so C10 draws one
+    value per election or nothing.
     """
     field = "state_popular_total"
     by_year = _per_year(rows, usps, source, field)
@@ -448,6 +448,8 @@ def popular_totals(
         year, value, votes = row["year"], row[field], row["popular_votes"]
         if value is None and votes is None:
             continue
+        if value is None:
+            raise TypeError(f"{source} has a popular-vote figure with no {field}")
         if year in seen and not over_time.same(by_year[year][field], value):
             raise TypeError(f"{source} has two values of {field} in {year}")
         by_year[year][field] = value
@@ -609,13 +611,15 @@ def _totals_section(
     table and that table's column-name list, for the rows T4 shows from the API path
     ``source``. Rows that cannot be read as one total per election, or a served name
     with nothing in it, show the heading and :data:`C10_UNAVAILABLE` only, with no
-    chart (D096(d)'s rule), while C7, T4 and the page stay: only a ``pv_status``
-    disagreement, which both charts read, degrades both (D113(c)). The ``try`` covers
-    everything built from the rows, never ``components.chart`` (D095(f))."""
+    chart (D096(d)'s rule), while T4 and the page stay. A fault in a total or in the
+    popular-vote window degrades C10 alone; one in what C7 reads too (the years, the
+    state's name, ``pv_status``) degrades both (D113(c), as amended). The ``try``
+    covers everything built from the rows, never ``components.chart`` (D095(f))."""
     heading = html.H2(C10_HEADING)
     try:
         coverage = body["meta"]["provenance"]["coverage"]
-        window = (coverage["pv_year_min"], coverage["pv_year_max"])
+        # Checked as C2 and C5 check theirs: a malformed window degrades C10 alone.
+        window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
         records = popular_totals(rows, served, usps, source)
         points = over_time.total_points(records, coverage)
         years = sorted(served)

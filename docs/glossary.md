@@ -1068,9 +1068,9 @@ articles and announcements). Every rule binds all three unless the rule states a
     and D107), with a tick every 4, 8, 10, 20 or 40 years, the smallest of those that goes into the
     span of years shown at most five times, so the axis writes at most five ticks (every 40 years
     over every served year). The value axis runs up the side: C4's ticks are full numbers; C5's are
-    short (d3's SI form with trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"), the one exception
-    to the chart rule (C5's `CHARTS` row, `short_value_ticks`,
-    #596, D110), and with no bar drawn C5 writes no value ticks. Their shared left margin is sized
+    short (d3's SI form with trailing zeros trimmed, `~s`: "0, 50M, 100M, 150M"), one of the chart
+    rule's two exceptions, with C10 (C5's `CHARTS` row, `short_value_ticks`, #596, D110; C10's,
+    #582, D113), and with no bar drawn C5 writes no value ticks. Their shared left margin is sized
     for C5's short ticks. C5's band is vertical, spanning the years outside the window, and its
     label sits inside the band at its top when the band spans at least half the year axis, and
     otherwise above the plot at the band's left edge (only a year filter leaves it that narrow;
@@ -1346,7 +1346,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   popular-vote bar, `labels.C1_NO_FIGURE`, and the caption sentence `labels.C1_NO_FIGURE_NOTE`,
   shown only when such a marker is drawn; `labels.NO_NATIONAL_TOTAL` and `labels.C5_NO_TOTAL`
   (the C4/C5 table and C5); `labels.NO_STATE_TOTAL` (C10's table) and `labels.C5_NO_TOTAL`
-  (C10's key, through `labels.C10_MARKER_LABELS`, #582). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and crossbar's marker hovers.
+  (C10's key, through `labels.C10_MARKER_LABELS`, #582, which also gives it to a total with no
+  status, *Not in this dataset*). In C2 (#564): `labels.NO_NATIONAL_FIGURE` in the companion table's `pv_share` / `hybrid_score` cells and in the triangle's and crossbar's marker hovers.
 - **Source:** `EcPvRow` docstring and `pv_status` description; `NationalSummaryRow` docstring;
   `.claude/specs/backlog-dashboard.md`, E9-S3 null table;
   `posts/2026-08-18-presidential-elections-are-messy.md`, "One empty cell, five different
@@ -1380,7 +1381,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   `labels.NOT_IN_DATASET` names, in the chart's key, the series of markers drawn in place of a bar
   for a null allotment, with `labels.C4_NO_FIGURE_NOTE` in the caption; its hover
   (`labels.C4_HOVER` or `labels.C4_STATE_HOVER`) writes the same cell. In C2 (#564): `labels.C2_NO_FIGURE`, C2's one open-circle key entry for any missing share or score, and `labels.C2_NO_SHARE_NOTE`. In C10 (#582),
-  `labels.NOT_IN_DATASET` names the key series for a total with no status to explain it.
+  `labels.NOT_IN_DATASET` is the table cell, and its hover's, for a total with no status to
+  explain it; the chart's key names that marker `labels.C5_NO_TOTAL`, the same entry as a
+  missing total inside the window.
 - **Source:** the comments on `NOT_IN_DATASET` and `_closed_value` in `labels.py`;
   `dashboard/CLAUDE.md`, `components.py`, `labels.py` (the "never No" rule);
   `.claude/specs/backlog-dashboard.md`, "Carry-forward constraints"; #348 acceptance criteria.
@@ -2001,10 +2004,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   extra `state_usps`). One point per served year from the state's first, collapsed from
   `/v1/states/{usps}` rows (`popular_totals` in `pages/state.py`): a year's total is read from
   every row except one whose `popular_votes` and `state_popular_total` are both null (a row
-  without a candidate figure carries no state total, per *State's total popular vote*), and those
-  must agree (D113(b)); `pv_status` must agree on every row, and its disagreement degrades C7
-  too (D113(c)). A disagreement, a gap or a name with no text shows the section's heading and
-  `C10_UNAVAILABLE` only; C7, T4, the filters and the success marker stay. Bars, band, markers
+  without a candidate figure carries no state total, per *State's total popular vote*); every
+  other row must carry a total, and those must agree (D113(b), as amended). A fault in a total
+  or in the popular-vote window shows the section's heading and `C10_UNAVAILABLE` only, while C7,
+  T4, the filters and the success marker stay; a fault in what C7 reads too (a year missing after
+  the state's first, the state's name with no text, `pv_status`) degrades both (D113(c), as
+  amended). Bars, band, markers
   and year axis are C5's (D100(d), D104), drawn by `over_time.total_figure` (D113(d)); band
   bounds from `meta.provenance.coverage`. Its value axis writes its numbers short, as C5's does
   (D113(e)). Its plot shares C7's left and right margin (`over_time.STATE_MARGIN`, D113(f)).
@@ -2015,7 +2020,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   (`state-<USPS>-total-popular-vote.csv`); in `labels.py`, `C10_TITLE_STATE` (else
   `C10_TITLE_THIS_STATE`), `C5_VALUE_AXIS`, `C10_HOVER`, the bands `C5_BEFORE_BAND` /
   `C5_AFTER_BAND`, the key entries through `C10_MARKER_LABELS` (`C5_LEGISLATURE`,
-  `C5_TOOK_NO_PART`, `C5_NO_TOTAL`, `NOT_IN_DATASET`, `UNRECOGNIZED`), the caption sentences
+  `C5_TOOK_NO_PART`, `C5_NO_TOTAL`, `UNRECOGNIZED`; `C5_NO_TOTAL` is the one entry for a
+  table cell of either `NO_STATE_TOTAL` or `NOT_IN_DATASET`, as on C5), the caption sentences
   `C5_BASIS`, `C10_SHORT_TICKS_NOTE`, `C5_BEFORE_NOTE`, `C5_AFTER_NOTE`, `C5_MARKER_NOTE`,
   `C10_FIRST_ELECTION_NOTE` (else `C10_FIRST_ELECTION_NOTE_THIS_STATE`) and `C7_FILTERS_NOTE`;
   the table's cells through `labels.popular_votes(..., no_figure=NO_STATE_TOTAL)` and

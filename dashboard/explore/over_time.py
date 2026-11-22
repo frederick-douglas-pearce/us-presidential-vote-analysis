@@ -28,9 +28,9 @@ HEIGHT_PX = 360
 TOP_PX = 16
 #: C4's marker series' symbols (#558, D104), which C7 draws too (#560): one series per
 #: label, so the chart's key names each cause, and one symbol per meaning across C2, C4,
-#: C5 and C7: "took no part" is C5's "x", no figure in this dataset C5's open circle, an
-#: unrecognized value the open square; "no electors appointed", C4's and C7's alone, is
-#: an open triangle.
+#: C5, C7 and C10: "took no part" is C5's "x", no figure in this dataset C5's open
+#: circle, an unrecognized value the open square; "no electors appointed", C4's and C7's
+#: alone, is an open triangle.
 C4_SYMBOLS = {
     labels.C4_NO_ELECTORS: "triangle-up-open",
     labels.C4_NO_ELECTORS_TOOK_NO_PART: "x",
@@ -61,10 +61,12 @@ def plain(name: Any) -> str | None:
 
 
 class Point(NamedTuple):
-    """One row of C4, C5 and C7 (#436, #560): its year, the served appointed allotment
-    and total popular vote, and the companion table's cells for them (and, for one
-    state, for its ``pv_status``). C7 draws no total: :func:`appointed_points` leaves
-    ``total`` ``None`` and ``total_cell`` empty, which only C5 reads."""
+    """One row of C4, C5, C7 or C10 (#436, #560, #582): its year, the served
+    appointed allotment and total popular vote, and the companion table's cells for
+    them (and, for one state, for its ``pv_status``). C7 draws no total:
+    :func:`appointed_points` leaves ``total`` ``None`` and ``total_cell`` empty, which
+    only C5 and C10 read. C10 draws no allotment: :func:`total_points` leaves
+    ``appointed`` ``None`` and ``appointed_cell`` empty, which only C4 and C7 read."""
 
     year: int
     appointed: Any
@@ -437,9 +439,12 @@ def c4_figure(
 
 class TotalChart(NamedTuple):
     """What C5's and C10's figures differ by (#582, D113): the bar series' name, each
-    table cell's marker label (a cell with none draws no marker when the band covers
-    its year, else :data:`explore.labels.UNRECOGNIZED`), each label's symbol, and the
-    year ticks' size (:func:`time_layout`)."""
+    table cell's marker label (a band cell, :data:`explore.labels.BEFORE_WINDOW`,
+    :data:`explore.labels.AFTER_WINDOW` or :data:`explore.labels.NOT_APPLICABLE`, in a
+    year outside the window draws no marker; any other cell with no label draws
+    :data:`explore.labels.UNRECOGNIZED`), each label's symbol (every label must have
+    one, or its markers are not drawn), and the year ticks' size
+    (:func:`time_layout`)."""
 
     name: str
     marker_labels: Mapping[str, str]
@@ -528,15 +533,14 @@ def total_figure(
     )
 
 
-#: C10's marker series' symbols (#582): C5's for the labels they share, so one symbol
-#: keeps one meaning across C5 and C10, and for a null total with no status to explain
-#: it, an open circle with a dot, apart from C5's "no total" open circle, which C10 can
-#: draw beside it.
+#: C10's marker series' symbols (#582): C5's, so one symbol keeps one meaning across C4,
+#: C5, C7 and C10 (D113, amendment): the open circle is "no figure in this dataset"
+#: wherever it is drawn, and C10 draws it for both of its null-total cells
+#: (:data:`explore.labels.C10_MARKER_LABELS`).
 C10_SYMBOLS = {
     labels.C5_LEGISLATURE: "diamond",
     labels.C5_TOOK_NO_PART: "x",
     labels.C5_NO_TOTAL: "circle-open",
-    labels.NOT_IN_DATASET: "circle-open-dot",
     labels.UNRECOGNIZED: "square-open",
 }
 

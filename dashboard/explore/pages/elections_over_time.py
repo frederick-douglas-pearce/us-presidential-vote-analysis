@@ -26,7 +26,6 @@ from dash import dcc, html
 
 from explore import (
     api,
-    charts,
     components,
     election_view,
     elections_view,
@@ -81,9 +80,6 @@ OVER_TIME_UNAVAILABLE = (
     "shown right now. Please try again in a minute."
 )
 
-#: C5's value-axis format (#596, D110): d3's SI form, trailing zeros trimmed ("50M"),
-#: written by :func:`explore.over_time.total_figure` since #582.
-C5_TICKFORMAT = charts.SHORT_TICKFORMAT
 
 #: Each C5 marker label's symbol, so no two marker series differ by color alone.
 _C5_SYMBOLS = {
@@ -289,9 +285,7 @@ def _over_time_section(
         # left and right margin for both, sized for C5's widest value ticks, with no
         # value axis pushing its own; each keeps its own top margin.
         for figure in (c4.figure, c5.figure):
-            layout = figure["layout"]
-            layout["margin"] = {**layout.get("margin", {}), **OVER_TIME_MARGIN}
-            layout["yaxis"]["automargin"] = False
+            over_time.align(figure, OVER_TIME_MARGIN)
         by_row = {id(row): point for row, point in zip(rows, points, strict=True)}
         notes = (
             labels.C4_BASIS,

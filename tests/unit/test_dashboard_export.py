@@ -2275,15 +2275,16 @@ def _state_history(body: dict[str, Any]) -> None:
     """A state's history (#560): T4's first row doctored, and the allotment and status
     it carries set alike on every row of its election, so C7 collapses them to one
     point rather than refusing the year, and its companion table words both cells.
-    C10 (#582) reads the same status, and that election's rows carry no total popular
-    vote (1824's, before the window), so its companion table words both its cells
-    too."""
+    C10 (#582) reads the same status, and its total is set to the sentinel on every
+    row of that election (so it collapses to one value), so its companion table words
+    both its cells through their own value paths."""
     _row(*STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE)(body)
     first = body["data"][0]
     for row in body["data"]:
         if row["year"] == first["year"]:
             row["state_electoral_votes"] = first["state_electoral_votes"]
             row["pv_status"] = first["pv_status"]
+            row["state_popular_total"] = SENTINEL
 
 
 #: Per page: the responses to doctor, each with every field a ``labels`` function

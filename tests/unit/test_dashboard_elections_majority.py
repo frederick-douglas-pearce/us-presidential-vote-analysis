@@ -483,7 +483,11 @@ class TestC2Methods:
             "circle-open": labels.C2_NO_FIGURE,
             "square-open": labels.UNRECOGNIZED,
         }
-        others = {**over_time.C4_SYMBOLS, **OVER_TIME_MOD["_C5_SYMBOLS"]}
+        others = {
+            **over_time.C4_SYMBOLS,
+            **OVER_TIME_MOD["_C5_SYMBOLS"],
+            **over_time.C10_SYMBOLS,  # #582
+        }
         shared = {"circle-open", "square-open"}  # no figure, unrecognized: one meaning
         for label, symbol in others.items():
             assert symbol not in set(c2) - shared, (label, symbol)

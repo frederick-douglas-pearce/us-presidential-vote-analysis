@@ -2014,7 +2014,7 @@ class TestTotalityGuards:
             assert figure["layout"]["title"] == TEST_FIGURE["layout"]["title"]
 
 
-# --- C5's short value ticks, the one exception (#596, D110) ----------------------------
+# --- C5's short value ticks, an exception C10 shares (#596, D110; #582, D113) ----------
 
 
 def short_figure(axis: str = "yaxis", tickformat: str = "~s") -> dict[str, Any]:

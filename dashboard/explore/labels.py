@@ -943,13 +943,14 @@ C5_MARKER_LABELS: dict[str, str] = {
 }
 #: C10's marker label, looked up by its table's cell (#582), as C5's is: the band's
 #: cells (:data:`BEFORE_WINDOW`, :data:`AFTER_WINDOW`) have none and draw no marker,
-#: and a null total with no status to explain it (:data:`NOT_IN_DATASET`) is a key
-#: series of its own, as in C4 and C7.
+#: and a null total with no status to explain it (:data:`NOT_IN_DATASET`) shares the
+#: "no total" entry with one inside the window, so the open circle keeps one meaning on
+#: the page (D113, amendment); the cell and the hover still say which it is.
 C10_MARKER_LABELS: dict[str, str] = {
     LEGISLATURE_CHOSE: C5_LEGISLATURE,
     TOOK_NO_PART: C5_TOOK_NO_PART,
     NO_STATE_TOTAL: C5_NO_TOTAL,
-    NOT_IN_DATASET: NOT_IN_DATASET,
+    NOT_IN_DATASET: C5_NO_TOTAL,
     UNRECOGNIZED: UNRECOGNIZED,
 }
 #: The C4/C5 table's last note: the window, and that a missing total is never a zero.

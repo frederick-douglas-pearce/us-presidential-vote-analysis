@@ -327,13 +327,26 @@ class TestC5:
         note = labels.C5_AFTER_NOTE.format(pv_year_max=2016)
         assert any(note in text for text in texts(tree))
 
-    def test_every_marker_label_has_a_symbol(self) -> None:
-        """A C5 marker label with no symbol would be dropped silently (#436's
-        review): inside the band that would read as a held popular vote."""
-        symbols = MOD["_C5_SYMBOLS"]
-        assert set(labels.C5_MARKER_LABELS.values()) | {labels.UNRECOGNIZED} <= set(
-            symbols
-        )
+    @pytest.mark.parametrize(
+        ("marker_labels", "symbols"),
+        [
+            (labels.C5_MARKER_LABELS, MOD["_C5_SYMBOLS"]),
+            # C10 shares C5's figure since #582 (D113(d)).
+            (labels.C10_MARKER_LABELS, over_time.C10_SYMBOLS),
+        ],
+    )
+    def test_every_marker_label_has_a_symbol(
+        self, marker_labels: dict[str, str], symbols: dict[str, str]
+    ) -> None:
+        """A C5 or C10 marker label with no symbol would be dropped silently (#436's
+        review; #582's, cr.13): inside the band that would read as a held popular
+        vote."""
+        assert set(marker_labels.values()) | {labels.UNRECOGNIZED} <= set(symbols)
+
+    def test_c10_draws_c5_s_symbols(self) -> None:
+        """One symbol per meaning (D113, amendment): every label C10 shares with C5
+        keeps C5's symbol, and C10 has no other."""
+        assert MOD["_C5_SYMBOLS"] == over_time.C10_SYMBOLS
 
     def test_a_repeated_nan_total_is_one_unrecognized_value(self) -> None:
         """D100(c) (#498): every 2016 row's total NaN is one value, though NaN is

@@ -7514,3 +7514,11 @@ key. Nothing yet labels the hybrid under T3 and the panel (#590).
 **Rationale.** (b) follows the field's documented meaning, not convenience: the rows skipped are exactly those the API defines as carrying no state total, and every row that carries a total is still compared. (a) and (c) keep AC5's isolation clean. (d)–(f) reuse C5's figure and D109's alignment rather than a second copy.
 
 **Action required.** None beyond #582. A `ba` follow-up may clarify the `EcPvRow.state_popular_total` description ("null where this candidate has no popular-vote record in this state"); #379 already holds that description's wording.
+
+**Amendment (#605's code review, round 1, 2026-11-21, owner-approved on the architect's scope ruling).**
+- (b) now reads: a row is skipped only when its `popular_votes` and `state_popular_total` are both `None`; **every other row must carry a non-null total**, and all of them must be one value. A candidate figure with a null total contradicts the premise (b) rests on and refuses, alone in its year or not. Before this amendment, a year whose only row read had a figure and a null total read a null total. The premise was checked against the live `GET /v1/states/GA` on 2026-11-21 and matched the recording. #606 tracks serving the total on every row, which would retire the skip.
+- (c) now reads: a fault in what both charts read degrades both: a year's `pv_status`, a year missing after the state's first (`over_time.state_series`), or a served name with no text. A fault in `state_electoral_votes` degrades C7 alone. A fault in `state_popular_total`, or in the popular-vote window (checked through `query.year_span`, as on C2 and C5), degrades C10 alone. As first written, (c) named only `pv_status` as degrading both.
+- **Key.** C10's key has one entry for both of its null-total cells. `NOT_IN_DATASET` maps to `C5_NO_TOTAL`, drawn as the open circle, so the open circle keeps one meaning ("no figure in this dataset") across C4, C5, C7 and C10, and on `/state/<usps>`. `C10_SYMBOLS` equals C5's. Each table cell and hover still names its own case.
+- **Not adopted:**
+  - One builder for C7's and C10's sections (KISS: about ten parameters).
+  - Moving the skip rule into the API in this change; that is #606.

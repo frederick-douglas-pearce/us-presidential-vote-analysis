@@ -46,6 +46,7 @@ from tests.e2e.dashboard_pages import (
     year_ticks,
 )
 from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
+from tests.e2e.test_dashboard_e2e_elections_over_time import assert_band_label_inside
 
 pytestmark = pytest.mark.e2e
 
@@ -342,8 +343,9 @@ def test_c7_and_c10_are_readable_at_phone_width(page: Page, width: int) -> None:
     """#560's AC6 and #582's (#558, D104): for each chart, the year along the bottom
     with its sparse ticks apart, every tick, axis title and key entry inside the width
     and none over another, no bar or marker text, no sideways scroll, and a hover
-    naming its year; C10's value ticks short ("5M"), its band labeled inside it, and
-    the two plots aligned, every value tick and axis title 8 px inside its chart."""
+    naming its year; C10's value ticks short ("5M"), its band labeled inside it with
+    the label over no other text, and the two plots aligned, every value tick and axis
+    title 8 px inside its chart."""
     page.set_viewport_size({"width": width, "height": 844})
     open_charts(page, width=width)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
@@ -354,7 +356,7 @@ def test_c7_and_c10_are_readable_at_phone_width(page: Page, width: int) -> None:
         expect(page.locator(f"{chart} .textpoint")).to_have_count(0)
         drawn = [
             b
-            for part in CHART_TEXTS
+            for part in (*CHART_TEXTS, ".annotation-text")
             for b in boxes(page, f"{chart} {part}")
             if b["w"] > 0 and b["text"]
         ]
@@ -377,10 +379,10 @@ def test_c7_and_c10_are_readable_at_phone_width(page: Page, width: int) -> None:
     assert ticks[0] == "0" and all(
         t == "0" or t[-1] in "kM" for t in ticks
     ), ticks
-    # C10's before band, labeled inside it, its label over no drawn text.
+    # C10's before band, labeled inside it (as C5's, #593), its label in the pairwise
+    # overlap check above with every tick, axis title and key entry.
     expect(page.locator(f"{C10} .layer-below .shapelayer path")).to_have_count(1)
-    (note,) = [b for b in boxes(page, f"{C10} .annotation-text") if b["w"] > 0]
-    assert note["x"] >= 0 and note["x"] + note["w"] <= width, note
+    assert_band_label_inside(page, C10)
     assert_plots_align(page)
 
 
