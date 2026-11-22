@@ -2215,6 +2215,12 @@ STATE_ROW_FIELDS = (
     "electoral_count_status",
     "pv_status",
 )
+#: The national fields the candidate's headline totals sum (#601, D115), shown in no
+#: table.
+CANDIDATE_TOTAL_FIELDS = (
+    "national_electoral_votes",
+    "national_electoral_votes_counted",
+)
 SUMMARY_ROW_FIELDS = (
     "nominating_party",
     "national_electoral_votes",
@@ -2362,11 +2368,15 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {"usps": "GA"},
         {"/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
+    # The headline totals' national fields (#601), which no table shows, doctored on
+    # the first row too, so each total reads its own field's value.
     "/candidate/<slug>": (
         {"slug": "andrew-jackson"},
         {
             "/v1/candidates/andrew-jackson": _row(
-                *STATE_ROW_FIELDS, nominating_party_note=DOCTORED_NOTE
+                *STATE_ROW_FIELDS,
+                *CANDIDATE_TOTAL_FIELDS,
+                nominating_party_note=DOCTORED_NOTE,
             )
         },
     ),
@@ -2415,13 +2425,19 @@ UNRECOGNIZED_CELLS = {
         "state-history": len(STATE_ROW_FIELDS) + 1 + 3 * (GA_FIRST_ROWS - 1),
         "state-electors": 2,
         "state-popular-total": 2,
+        # The doctored allotment makes both headline figures read it (#601, D115).
+        "state-history-metrics": 2,
     },
     # The doctored ratio makes both figures read it (#600, D114: one selection).
     "/state/<usps>/per-capita": {
         "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
         "state-per-capita-metrics": 2,
     },
-    "/candidate/<slug>": {"candidate-history": len(STATE_ROW_FIELDS) + 1},
+    # Each doctored national field makes its own total alone read it (#601, D115).
+    "/candidate/<slug>": {
+        "candidate-history": len(STATE_ROW_FIELDS) + 1,
+        "candidate-metrics": len(CANDIDATE_TOTAL_FIELDS),
+    },
 }
 
 
@@ -2612,6 +2628,8 @@ class TestNoRawValues:
                     "majority-metrics",
                     "elections-over-time-metrics",
                     "state-per-capita-metrics",
+                    "state-history-metrics",
+                    "candidate-metrics",
                 )
             },
         }

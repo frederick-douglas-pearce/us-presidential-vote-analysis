@@ -28,7 +28,7 @@ from typing import Any, NamedTuple
 import dash
 from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, query
+from explore import api, components, export, labels, metrics, over_time, query
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries, whatever the filters leave in T5.
@@ -39,6 +39,17 @@ TABLE_ID = "candidate-history"
 URL_ID = "candidate-url"
 YEAR_ID = "candidate-year"
 STATE_ID = "candidate-state"
+#: The headline figures (#601, D112(f), (g), D115): the block and each figure's value,
+#: by metric key, in display order, the page's one per-key table (D114(d)); DOM ids are
+#: stable and never renamed (D097(g)). In T5's card, after the controls.
+METRICS_ID = "candidate-metrics"
+METRIC_IDS = {
+    "candidate_elections_count": "candidate-elections-count",
+    "candidate_ev_cast_total": "candidate-ev-cast-total",
+    "candidate_ev_counted_total": "candidate-ev-counted-total",
+}
+#: The note under the figures while the State filter is applied.
+METRICS_NOTE_ID = "candidate-metrics-note"
 
 #: T5's columns, in display order, by public field name.
 FIELDS = (
@@ -234,6 +245,60 @@ def select(rows: list[dict[str, Any]], chosen: Filters) -> list[dict[str, Any]]:
     ]
 
 
+def _per_year(
+    rows: list[dict[str, Any]], field: str
+) -> list[tuple[int, object]] | None:
+    """One ``(year, value)`` pair per year of ``rows`` for a national ``field`` (#601,
+    D115; D098's pattern): every row of a year must carry one value, a null beside a
+    figure being two (:func:`explore.over_time.same`). ``None`` (that total reads
+    unrecognized) on a disagreement or a row without the field; the other field's total
+    is checked on its own. A year whose rows are all null passes its null, so its total
+    reads no figure (D097)."""
+    by_year: dict[int, object] = {}
+    for row in rows:
+        if field not in row:
+            return None
+        year, value = row["year"], row[field]
+        if year in by_year and not over_time.same(by_year[year], value):
+            return None
+        by_year.setdefault(year, value)
+    return sorted(by_year.items())
+
+
+def _figures(rows: list[dict[str, Any]], chosen: Filters) -> html.Div:
+    """The candidate's three headline figures (#601, D112(f), (g), D115), as a ``dl``:
+    the elections in which electors cast a vote for them and the national electoral
+    votes cast and counted, one value per year. They follow the year choice and never
+    the State filter (national totals), so they read the candidate's rows under the year
+    alone, never T5's shown rows; a note says so while a state is chosen. A fault in one
+    total's field makes that total alone unrecognized; T5 and the page stay."""
+    rows = [r for r in rows if chosen.year in (None, r["year"])]
+    years = _years(rows)
+    entries: list[Any] = []
+    for key, ident in METRIC_IDS.items():
+        metric = metrics.METRICS[key]
+        rest: str | None
+        if metric.kind == "count":
+            n = metrics.count(years)
+            first, last = (years[0], years[-1]) if years else (None, None)
+            value, rest = labels.metric_elections(
+                n, first, last, labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS
+            )
+        elif metric.kind == "sum":
+            pairs = _per_year(rows, metric.source.field)
+            total = metrics.UNRECOGNIZED_TOTAL if pairs is None else metrics.sum(pairs)
+            value, rest = labels.metric_total(total, labels.METRIC_NO_FIGURE[key])
+        else:
+            raise TypeError(f"{key} is no count or sum")
+        entries += components.metric_entry(key, ident, value, rest)
+    block: list[Any] = [html.Dl(entries, className="metrics")]
+    if chosen.state is not None:
+        block.append(
+            html.P(labels.METRIC_ALL_STATES_NOTE, id=METRICS_NOTE_ID, className="note")
+        )
+    return html.Div(block, id=METRICS_ID)
+
+
 def search_for(year: Any, state: Any) -> str:
     """The query string for the controls' values, in the normal form ``og:url`` uses
     (``""`` or ``?…``). Every year and a cleared control are omitted."""
@@ -390,6 +455,7 @@ def render(
             components.card(
                 [
                     _controls(rows, years, several, chosen),
+                    _figures(rows, chosen),
                     html.P(
                         f"Showing {len(shown)} of {len(rows)} rows", className="count"
                     ),

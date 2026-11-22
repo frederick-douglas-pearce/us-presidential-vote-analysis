@@ -1582,7 +1582,8 @@ class TestWideLayout:
     ) -> None:
         # #560, D106: the lede is added by layout(), so the whole page is checked there:
         # the heading, the lede and the page body, nothing between. In the body, the
-        # section links first (#559, D105); then C7's section (its heading, the chart,
+        # section links first (#559, D105); then C7's section (its heading, its
+        # headline figures (#601, D115), the chart,
         # its table's heading, the table in its scroll box, its download, its notes and
         # its column-name list); then C10's, laid out alike (#582, D113); then T4's,
         # under its own heading, with the page's Location and the filters that narrow
@@ -1600,10 +1601,11 @@ class TestWideLayout:
         c7 = card_children(content, 1)
         assert type(c7[0]).__name__ == "H2"
         assert c7[0].children == MOD["C7_HEADING"]
-        assert type(c7[1]).__name__ == "Figure"
-        assert c7[1].id == charts.dom_id(MOD["C7_ID"])
-        assert type(c7[2]).__name__ == "H2"
-        assert c7[2].children == MOD["C7_TABLE_HEADING"]
+        assert c7[1].id == MOD["METRICS_ID"]
+        assert type(c7[2]).__name__ == "Figure"
+        assert c7[2].id == charts.dom_id(MOD["C7_ID"])
+        assert type(c7[3]).__name__ == "H2"
+        assert c7[3].children == MOD["C7_TABLE_HEADING"]
         # C7's table and its column-name list are in C7's card, and T4 is not.
         assert find(c7, MOD["ELECTORS_TABLE_ID"]) is not None
         assert find(c7, MOD["ELECTORS_GLOSSARY_ID"]) is not None
@@ -2809,3 +2811,199 @@ class TestPerCapitaFigures:
         ids = routed_ids(route("/state/GA/per-capita"))
         assert PC_FIGURES in ids and all(i in ids for i in PC_FIGURE_IDS.values())
         assert calls == [GA_PER_CAPITA_PATH]
+
+
+# The state history's headline figures (#601, D112(e), (g), D115).
+ST_FIGURES = MOD["METRICS_ID"]
+ST_FIGURE_IDS: dict[str, str] = MOD["METRIC_IDS"]
+ELECTIONS_COUNT = "state_elections_count"
+TOOK_OFFICE = "state_took_office_count"
+
+
+def st_figure(tree: Any, key: str) -> str:
+    dd = find(tree, ST_FIGURE_IDS[key])
+    assert dd is not None, key
+    return "".join(texts(dd))
+
+
+def took_office_row(body: dict[str, Any], year: int) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = [
+        r for r in body["data"] if r["year"] == year and r["took_office"]
+    ]
+    (row,) = rows
+    return row
+
+
+class TestStateFigures:
+    def test_the_hand_counts(self) -> None:
+        # #569's plan recordings: GA has rows in 51 years, 50 with electors appointed
+        # (1864's allotment is 0); the candidate who took office got at least one of
+        # its cast votes in 27 of them. Comparing ``electoral_votes`` with
+        # ``state_electoral_votes`` would give 28 (1864 reads 0 == 0).
+        tree = render()
+        assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+        assert st_figure(tree, TOOK_OFFICE) == "27 of 50 elections (1824–2024)"
+        note = find(tree, MOD["METRICS_NOTE_ID"])
+        assert " ".join(texts(note)) == labels.METRIC_ZERO_ALLOTMENT_NOTE.format(
+            years="1864"
+        )
+
+    def test_the_count_reconciles_to_c7_s_table(self) -> None:
+        # D112(g): unfiltered, so the count is C7's companion table's rows whose
+        # allotment is above 0, and the note's years those at 0.
+        tree = render()
+        cells = body_cells(tree)
+        nonzero = [int(year) for year, appointed, _ in cells if appointed != "0"]
+        zero = [int(year) for year, appointed, _ in cells if appointed == "0"]
+        assert len(cells) == 51 and zero == [1864]
+        assert st_figure(tree, ELECTIONS_COUNT) == (
+            f"{len(nonzero)} elections ({nonzero[0]}–{nonzero[-1]})"
+        )
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "year_from=1900&year_to=1960",
+            "candidate=andrew-jackson",
+            "pv_status=popular_vote",
+        ],
+    )
+    def test_t4_s_filters_never_reach_them(self, query: str) -> None:
+        plain, filtered = render(), render(query)
+        assert texts(find(filtered, TABLE)) != texts(find(plain, TABLE))
+        for key in ST_FIGURE_IDS:
+            assert st_figure(filtered, key) == st_figure(plain, key), (query, key)
+
+    @pytest.mark.parametrize(
+        "change",
+        ["no took-office row", "two took-office rows", "null", "missing", "a number"],
+    )
+    def test_a_took_office_fault_makes_that_figure_alone_unrecognized(
+        self, change: str
+    ) -> None:
+        # Architect I3 (D115): the flag figure alone reads it; the count, C7, T4 and
+        # the page stay, so nothing it reads reaches C7's section's except.
+        body = ga_body()
+        row = took_office_row(body, 1828)
+        other = next(
+            r for r in body["data"] if r["year"] == 1828 and not r["took_office"]
+        )
+        if change == "no took-office row":
+            row["took_office"] = False
+        elif change == "two took-office rows":
+            other["took_office"] = True
+        elif change == "null":
+            other["took_office"] = None
+        elif change == "missing":
+            del other["took_office"]
+        else:
+            other["took_office"] = 1
+        tree = render(body=body)
+        assert st_figure(tree, TOOK_OFFICE) == labels.UNRECOGNIZED
+        assert find(tree, ST_FIGURE_IDS[TOOK_OFFICE]).title == labels.UNRECOGNIZED_NOTE
+        assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+        assert c7_figure(tree) is not None
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is None
+        assert find(tree, TABLE) is not None and tree.id == PAGE_ID
+
+    @pytest.mark.parametrize("votes", [3.0, True, -1, "x"])
+    def test_a_took_office_vote_no_count_can_read_is_unrecognized(
+        self, votes: Any
+    ) -> None:
+        body = ga_body()
+        took_office_row(body, 1828)["electoral_votes"] = votes
+        tree = render(body=body)
+        assert st_figure(tree, TOOK_OFFICE) == labels.UNRECOGNIZED
+        assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+
+    @pytest.mark.parametrize("votes", [None, "", " "])
+    def test_a_null_took_office_vote_is_left_out_of_n(self, votes: Any) -> None:
+        # D112(a) as amended, architect I5: a null is never read as false; N drops.
+        body = ga_body()
+        row = took_office_row(body, 2024)
+        assert row["electoral_votes"] > 0  # a year counted among the 27
+        row["electoral_votes"] = votes
+        tree = render(body=body)
+        assert st_figure(tree, TOOK_OFFICE) == "26 of 49 elections (1824–2020)"
+        assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+
+    def test_every_took_office_vote_null_names_no_cause(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            if row["took_office"]:
+                row["electoral_votes"] = None
+        tree = render(body=body)
+        assert st_figure(tree, TOOK_OFFICE) == labels.METRIC_NO_FIGURE[TOOK_OFFICE]
+
+    def test_a_split_delegation_counts(self) -> None:
+        # D112(e): any cast vote for the candidate who took office counts. GA 1828's
+        # took-office row set to one vote of its allotment still counts.
+        body = ga_body()
+        row = took_office_row(body, 1828)
+        before = st_figure(render(body=copy.deepcopy(body)), TOOK_OFFICE)
+        row["electoral_votes"] = 1
+        assert row["state_electoral_votes"] > 1
+        assert st_figure(render(body=body), TOOK_OFFICE) == before
+
+    @pytest.mark.parametrize("value", [9.0, None, -1, "x"])
+    def test_an_allotment_no_count_can_read_makes_both_unrecognized_and_keeps_c7(
+        self, value: Any
+    ) -> None:
+        # Architect I4 (D115): set on every row of 1828, so C7's collapse holds one
+        # value; C7 draws it as a marker and stays, as T4 and the page do.
+        body = ga_body()
+        for row in body["data"]:
+            if row["year"] == 1828:
+                row["state_electoral_votes"] = value
+        tree = render(body=body)
+        for key in ST_FIGURE_IDS:
+            assert st_figure(tree, key) == labels.UNRECOGNIZED, key
+        assert find(tree, MOD["METRICS_NOTE_ID"]) is None
+        assert c7_figure(tree) is not None
+        assert find(tree, TABLE) is not None and tree.id == PAGE_ID
+
+    def test_a_collapse_fault_removes_them_with_c7(self) -> None:
+        # D112(c)'s precedent: C7's collapse is their input, so two allotments in one
+        # year degrade C7's section and the figures go with it; T4 stays.
+        body = ga_body()
+        rows_1828 = [r for r in body["data"] if r["year"] == 1828]
+        rows_1828[0]["state_electoral_votes"] += 1
+        tree = render(body=body)
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert find(tree, ST_FIGURES) is None
+        assert find(tree, TABLE) is not None
+
+    def test_no_year_with_electors_says_so_for_both(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            row["state_electoral_votes"] = 0
+        tree = render(body=body)
+        for key in ST_FIGURE_IDS:
+            assert st_figure(tree, key) == labels.METRIC_NO_FIGURE_NO_ELECTORS, key
+        assert find(tree, MOD["METRICS_NOTE_ID"]) is None
+
+    def test_one_year_with_electors_names_its_year(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            if row["year"] != 1828:
+                row["state_electoral_votes"] = 0
+        tree = render(body=body)
+        assert st_figure(tree, ELECTIONS_COUNT) == "1 election (1828)"
+        assert st_figure(tree, TOOK_OFFICE).endswith(" of 1 election (1828)")
+
+    def test_they_sit_in_c7_s_card_after_its_heading_and_before_the_chart(
+        self,
+    ) -> None:
+        tree = render()
+        card = in_one_card(tree, ST_FIGURES, total=3)
+        assert find(card, charts.dom_id(MOD["C7_ID"])) is not None
+        order = [getattr(n, "id", None) for n in components._within(card.children)]
+        assert order.index(ST_FIGURES) < order.index(charts.dom_id(MOD["C7_ID"]))
+
+    def test_the_page_still_makes_the_same_requests(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        ids = routed_ids(route("/state/GA"))
+        assert ST_FIGURES in ids and all(i in ids for i in ST_FIGURE_IDS.values())
+        assert calls == [GA_PATH]

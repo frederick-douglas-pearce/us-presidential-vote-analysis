@@ -475,3 +475,51 @@ def test_the_per_capita_figures_read_inside_phone_width(page: Page, width: int) 
     figures, table = rect(page, PER_CAPITA_FIGURES), rect(page, "#state-per-capita")
     assert figures["bottom"] <= table["top"], (figures, table)
 
+
+
+# --- the state history's and candidate's headline figures (#601, D115) ----------------
+
+STATE_FIGURES = "#state-history-metrics"
+CANDIDATE_FIGURES = "#candidate-metrics"
+
+
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_the_state_figures_read_inside_phone_width(page: Page, width: int) -> None:
+    """AC 360 px (#601): both figures and the note naming 1864 sit inside the width
+    with no sideways scroll in Light, Dark and System, above C7's chart."""
+    open_at(page, STATE_PATH, width)
+    expect(page.locator("#state-took-office-count")).to_have_text(
+        "27 of 50 elections (1824–2024)"
+    )
+    assert_figures_inside(page, STATE_FIGURES, width, 5)
+    figures, chart = rect(page, STATE_FIGURES), rect(page, "#c7")
+    assert figures["bottom"] <= chart["top"], (figures, chart)
+
+
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_the_candidate_figures_read_inside_phone_width(page: Page, width: int) -> None:
+    """AC 360 px (#601): the count and both totals inside the width with no sideways
+    scroll in Light, Dark and System, above T5."""
+    open_at(page, CANDIDATE_PATH, width)
+    expect(page.locator("#candidate-ev-cast-total")).to_have_text(
+        "496, over 3 elections (1824–1832)"
+    )
+    assert_figures_inside(page, CANDIDATE_FIGURES, width, 6)
+    figures, table = rect(page, CANDIDATE_FIGURES), rect(page, "#candidate-history")
+    assert figures["bottom"] <= table["top"], (figures, table)
+
+
+def test_a_year_pill_updates_the_candidate_figures_with_no_reload(page: Page) -> None:
+    """#601 (architect suggestion): the figures follow the year choice through the
+    filter callback's client-side route, the document kept."""
+    open_at(page, CANDIDATE_PATH, 390)
+    page.evaluate("window.__kept = true")
+    page.locator("#candidate-year label", has_text="1828").click()
+    expect(page.locator("#candidate-elections-count")).to_have_text(
+        "1 election (1828)"
+    )
+    expect(page.locator("#candidate-ev-counted-total")).to_have_text(
+        "178, over 1 election (1828)"
+    )
+    assert "year_from=1828" in page.url
+    assert page.evaluate("window.__kept === true")
