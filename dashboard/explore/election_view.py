@@ -64,6 +64,24 @@ def row_year(row: Any) -> int | None:
     return query.checked_year(row.get("year")) if isinstance(row, dict) else None
 
 
+#: The three margins, in the panel's order: the fields :func:`margin_cells` words.
+MARGINS = ("ec_margin", "pv_margin", "hybrid_margin")
+
+
+def margin_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, str]:
+    """A year's three margin cells, by field (#563): the one cell function the election
+    panel and T1 on ``/elections`` share, so the two always read the same for a year.
+    The electoral margin exists for every year, so its null names no cause; a null
+    popular-vote or hybrid margin outside the popular-vote window (from ``coverage``)
+    reads :data:`explore.labels.NOT_APPLICABLE`. ``block`` is the year's election
+    panel block or its N1 ``elections`` item; a missing field is a ``KeyError``."""
+    applicable = labels.in_pv_window(year, coverage)
+    return {
+        field: labels.margin(block[field], field == "ec_margin" or applicable)
+        for field in MARGINS
+    }
+
+
 def served_year(path_vars: dict[str, Any], body: Any) -> bool:
     """Whether ``path_vars["year"]`` is a year ``/v1/elections`` serves.
 

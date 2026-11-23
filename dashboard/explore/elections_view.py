@@ -125,6 +125,65 @@ def n1_items(index: dict[str, Any], summary: Any) -> dict[int, dict[str, Any]]:
     return by_year
 
 
+class Recipient(NamedTuple):
+    """One N1 ``data`` row as T1's Recipients cell and C9's hover read it (#563): the
+    served name and the electoral votes cast and counted, each already checked."""
+
+    candidate: str
+    cast: int
+    counted: int
+
+
+def n1_recipients(index: dict[str, Any], summary: Any) -> dict[int, list[Recipient]]:
+    """N1's ``data`` rows by year, in served order, for every year the index serves
+    (#563, D116): the one check of the rows T1's Recipients column and chart C9 read,
+    and their reconciliation with the index.
+
+    Each row's year is one the index serves (:func:`explore.election_view.row_year`
+    checks it), its ``candidate`` has text, its ``national_electoral_votes`` (cast) is
+    an ``int`` above zero, and its ``national_electoral_votes_counted`` an ``int`` from
+    zero to cast; ``bool`` is never an ``int`` here. A row with no votes cast is
+    refused, never left out: the API counts every N1 row in ``candidate_count``
+    (D116(d)). Then, for every index row, its ``candidate_count`` is an ``int`` of at
+    least 1 equal to its year's number of rows, so no year reconciles to an empty bar.
+    It is run over every served year before the filters apply, so a defect in a year
+    the filters hide still shows. It formats nothing.
+
+    Pure; raises ``KeyError`` for a missing key and ``TypeError`` for anything else
+    above.
+    """
+    served = served_years(index)
+    if not isinstance(summary, dict):
+        raise TypeError(f"{N1} is not an object")
+    rows = summary["data"]
+    if not isinstance(rows, list):
+        raise TypeError(f"{N1} carries no list of rows")
+    by_year: dict[int, list[Recipient]] = {year: [] for year in served}
+    for row in rows:
+        year = election_view.row_year(row)
+        if year is None or year not in served:
+            raise TypeError(f"{N1}: a row of a year the index does not serve")
+        name = row["candidate"]
+        cast = row["national_electoral_votes"]
+        counted = row["national_electoral_votes_counted"]
+        if not labels.has_text(name):
+            raise TypeError(f"{N1}: a row names no candidate")
+        if type(cast) is not int or cast <= 0:
+            raise TypeError(f"{N1}: a row's votes cast is not a count above zero")
+        if type(counted) is not int or not 0 <= counted <= cast:
+            raise TypeError(f"{N1}: a row's votes counted is not a count up to cast")
+        by_year[year].append(Recipient(name, cast, counted))
+    for election in index["data"]:
+        count = election["candidate_count"]
+        if (
+            type(count) is not int
+            or count < 1
+            or count != len(by_year[election["year"]])
+        ):
+            raise TypeError(f"{N1}: a year's rows do not match its candidate count")
+    return by_year
+
+
 def index_rule(index: dict[str, Any]) -> tuple[tuple[int, int], dict[int, bool]]:
     """The index's popular-vote window and each served year's ``has_popular_vote``,
     checked as the page's, never a section's (#562's cr.1; #564's review, cr.3 and

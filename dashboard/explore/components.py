@@ -519,6 +519,12 @@ def metric_entry(key: str, ident: str, value: str, rest: str | None) -> list[Any
     ]
 
 
+#: A page-only column's header class (#563, D116): the table shows the column and its
+#: download leaves it out, so the dashboard export tests' ``link_problems`` (through
+#: ``TestEveryTable``) checks the download's header against the other headers.
+PAGE_ONLY_CLASS = "page-only"
+
+
 def table(
     rows: Sequence[dict[str, Any]],
     render_row: Callable[[dict[str, Any]], html.Tr],
@@ -529,6 +535,7 @@ def table(
     extra: tuple[str, ...] = (),
     notes: tuple[str, ...] = (),
     empty: str = NO_ROWS,
+    page_only: tuple[tuple[str, str], ...] = (),
 ) -> list[Any]:
     """A table, its CSV download and its notes (#309).
 
@@ -545,6 +552,13 @@ def table(
     the file's preamble, so what they explain is explained in both. With no rows, there
     is no table and nothing to download: ``empty`` says so. The link is the scroll
     box's next sibling, outside it, so it never scrolls away with the table.
+
+    ``page_only`` (#563, D116, amending D075) appends columns the page shows and the
+    download leaves out, each as ``(header, sources)``: a cell built from several
+    served values, which no one public field names. Each header is the page's text,
+    marked :data:`PAGE_ONLY_CLASS`, with ``sources`` (the served fields it is built
+    from) as its tooltip; they follow the ``fields`` headers, and ``render_row``
+    writes their cells last. The CSV is built from ``fields`` and ``extra`` alone.
     """
     shown = [html.P(note, className="note") for note in notes]
     if not rows:
@@ -555,7 +569,20 @@ def table(
         html.Div(
             html.Table(
                 [
-                    html.Thead(html.Tr([labels.header(field) for field in fields])),
+                    html.Thead(
+                        html.Tr(
+                            [labels.header(field) for field in fields]
+                            + [
+                                html.Th(
+                                    text,
+                                    title=sources,
+                                    scope="col",
+                                    className=PAGE_ONLY_CLASS,
+                                )
+                                for text, sources in page_only
+                            ]
+                        )
+                    ),
                     html.Tbody([render_row(row) for row in rows]),
                 ],
                 id=table_id,

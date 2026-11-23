@@ -61,7 +61,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     # A backstop only: the capped steps below fire first.
-    timeout-minutes: 30
+    timeout-minutes: 33
     steps:
       - uses: actions/checkout@v4
 
@@ -118,8 +118,10 @@ jobs:
         # The suite ran 474–480 s on CI by #560 (C7), at the old 8-minute cap, and timed
         # out with every test passing (#578). 11 minutes leaves room while #579 looks at
         # cutting its run time; with the other caps and the setup margin it stays under
-        # the job's 30 (tests/unit/test_e2e_workflow.py).
-        timeout-minutes: 11
+        # the job's cap (tests/unit/test_e2e_workflow.py). Raised to 14 (owner, #563):
+        # C9's tests took the suite past 11 minutes with every test passing, and the
+        # job cap went from 30 to 33 to keep the margin; #589 re-derives the limit.
+        timeout-minutes: 14
         run: uv run pytest -m e2e --tracing retain-on-failure
 
       - name: Upload traces (on failure)

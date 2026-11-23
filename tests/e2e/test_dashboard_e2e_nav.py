@@ -279,8 +279,10 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     expect_marked(page, ("elections", "page"))
-    # No chart on /elections since #562 (C2 has its own page), so no plotly.js or
-    # graph chunk is requested here or on the return below.
+    # /elections draws C9 since #563: wait for it to be drawn, so dcc's graph chunk
+    # and plotly.js, each fetched once per document, are already loaded and nothing
+    # but the router is requested on any navigation below, the return included.
+    page.locator("#c9 .main-svg").first.wait_for()
     seen: list[tuple[str, str, str]] = []
 
     def on_request(request: Request) -> None:

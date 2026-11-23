@@ -105,6 +105,10 @@ LABELS: dict[str, str] = {
     # Chart C10 and its companion table (#582): a ``/v1/states/{usps}`` row's total
     # popular vote (restored; #436's wording, retired with C5's one-state mode, #562).
     "state_popular_total": "Total popular vote (state)",
+    # T1's two N1 columns (#563, served by #570): "cast" because the sum is of votes
+    # cast while the rank is by votes counted.
+    "electoral_votes_outside_top_two": "Electoral votes cast outside the top two",
+    "electors_without_a_counted_vote": "Electors without a counted vote",
 }
 
 #: Each closed ``pv_status`` value, as a filter option reads it.
@@ -943,6 +947,42 @@ NOMINATING_PARTY: dict[str, str] = {
 }
 
 
+# --- Chart C9 (#563, D116): ba spec, approved at #563's plan gate, 2026-11-22 ---------
+
+#: One recipient of electoral votes in a year, as T1's Recipients cell writes it (one
+#: line each, in N1's served order) and C9's hover repeats it.
+RECIPIENT_LINE = "{candidate}: {cast} cast, {counted} counted"
+C9_TITLE = "Candidates with electoral votes in each election"
+C9_VALUE_AXIS = "Candidates with electoral votes"
+C9_HOVER = "{year}<br>Candidates with electoral votes: {count}<br>{recipients}"
+C9_BASIS = (
+    "Each bar is one election: the number of candidates who received at least one "
+    "electoral vote cast that year."
+)
+C9_CAST_NOTE = (
+    "A candidate is included even if Congress did not count their votes: in 1872, "
+    "Horace Greeley received 3 electoral votes cast and none counted."
+)
+#: C9's finding over the years shown: two or more shown, at least one above two.
+C9_FINDING = (
+    "In {more} of the {n} elections shown, more than two candidates received "
+    "electoral votes. The most in one election was {most}, in {years}."
+)
+C9_FINDING_NONE = (
+    "In none of the {n} elections shown did more than two candidates receive "
+    "electoral votes."
+)
+C9_FINDING_ONE = "Candidates with electoral votes in {year}: {count}."
+C9_HOVER_NOTE = (
+    "Hovering over or tapping a bar lists each candidate who received electoral votes "
+    "that year, with their electoral votes cast and counted, as the list of elections "
+    "on this page does."
+)
+C9_UNAVAILABLE = (
+    "The chart of how many candidates received electoral votes in each election can't "
+    "be shown right now. Please try again in a minute."
+)
+
 # --- Charts C4 and C5 (#436, D100): ba spec, approved at #436's plan gate -------------
 
 #: C4's title, and the one-state form C7 shares (#560; C4 draws all states only since
@@ -1205,11 +1245,14 @@ def glossary(
     summary: str = "Column names",
     chosen: Mapping[str, str] | None = None,
     ident: str | None = None,
+    page_only: Iterable[tuple[str, str]] = (),
 ) -> html.Details:
     """Each column's plain label beside the API field name it shows. A list that is no
     table (the election panel) names its ``summary`` otherwise, and a label that
     depends on the data (``ec_winner``'s, #355) comes from ``chosen``. ``ident`` is the
-    list's DOM id, where a page has several (#436)."""
+    list's DOM id, where a page has several (#436). ``page_only`` lists, after the
+    fields, each page-only column (#563, D116) as its header and the served fields it
+    is built from."""
     shown = {**LABELS, **(chosen or {})}
     kwargs: dict[str, Any] = {} if ident is None else {"id": ident}
     return html.Details(
@@ -1220,6 +1263,11 @@ def glossary(
                     item
                     for field in fields
                     for item in (html.Dt(shown[field]), html.Dd(html.Code(field)))
+                ]
+                + [
+                    item
+                    for header_text, sources in page_only
+                    for item in (html.Dt(header_text), html.Dd(html.Code(sources)))
                 ]
             ),
         ],

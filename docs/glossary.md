@@ -293,6 +293,51 @@ articles and announcements). Every rule binds all three unless the rule states a
   counts (a candidate in several elections is listed once).
 - **Status:** settled
 
+### Candidates with electoral votes chart (C9)
+- **Plain:** A chart on the list of elections, with election years running left to right, oldest at
+  the left. Each bar is one election, and its height is how many candidates received electoral
+  votes in it. Hovering over or tapping a bar shows the year, that number, and each candidate who
+  received electoral votes that year, with their electoral votes cast and counted. The page's
+  filters narrow the chart and the list together.
+- **Precise:** C9 in `CHARTS` on `/elections`, id `c9`, companion table T1 (`elections-table`),
+  in the list's card after the pair (the filters, the count and the averages), full width, above
+  T1. One bar per distinct year T1 shows, at its year on the year axis (D104), its height the
+  served `candidate_count` of that year's `/v1/elections` row; the dashboard counts nothing
+  (D097, D091). One series, `--chart-ec` (D109), with no key and no bar text (D104(c)). The hover
+  is the year, T1's count cell and that year's *Recipients* lines, escaped (D091). The caption's
+  finding is computed from the served counts of the years shown: one sentence for one year, and
+  otherwise how many of the elections shown had more than two candidates with electoral votes and
+  the most in one election, with every year that ties for the most, or a sentence that none did.
+  The year-range and popular-vote filters narrow C9 with T1 (D110, D116(b)); a filter leaving no
+  year shows `labels.NO_ELECTIONS_MATCH` and no chart. Two degradation tiers (D116(e)). Tier 1:
+  N1 cannot be read, its `elections` items fail `elections_view.n1_items`, the bounds of the
+  index's popular-vote window fail `query.year_span` (a missing bound is the whole page's defect),
+  or any served year's item lacks a field T1's N1 cells or `election_view.margin_cells` read (T1's
+  four N1 fields and `hybrid_margin`). C9 is replaced by `labels.C9_UNAVAILABLE` (id `elections-c9-unavailable`),
+  and every N1 cell in T1 reads `T1_N1_UNAVAILABLE_CELL`. Tier 2: `elections_view.n1_recipients`
+  refuses a row (a row with no votes cast is refused, never left out), or a year's number of rows
+  differs from its `candidate_count`, which must also be at least 1. Both tiers' checks run over
+  every served year, before the filters apply, and the tier comes from the check, never from a
+  cell. C9 is replaced by the same sentence, and only
+  T1's Recipients cells read `T1_N1_UNAVAILABLE_CELL`. Every drawn year's count is reconciled
+  first, so C9 has no labeled marker.
+- **Shown as:** `labels.C9_TITLE`, `labels.C9_VALUE_AXIS`, `labels.C9_HOVER` (its recipients
+  written with `labels.RECIPIENT_LINE`), the caption sentences in order `labels.C9_BASIS`,
+  `labels.C9_CAST_NOTE`, one of `labels.C9_FINDING`, `labels.C9_FINDING_NONE` or
+  `labels.C9_FINDING_ONE` (tied years through `labels.metric_years`), and
+  `labels.C9_HOVER_NOTE`, then `labels.CHART_TABLE_POINTER`; `labels.C9_UNAVAILABLE`; the year
+  axis's title (`LABELS["year"]`); `FILTER_SENTENCE` in `pages/elections.py`, which names the
+  chart and the list.
+- **Source:** #563 acceptance criteria; D116 (amending D075, and D093(a) through D110(a));
+  D091; D097; D104; D110; `YearListItem.candidate_count` and the `NationalSummaryRow` fields in
+  `src/usvote/api/models.py`; `CHARTS` in `dashboard/explore/charts.py`; reader wording: `ba`
+  spec for #563, approved by the owner at its plan gate (2026-11-22).
+- **Not:** Candidates on the ballot. Only the candidates whose votes Congress counted (1872's
+  Greeley is included). *Candidates in the dataset (dataset-wide count)*. A count the dashboard
+  makes itself.
+- **Status:** settled; wording pending (the historical claim in `labels.C9_CAST_NOTE`, that in
+  1872 Horace Greeley received 3 electoral votes cast and none counted, awaits the owner's check)
+
 ### Candidates with electoral votes (count per election)
 - **Plain:** How many candidates received electoral votes in that election.
 - **Precise:** `candidate_count` on a `/v1/elections` row: the number of distinct candidates in
@@ -300,7 +345,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   vote cast that year, including one whose votes Congress did not count (1872, Greeley: 3 cast,
   0 counted). `/v1/meta` also has a `candidate_count` with another meaning: see *Candidates in
   the dataset (dataset-wide count)*.
-- **Shown as:** `LABELS["candidate_count"]` (T1); on the API's `/docs` page, the
+- **Shown as:** `LABELS["candidate_count"]` (T1); in C9 (*Candidates with electoral votes chart
+  (C9)*), each bar's height, `labels.C9_TITLE`, the value-axis title `labels.C9_VALUE_AXIS` and
+  the count line of `labels.C9_HOVER`; on the API's `/docs` page, the
   `YearListItem.candidate_count` field description in `src/usvote/api/models.py`.
 - **Source:** `YearListItem.candidate_count` in `src/usvote/api/models.py`;
   `SnapshotRepository.list_years` in `src/usvote/api/repository.py` (per-year count over
@@ -450,7 +497,8 @@ articles and announcements). Every rule binds all three unless the rule states a
   after the page's year filters, C4 above C5 with their year axes lined up, followed by the one
   companion table they share. C7 is on a state's history page (`/state/<usps>`), before the filters,
   with its own companion table; C10 is below C7, with its own companion table, their plots lined
-  up (#582).
+  up (#582). C9 is on `/elections`, in the list's card after the filters, the count and the
+  averages, full width above T1, its companion table (#563, D116).
 - **Source:** #432 acceptance criteria; `.claude/specs/backlog-dashboard.md`, E9-S6,
   "Conventions every chart follows"; owner decisions, 2026-11-05 (titles describe the chart and a
   caption may state a finding or carry narrative; plotly.js from its CDN, loaded lazily, with no
@@ -476,7 +524,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   share one companion table (C4 and C5). C4 and C5's table, on `/elections/over-time`, shows all
   states; the page's year filters narrow it and both charts alike, as they narrow C2 and its table
   on `/elections/majority` (#596). On a state's history page, C7's and C10's companion tables are
-  each their own; the page's filters narrow T4 only. `components.chart` refuses any other table. The table pointer links
+  each their own; the page's filters narrow T4 only. On `/elections`, T1 is C9's companion table,
+  and the page's filters narrow both alike (#563, D110, D116(b)); C9's hover also lists the
+  recipients, which T1 shows on the page but leaves out of its download (*Recipients*).
+  `components.chart` refuses any other table. The table pointer links
   to `#<table id>`, the table element itself, below the table's heading. Every chart's pointer has
   the same text; the caption it ends tells the reader which chart it belongs to. Like every table,
   it is built by `components.table` with its own CSV. A filter on the page can narrow the table
@@ -570,7 +621,21 @@ articles and announcements). Every rule binds all three unless the rule states a
   `OVER_TIME_UNAVAILABLE` in `pages/elections_over_time.py`, when `/v1/elections/summary` cannot be
   read): each is the only section on its page, and the page keeps its heading, lede and section
   links. The averages' own unavailable state (`METRICS_UNAVAILABLE` in `pages/elections.py`): the
-  count of elections shown and the rest of the page still show.
+  count of elections shown and the rest of the page still show. C9's and T1's N1 columns' own
+  unavailable states on `/elections` (#563, D116(e)). In tier 1 (N1 cannot be read, its
+  `elections` items fail their check, the bounds of the popular-vote window fail theirs, or a
+  served year's item lacks a field T1's N1 cells are built from; checked over every served year
+  before the filters): `labels.C9_UNAVAILABLE` (id
+  `elections-c9-unavailable`) in C9's place, `T1_N1_UNAVAILABLE_CELL` in each of T1's five N1
+  columns, and `T1_N1_UNAVAILABLE_NOTE` first among T1's notes and in its download where one is offered,
+  and among the notes even when the filters leave no election (the tier comes from the check, never from a cell; C9 then shows nothing).
+  In tier 2 (a recipient row fails its check, a row with no votes cast included, or a year's rows
+  do not match its `candidate_count`, which must be at least 1):
+  `labels.C9_UNAVAILABLE`, and `T1_N1_UNAVAILABLE_CELL` in the Recipients cells only, with no
+  note. The rest of T1 and the page still show. In a download made while N1 can't be read, an
+  empty cell in the four columns the note names means not read. It does not mean null, even
+  though the preamble's last line (`export.NULL_LINE`) still prints; the note overrides it (owner
+  decision at #563's plan gate, 2026-11-22).
 - **Status:** settled
 
 ### Earliest and latest electors appointed (figures)
@@ -647,7 +712,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   with no served year on one side has no link on that side. "Earlier" and "later" are about the years this
   dataset serves, not a claim that no election fell between two linked years.
 - **Shown as:** `LABELS["year"]`; the year axis of C2 on `/elections/majority`, of C4 and C5 on
-  `/elections/over-time` and of C7 and C10 on `/state/<usps>`, a numeric axis with a tick every 4, 8, 10, 20
+  `/elections/over-time`, of C9 on `/elections` and of C7 and C10 on `/state/<usps>`, a numeric axis with a tick every 4, 8, 10, 20
   or 40 years, the smallest of those that goes into the span of years shown at most five times, so
   the axis writes at most five ticks (every 40 years over every served year); the year-range slider
   (`/elections`, `/elections/majority`, `/elections/over-time`, `/state/<usps>`,
@@ -1038,7 +1103,9 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** `LABELS["electoral_votes"]`, `LABELS["national_electoral_votes"]`. On
   `/candidate/<slug>`, `national_electoral_votes` is added up over the elections shown in
   `labels.METRIC_LABELS["candidate_ev_cast_total"]`, and on `/state/<usps>` the took-office row's
-  `electoral_votes` decides `labels.METRIC_LABELS["state_took_office_count"]`.
+  `electoral_votes` decides `labels.METRIC_LABELS["state_took_office_count"]`. On `/elections`,
+  each recipient's cast number in T1's Recipients column and C9's hover (`labels.RECIPIENT_LINE`;
+  *Recipients*).
 - **Source:** `EcPvRow.electoral_votes`; `NationalSummaryRow.national_electoral_votes`;
   `count_status.CAST_VOTES_COLUMN`; D046; `posts/2026-08-25-it-takes-270-but-270-of-what.md`.
 - **Not:** *Electoral votes counted* (they differ in 1868 and 1872); *Appointed electors*.
@@ -1054,7 +1121,9 @@ articles and announcements). Every rule binds all three unless the rule states a
   in C1, the hover line "Electoral votes counted" (`labels.C1_EC_HOVER`) and the caption sentences
   `labels.C1_BASES` and `labels.C1_EC_BASIS`. In C2, the hover line "Electoral votes counted"
   (`labels.C2_HOVER`), and the caption sentences `labels.C2_LEADER_POINT` and `labels.C1_EC_BASIS`.
-  On `/candidate/<slug>`, `labels.METRIC_LABELS["candidate_ev_counted_total"]`.
+  On `/candidate/<slug>`, `labels.METRIC_LABELS["candidate_ev_counted_total"]`. On `/elections`,
+  each recipient's counted number in T1's Recipients column and C9's hover
+  (`labels.RECIPIENT_LINE`; *Recipients*).
 - **Source:** `EcPvRow.electoral_votes_counted`; `count_status.COUNTED_VOTES_COLUMN`; D046;
   `posts/2026-08-25-it-takes-270-but-270-of-what.md`, "Then there is a third number".
 - **Not:** *Electoral votes cast.*
@@ -1074,13 +1143,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   field description in `src/usvote/api/models.py`, and the sentence in the `ElectionSummary`
   class docstring that says it is never null; served on each `elections` item of
   `/v1/elections/summary` and in `election` on `/v1/elections/{year}` and
-  `/v1/elections/{year}/summary`. Not shown on the dashboard until #563 adds a `LABELS` key.
+  `/v1/elections/{year}/summary`. On `/elections`, `LABELS["electoral_votes_outside_top_two"]`
+  (T1, #563), with the note `OUTSIDE_TOP_TWO_NOTE` under T1 and in its download
+  (`pages/elections.py`).
 - **Source:** #570 (figure approved by the owner, 2026-11-17); `ElectionSummary` in
   `src/usvote/api/models.py`; the build in `src/usvote/snapshot.py`; D046 §4; D094(iv); reader
-  wording: `ba` spec for #570, approved at its plan gate.
+  wording: `ba` spec for #570, approved at its plan gate; T1's label and `OUTSIDE_TOP_TWO_NOTE`:
+  `ba` spec for #563, approved at its plan gate (2026-11-22).
 - **Not:** A sum of votes counted. A ranking by votes cast. "Third-party votes": rank, not party,
   decides who is outside. The candidates' number (*Candidates with electoral votes*).
-- **Status:** settled
+- **Status:** settled; wording pending (the historical claim in `OUTSIDE_TOP_TWO_NOTE` awaits the owner's check)
 
 ### Electors appointed and total popular vote over time (charts C4 and C5)
 - **Plain:** Two charts on their own page, one of the Elections pages, with election years running
@@ -1167,13 +1239,15 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** on the API's `/docs` page, the `ElectionSummary.electors_without_a_counted_vote`
   field description in `src/usvote/api/models.py`, and the sentence in the `ElectionSummary`
   class docstring that says it is never null; served where *Electoral votes outside the top
-  two* is. Not shown on the dashboard until #563 adds a `LABELS` key.
+  two* is. On `/elections`, `LABELS["electors_without_a_counted_vote"]` (T1, #563), with the note
+  `NO_COUNTED_VOTE_NOTE` under T1 and in its download (`pages/elections.py`).
 - **Source:** #570 (figure approved by the owner, 2026-11-17); `ElectionSummary`;
   `ELECTORAL_VOTE_SHORTFALLS` and the count-status overrides in `src/usvote/transform.py`; D041;
-  D044; D046; reader wording and the name: `ba` spec for #570, approved at its plan gate.
+  D044; D046; reader wording and the name: `ba` spec for #570, approved at its plan gate; T1's
+  label and `NO_COUNTED_VOTE_NOTE`: `ba` spec for #563, approved at its plan gate (2026-11-22).
 - **Not:** The `not_counted` count status, which is only part of the second gap. "Electors not
   counted": electors are appointed, votes are counted. Faithless votes, which are cast and counted.
-- **Status:** settled
+- **Status:** settled; wording pending (the historical claim in `NO_COUNTED_VOTE_NOTE` awaits the owner's check)
 
 ### Faithless vote (faithless elector)
 - **Plain:** An elector's vote for someone other than the candidate the elector had pledged to
@@ -1256,7 +1330,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   candidates; the popular-vote and hybrid margins are null outside the popular-vote window.
 - **Shown as:** `LABELS["ec_margin"]`, `LABELS["pv_margin"]`, `LABELS["hybrid_margin"]`;
   `labels.margin`; the panel note `labels.MARGIN_NOTE`, also shown under the averages on
-  `/elections` (*Average margin*).
+  `/elections` (*Average margin*). On `/elections`, T1's `ec_margin` and `pv_margin` columns
+  (#563), whose cells come from `election_view.margin_cells`, the election panel's own cell
+  function, so a year reads the same in both (D116(f)); a popular-vote margin outside the
+  popular-vote window reads `labels.NOT_APPLICABLE`. `labels.MARGIN_NOTE` is also the last of
+  T1's notes, so it shows twice on that page (kept with the #563 spec, approved at its plan gate).
 - **Source:** `ElectionSummary.ec_margin`, `pv_margin`, `hybrid_margin` and
   `_ELECTION_SUMMARY_EXAMPLE` in `src/usvote/api/models.py`; D037; help-text wording
   (`labels.MARGIN_NOTE`): approved by the owner in place on the #352 branch deploy, 2026-10-12.
@@ -1540,8 +1618,9 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Pages for all elections (list of elections, Electoral College majority, electors appointed and total popular vote)
-- **Plain:** The Elections part of the site has three pages: the list of elections, with filters and
-  the average margins; the Electoral College majority page, a chart and table of whether each
+- **Plain:** The Elections part of the site has three pages: the list of elections, with filters,
+  the average margins and a chart of how many candidates received electoral votes in each
+  election; the Electoral College majority page, a chart and table of whether each
   election's Electoral College leader won more than half of the electors appointed; and the electors
   appointed and total popular vote page, two charts and a table of those totals in every election,
   for all states together. Links near the top of each page go between the three, and the page being
@@ -1549,9 +1628,12 @@ articles and announcements). Every rule binds all three unless the rule states a
   with a popular vote in this dataset, and the links between the pages keep that choice. The
   majority page also shows, where this dataset has popular-vote figures, the leader's popular-vote
   share and the hybrid score the project proposes.
-- **Precise:** Three registered pages. `/elections` (`pages/elections.py`): T1, its year-range and
-  popular-vote filters, the count of elections shown and the averages; it reads `/v1/elections` and
-  N1. `/elections/majority` (`pages/elections_majority.py`): C2 and `elections-leader-table`; it
+- **Precise:** Three registered pages. `/elections` (`pages/elections.py`): C9, T1, their
+  year-range and popular-vote filters, the count of elections shown and the averages; it reads
+  `/v1/elections` and N1. T1's eight columns, in order: `year`, `candidate_count`,
+  `has_popular_vote`, `electoral_votes_outside_top_two`, `electors_without_a_counted_vote`,
+  `ec_margin` and `pv_margin` (the seven served fields, `FIELDS`), then *Recipients*, on the page
+  only (`PAGE_ONLY`, D116(a)). `/elections/majority` (`pages/elections_majority.py`): C2 and `elections-leader-table`; it
   reads N1 and has the same year-range and popular-vote filters as `/elections`.
   `/elections/over-time` (`pages/elections_over_time.py`): C4, C5 and their one table, all states
   only; it reads N1 and has the same filters. On a successful render each page carries the section
@@ -1560,7 +1642,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   filters the render applied (`year_from`, `year_to`, `pv`), as a state's two pages carry the year
   range (D105). The three pages share one filter parser and one filter callback
   (`elections_view.py`). When the filters leave no election, `/elections` shows
-  `labels.NO_ELECTIONS_MATCH` in T1's place and each chart page shows it in place of its charts and
+  `labels.NO_ELECTIONS_MATCH` in place of C9 and T1 and each chart page shows it in place of its charts and
   table; the filters and section links stay. A failed N1 degrades only the sections that read it. An
   old `/elections?state=<usps>` link answers 302 to `/state/<usps>` when the state roster in memory
   accepts the code; otherwise `/elections` is served with the key ignored. An old `/elections#c2`,
@@ -1569,13 +1651,17 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** the section links `labels.SECTION_ELECTIONS_LIST`, `labels.SECTION_MAJORITY`,
   `labels.SECTION_OVER_TIME` and the landmark name `labels.ELECTIONS_SECTIONS_LABEL` (read by
   assistive technology, not shown); on `/elections`, the H1 "Elections" (a literal), `LEDE`,
-  `FILTER_SENTENCE` (success only), `LIST_HEADING`, the title and description; on
+  `FILTER_SENTENCE` (success only), `LIST_HEADING`, `RECIPIENTS_HEADER`, T1's notes in order
+  (`T1_N1_UNAVAILABLE_NOTE` first in tier 1 only, then `labels.HAS_POPULAR_VOTE_NOTE`,
+  `RECIPIENTS_DOWNLOAD_NOTE`, `OUTSIDE_TOP_TWO_NOTE`, `NO_COUNTED_VOTE_NOTE` and
+  `labels.MARGIN_NOTE`), C9's wording (*Candidates with electoral votes chart (C9)*), the title
+  and description; on
   `/elections/majority` and `/elections/over-time`, `HEADING`, `LEDE`, `FILTER_SENTENCE` (success
   only), the title and description in each page's module; on all three, the filters'
   `labels.YEARS_FILTER` and `labels.PV_ONLY_FILTER` and the empty note `labels.NO_ELECTIONS_MATCH`.
   `elections_view.py` ships no wording of its own.
 - **Source:** #562 (owner agreement at the 2026-11-17 review); D092 (the subpage pattern); D107;
-  reader wording: `ba` spec for #562, approved at its plan gate (2026-11-19); `LEDE` and description on `/elections/majority`: `ba` spec for #564, approved at its plan gate (2026-11-19); #596 (owner decisions, 2026-11-20); D110; reader wording: `ba` spec for #596.
+  reader wording: `ba` spec for #562, approved at its plan gate (2026-11-19); `LEDE` and description on `/elections/majority`: `ba` spec for #564, approved at its plan gate (2026-11-19); #596 (owner decisions, 2026-11-20); D110; reader wording: `ba` spec for #596; C9 and T1's N1 columns: #563, D116; reader wording: `ba` spec for #563, approved at its plan gate (2026-11-22).
 - **Not:** *Election pages* (one election's three pages). *Site navigation*. A filter: the section
   links change the page, not the rows; the filters they carry are the reader's own.
 - **Status:** settled
@@ -1792,6 +1878,34 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** `PerCapitaRow.population` and `population_series`; D059; D064(b); D066; header
   wording: owner decision, 2026-10-10, #348.
 - **Not:** Voting-age population; votes cast.
+- **Status:** settled
+
+### Recipients (who received electoral votes, per election)
+- **Plain:** In the list of elections, the candidates who received electoral votes in each
+  election, one line each, with their electoral votes cast and counted.
+- **Precise:** For one year, N1's `data` rows for that year, in served order, each written from
+  `candidate`, `national_electoral_votes` (cast) and `national_electoral_votes_counted`. Every row
+  has more than 0 votes cast and from 0 to that number counted (`elections_view.n1_recipients`);
+  a row with none cast is refused, never left out, since the API counts every N1 row in
+  `candidate_count` (D116(d)). So the lines are exactly the candidates *Candidates with electoral
+  votes (count per election)* counts. Their number equals that year's `candidate_count`, which is
+  at least 1; a refused row, a mismatch or a count below 1 is C9's tier 2. Both
+  numbers always show, even when they are equal. It is a page-only column (D116(a), amending
+  D075), the last in T1 after its seven served columns. It is built through
+  `components.table(..., page_only=)`, with its header marked `components.PAGE_ONLY_CLASS` and
+  `RECIPIENTS_FIELDS` as the header's tooltip. It is never in T1's download: each election's own
+  national results table and its download carry the same rows. No public field holds it, so it
+  has no `LABELS` key and no Key index row. The same lines make up C9's hover.
+- **Shown as:** `RECIPIENTS_HEADER`, `RECIPIENTS_FIELDS` (the header's tooltip and the entry in
+  T1's column-name list, through `PAGE_ONLY`) and `RECIPIENTS_DOWNLOAD_NOTE`, in
+  `pages/elections.py`; `labels.RECIPIENT_LINE`, one line per recipient with `labels.number`
+  cells, separated by line breaks in the table and joined with `<br>` in `labels.C9_HOVER`;
+  `T1_N1_UNAVAILABLE_CELL` in both degradation tiers.
+- **Source:** #563 (update 1); D116; `NationalSummaryRow.candidate`, `national_electoral_votes`
+  and `national_electoral_votes_counted` in `src/usvote/api/models.py`; D007; reader wording:
+  `ba` spec for #563, approved by the owner at its plan gate (2026-11-22).
+- **Not:** A public `/v1` field. A `LABELS` key. Candidates on the ballot. Only the candidates
+  whose votes Congress counted. The winners.
 - **Status:** settled
 
 ### Rows shown (count line)
@@ -2372,6 +2486,11 @@ Every `LABELS` key and the entry that defines it.
 | `hybrid_score` | Hybrid |
 | `electoral_denominator` | Appointed electors |
 | `national_pv_denominator` | Total popular vote (nation) |
+| `electoral_votes_outside_top_two` | Electoral votes outside the top two |
+| `electors_without_a_counted_vote` | Electors without a counted vote |
+
+T1's recipients column has no `LABELS` key: its header is a page constant (`RECIPIENTS_HEADER`,
+*Recipients*).
 
 Metric keys (`labels.METRIC_LABELS`) are not `LABELS` keys; each is named under its entry's
 **Shown as**: `elections_shown` (*Elections shown*), `ec_margin_mean` and `pv_margin_mean`
@@ -2429,7 +2548,7 @@ code that carries the wording today; "a rule" marks a row that no single string 
 | "previous election", "next election" for a link to a neighboring year | Earlier: the {year} election; Later: the {year} election | `labels.EARLIER_LINK`, `labels.LATER_LINK`, on every election page | The links follow the years this dataset serves, read from the data. "Previous" and "next" claim no election fell between, which nothing in the code checks. |
 | "Summary" for an election's first page | Overview | `labels.SECTION_OVERVIEW` | The API serves T3's data as `summary`; one term, one meaning. |
 | an arrow character ("←", "→", "«", "»") typed into a link's text | a drawn chevron beside the text, with the words unchanged | a rule (`.neighbor-nav` in `dashboard/explore/assets/style.css`) | A typed arrow is read aloud ("left arrow") and becomes part of the link's name; the words already say which way the link goes. |
-| "win margin", "winning margin" | margin | `labels.METRIC_LABELS`, `LABELS["ec_margin"]`, `LABELS["pv_margin"]` | A margin is first place's lead over second under one method; in 1824 the Electoral College leader did not win. |
+| "win margin", "winning margin", "winner's margin" | margin | `labels.METRIC_LABELS`, `LABELS["ec_margin"]`, `LABELS["pv_margin"]` | A margin is first place's lead over second under one method; in 1824 the Electoral College leader did not win. |
 | "mean" in reader text | average | `labels.METRIC_LABELS` | The plain word; "mean" stays in code and D097. |
 | "turnout" | "total popular vote" | `labels.C5_*`, `labels.C10_*` | Turnout is a share of eligible voters, which this dataset doesn't have. |
 | "no popular vote before 1976" | "this dataset's popular-vote figures begin in {pv_year_min}" | `labels.C5_BEFORE_NOTE`, `labels.C2_BEFORE_NOTE` | The band label, `labels.C5_BEFORE_BAND`, says "no popular-vote figures in this dataset" and leaves the year to these notes (#593). |
@@ -2463,3 +2582,9 @@ decision and who makes it.
   `/states` lede (a literal in `layout` in `pages/states.py`) says "Open one to see …" on the
   degraded state too, where the list of states it points at does not show. A follow-up rewords or
   splits it; the owner approves, on a label spec from `ba`.
+- **Candidates with electoral votes chart (C9)**, **Electoral votes outside the top two** and
+  **Electors without a counted vote**: the historical claims in the #563 wording await the
+  owner's check: 1872, Horace Greeley 3 electoral votes cast and none counted
+  (`labels.C9_CAST_NOTE`); 1872, the votes cast outside the top two include Greeley's 3
+  (`OUTSIDE_TOP_TWO_NOTE`); 2000, one elector from the District of Columbia did not vote
+  (`NO_COUNTED_VOTE_NOTE`). The owner checks them.
