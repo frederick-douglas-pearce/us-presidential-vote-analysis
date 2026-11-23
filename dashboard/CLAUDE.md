@@ -53,8 +53,8 @@ rules, the template, the config and the chart callback, #432, the not-drawn log 
 [`dashboard/`](#dashboard--the-public-dashboard-e9)). pytest's `pythonpath` includes
 `dashboard`, so they import the `explore` package directly.
 `tests/fixtures/dashboard/` holds recorded public API responses (`/v1/meta`,
-`/v1/elections`, N1's `/v1/elections/summary` (#434, served locally from the same snapshot), N2's `/v1/elections/states` (#436, the same way; no page reads it since #562, D107, and it stays test input for C7's reconciliation), `/v1/elections/{year}` for 1824, 1860, 1868, 1872, 1896, 2016 and 2024,
-`/v1/states/GA`, `/v1/elections/{year}/per-capita` for those years and 1848 and 1864, and
+`/v1/elections`, N1's `/v1/elections/summary` (#434), N2's `/v1/elections/states` (#436; no page reads it since #562, D107, and it stays test input for C7's reconciliation), `/v1/elections/{year}` for 1824, 1860, 1868, 1872, 1896, 2016 and 2024,
+`/v1/states/{GA,TX}` (TX since #575), `/v1/elections/{year}/per-capita` for those years and 1848 and 1864, and
 `/v1/states/{GA,TX}/per-capita`, and the candidate index `/v1/candidates` with
 `/v1/candidates/andrew-jackson`), all
 from one snapshot, which `test_every_recorded_response_is_one_snapshot` checks: test input

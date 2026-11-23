@@ -59,8 +59,8 @@
       "ec_share_hybrid": 0.15708812260536398,
       "pv_coverage": 0.7279693486590039,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
+      "nominating_party": "democratic_republican",
+      "nominating_party_source": "USGOV",
       "nominating_party_note": null
     },
     {
@@ -80,9 +80,9 @@
       "ec_share_hybrid": 0.1417624521072797,
       "pv_coverage": 0.7279693486590039,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "democratic_republican",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1828,
@@ -185,9 +185,9 @@
       "ec_share_hybrid": 0.03819444444444445,
       "pv_coverage": 0.9618055555555556,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "South Carolina cast 11 electoral votes for Floyd for President in 1832."
     },
     {
       "year": 1832,
@@ -206,9 +206,9 @@
       "ec_share_hybrid": 0.024305555555555556,
       "pv_coverage": 0.9618055555555556,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "anti_masonic",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1836,
@@ -269,9 +269,9 @@
       "ec_share_hybrid": 0.08843537414965986,
       "pv_coverage": 0.9625850340136054,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "whig",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "The Whigs ran several candidates in 1836, nominated by local caucuses. This dataset's sources name him as one of them but do not say which caucus nominated him."
     },
     {
       "year": 1836,
@@ -290,9 +290,9 @@
       "ec_share_hybrid": 0.047619047619047616,
       "pv_coverage": 0.9625850340136054,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "whig",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "The Whigs ran several candidates in 1836, nominated by local caucuses. This dataset's sources name him as one of them but do not say which caucus nominated him."
     },
     {
       "year": 1836,
@@ -542,9 +542,9 @@
       "ec_share_hybrid": 0.02702702702702703,
       "pv_coverage": 0.972972972972973,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "american_whig",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "Fillmore accepted the presidential nomination of the American Party (Know-Nothing), and the Whig Party endorsed him. This dataset treats that endorsement as a Whig nomination. This dataset's sources do not name a convention, caucus or other body that nominated or endorsed him."
     },
     {
       "year": 1860,
@@ -584,8 +584,8 @@
       "ec_share_hybrid": 0.2376237623762376,
       "pv_coverage": 0.9735973597359736,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
+      "nominating_party": "southern_democratic",
+      "nominating_party_source": "USGOV",
       "nominating_party_note": null
     },
     {
@@ -605,9 +605,9 @@
       "ec_share_hybrid": 0.12871287128712872,
       "pv_coverage": 0.9735973597359736,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "constitutional_union",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1860,
@@ -752,9 +752,9 @@
       "ec_share_hybrid": 0.11475409836065574,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "The Democrats and the Liberal Republicans nominated Horace Greeley for President in 1872. Greeley died before the electors voted, and electors in several states then voted for various candidates. Some voted for Hendricks for President."
     },
     {
       "year": 1872,
@@ -773,9 +773,9 @@
       "ec_share_hybrid": 0.04918032786885246,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "Brown was Horace Greeley's running mate in 1872. Greeley died before the electors voted, and electors in several states then voted for various candidates. Some voted for Brown for President."
     },
     {
       "year": 1872,
@@ -794,9 +794,9 @@
       "ec_share_hybrid": 0.00546448087431694,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "Horace Greeley died before the electors voted in 1872, and electors in several states then voted for various candidates. Two Georgia electors voted for Jenkins for President."
     },
     {
       "year": 1872,
@@ -1067,9 +1067,9 @@
       "ec_share_hybrid": 0.04954954954954955,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "populist",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1896,
@@ -1298,9 +1298,9 @@
       "ec_share_hybrid": 0.015065913370998116,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "republican",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1916,
@@ -1445,9 +1445,9 @@
       "ec_share_hybrid": 0.02448210922787194,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "progressive_1924",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "La Follette ran on the Progressive Party ticket, which the Conference for Progressive Political Action nominated at Cleveland."
     },
     {
       "year": 1928,
@@ -1718,9 +1718,9 @@
       "ec_share_hybrid": 0.07344632768361582,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "states_rights_democratic",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1952,
@@ -1823,9 +1823,9 @@
       "ec_share_hybrid": 0.0018832391713747645,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 1956, one Alabama elector voted for Jones for President."
     },
     {
       "year": 1960,
@@ -1886,9 +1886,9 @@
       "ec_share_hybrid": 0.027932960893854747,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 1960, Mississippi's popular vote included votes for unpledged Democratic electors, who later agreed to support Byrd. He received electoral votes for President from Mississippi (8), Alabama (6) and Oklahoma (1)."
     },
     {
       "year": 1964,
@@ -1991,9 +1991,9 @@
       "ec_share_hybrid": 0.08550185873605948,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "american_independent",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1972,
@@ -2054,9 +2054,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "libertarian",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "This dataset's sources say which party he ran for, but do not name a convention, caucus or other body that nominated him."
     },
     {
       "year": 1976,
@@ -2117,9 +2117,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 1976, one Washington State elector voted for Reagan for President."
     },
     {
       "year": 1980,
@@ -2264,9 +2264,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "Bentsen ran for Vice President on the Democratic ticket in 1988. One West Virginia elector voted for him for President and for Dukakis for Vice President."
     },
     {
       "year": 1992,
@@ -2453,9 +2453,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "Edwards was the Democratic nominee for Vice President in 2004. One Minnesota elector voted for him for both President and Vice President."
     },
     {
       "year": 2008,
@@ -2600,9 +2600,9 @@
       "ec_share_hybrid": 0.0055762081784386614,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 2016, four Washington electors cast faithless votes for President: three for Colin Powell and one for Faith Spotted Eagle."
     },
     {
       "year": 2016,
@@ -2621,9 +2621,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 2016, one Hawaii elector cast a faithless vote for Bernie Sanders for President."
     },
     {
       "year": 2016,
@@ -2642,9 +2642,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 2016, four Washington electors cast faithless votes for President: three for Colin Powell and one for Faith Spotted Eagle."
     },
     {
       "year": 2016,
@@ -2663,9 +2663,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 2016, two Texas electors cast faithless votes for President: one for Ron Paul and one for John Kasich."
     },
     {
       "year": 2016,
@@ -2684,9 +2684,9 @@
       "ec_share_hybrid": 0.0018587360594795538,
       "pv_coverage": 1.0,
       "hybrid_score": null,
-      "nominating_party": null,
-      "nominating_party_source": null,
-      "nominating_party_note": null
+      "nominating_party": "no_nomination",
+      "nominating_party_source": "USGOV",
+      "nominating_party_note": "In 2016, two Texas electors cast faithless votes for President: one for Ron Paul and one for John Kasich."
     },
     {
       "year": 2020,
@@ -2789,7 +2789,9 @@
       "hybrid_flip": null,
       "ec_margin": 5.747126436781608,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 78,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1828,
@@ -2806,7 +2808,9 @@
       "hybrid_flip": null,
       "ec_margin": 36.398467432950184,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1832,
@@ -2823,7 +2827,9 @@
       "hybrid_flip": null,
       "ec_margin": 59.02777777777777,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 18,
+      "electors_without_a_counted_vote": 2
     },
     {
       "year": 1836,
@@ -2840,7 +2846,9 @@
       "hybrid_flip": null,
       "ec_margin": 32.99319727891156,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 51,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1840,
@@ -2857,7 +2865,9 @@
       "hybrid_flip": null,
       "ec_margin": 59.183673469387756,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1844,
@@ -2874,7 +2884,9 @@
       "hybrid_flip": null,
       "ec_margin": 23.636363636363633,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1848,
@@ -2891,7 +2903,9 @@
       "hybrid_flip": null,
       "ec_margin": 12.413793103448278,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1852,
@@ -2908,7 +2922,9 @@
       "hybrid_flip": null,
       "ec_margin": 71.62162162162163,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1856,
@@ -2925,7 +2941,9 @@
       "hybrid_flip": null,
       "ec_margin": 20.27027027027027,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 8,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1860,
@@ -2942,7 +2960,9 @@
       "hybrid_flip": null,
       "ec_margin": 35.64356435643564,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 51,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1864,
@@ -2959,7 +2979,9 @@
       "hybrid_flip": null,
       "ec_margin": 81.62393162393163,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 1
     },
     {
       "year": 1868,
@@ -2976,7 +2998,9 @@
       "hybrid_flip": null,
       "ec_margin": 48.63945578231293,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 9
     },
     {
       "year": 1872,
@@ -2993,7 +3017,9 @@
       "hybrid_flip": null,
       "ec_margin": 66.66666666666666,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 24,
+      "electors_without_a_counted_vote": 17
     },
     {
       "year": 1876,
@@ -3010,7 +3036,9 @@
       "hybrid_flip": null,
       "ec_margin": 0.2710027100270962,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1880,
@@ -3027,7 +3055,9 @@
       "hybrid_flip": null,
       "ec_margin": 15.98915989159892,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1884,
@@ -3044,7 +3074,9 @@
       "hybrid_flip": null,
       "ec_margin": 9.226932668329175,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1888,
@@ -3061,7 +3093,9 @@
       "hybrid_flip": null,
       "ec_margin": 16.209476309226932,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1892,
@@ -3078,7 +3112,9 @@
       "hybrid_flip": null,
       "ec_margin": 29.729729729729726,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 22,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1896,
@@ -3095,7 +3131,9 @@
       "hybrid_flip": null,
       "ec_margin": 21.25279642058166,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1900,
@@ -3112,7 +3150,9 @@
       "hybrid_flip": null,
       "ec_margin": 30.64876957494407,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1904,
@@ -3129,7 +3169,9 @@
       "hybrid_flip": null,
       "ec_margin": 41.1764705882353,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1908,
@@ -3146,7 +3188,9 @@
       "hybrid_flip": null,
       "ec_margin": 32.91925465838509,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1912,
@@ -3163,7 +3207,9 @@
       "hybrid_flip": null,
       "ec_margin": 65.34839924670433,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 8,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1916,
@@ -3180,7 +3226,9 @@
       "hybrid_flip": null,
       "ec_margin": 4.331450094161959,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1920,
@@ -3197,7 +3245,9 @@
       "hybrid_flip": null,
       "ec_margin": 52.16572504708097,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1924,
@@ -3214,7 +3264,9 @@
       "hybrid_flip": null,
       "ec_margin": 46.327683615819204,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 13,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1928,
@@ -3231,7 +3283,9 @@
       "hybrid_flip": null,
       "ec_margin": 67.23163841807909,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1932,
@@ -3248,7 +3302,9 @@
       "hybrid_flip": null,
       "ec_margin": 77.77777777777777,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1936,
@@ -3265,7 +3321,9 @@
       "hybrid_flip": null,
       "ec_margin": 96.98681732580037,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1940,
@@ -3282,7 +3340,9 @@
       "hybrid_flip": null,
       "ec_margin": 69.11487758945387,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1944,
@@ -3299,7 +3359,9 @@
       "hybrid_flip": null,
       "ec_margin": 62.71186440677967,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1948,
@@ -3316,7 +3378,9 @@
       "hybrid_flip": null,
       "ec_margin": 21.46892655367231,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 39,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1952,
@@ -3333,7 +3397,9 @@
       "hybrid_flip": null,
       "ec_margin": 66.47834274952919,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1956,
@@ -3350,7 +3416,9 @@
       "hybrid_flip": null,
       "ec_margin": 72.31638418079096,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 1,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1960,
@@ -3367,7 +3435,9 @@
       "hybrid_flip": null,
       "ec_margin": 15.64245810055866,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 15,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1964,
@@ -3384,7 +3454,9 @@
       "hybrid_flip": null,
       "ec_margin": 80.66914498141264,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1968,
@@ -3401,7 +3473,9 @@
       "hybrid_flip": null,
       "ec_margin": 20.44609665427509,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 46,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1972,
@@ -3418,7 +3492,9 @@
       "hybrid_flip": null,
       "ec_margin": 93.49442379182156,
       "pv_margin": null,
-      "hybrid_margin": null
+      "hybrid_margin": null,
+      "electoral_votes_outside_top_two": 1,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1976,
@@ -3435,7 +3511,9 @@
       "hybrid_flip": false,
       "ec_margin": 10.594795539033452,
       "pv_margin": 2.0588729518964732,
-      "hybrid_margin": 6.326834245464963
+      "hybrid_margin": 6.326834245464963,
+      "electoral_votes_outside_top_two": 1,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1980,
@@ -3452,7 +3530,9 @@
       "hybrid_flip": false,
       "ec_margin": 81.78438661710037,
       "pv_margin": 9.73194041480192,
-      "hybrid_margin": 45.758163515951146
+      "hybrid_margin": 45.758163515951146,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1984,
@@ -3469,7 +3549,9 @@
       "hybrid_flip": false,
       "ec_margin": 95.16728624535315,
       "pv_margin": 18.22563416289622,
-      "hybrid_margin": 56.69646020412469
+      "hybrid_margin": 56.69646020412469,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1988,
@@ -3486,7 +3568,9 @@
       "hybrid_flip": false,
       "ec_margin": 58.55018587360594,
       "pv_margin": 7.727119047963499,
-      "hybrid_margin": 33.138652460784726
+      "hybrid_margin": 33.138652460784726,
+      "electoral_votes_outside_top_two": 1,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1992,
@@ -3503,7 +3587,9 @@
       "hybrid_flip": false,
       "ec_margin": 37.54646840148699,
       "pv_margin": 5.593158035322826,
-      "hybrid_margin": 21.56981321840491
+      "hybrid_margin": 21.56981321840491,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 1996,
@@ -3520,7 +3606,9 @@
       "hybrid_flip": false,
       "ec_margin": 40.89219330855018,
       "pv_margin": 8.51066655193809,
-      "hybrid_margin": 24.70142993024414
+      "hybrid_margin": 24.70142993024414,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 2000,
@@ -3537,7 +3625,9 @@
       "hybrid_flip": false,
       "ec_margin": 0.9293680297397799,
       "pv_margin": 0.5112914484084907,
-      "hybrid_margin": 0.20903829066564739
+      "hybrid_margin": 0.20903829066564739,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 1
     },
     {
       "year": 2004,
@@ -3554,7 +3644,9 @@
       "hybrid_flip": false,
       "ec_margin": 6.505576208178443,
       "pv_margin": 2.452161411432574,
-      "hybrid_margin": 4.478868809805508
+      "hybrid_margin": 4.478868809805508,
+      "electoral_votes_outside_top_two": 1,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 2008,
@@ -3571,7 +3663,9 @@
       "hybrid_flip": false,
       "ec_margin": 35.687732342007436,
       "pv_margin": 7.266953495771284,
-      "hybrid_margin": 21.477342918889352
+      "hybrid_margin": 21.477342918889352,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 2012,
@@ -3588,7 +3682,9 @@
       "hybrid_flip": false,
       "ec_margin": 23.420074349442377,
       "pv_margin": 3.846606872694908,
-      "hybrid_margin": 13.633340611068645
+      "hybrid_margin": 13.633340611068645,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 2016,
@@ -3605,7 +3701,9 @@
       "hybrid_flip": false,
       "ec_margin": 14.312267657992567,
       "pv_margin": 2.0970670301159178,
-      "hybrid_margin": 6.107600313938333
+      "hybrid_margin": 6.107600313938333,
+      "electoral_votes_outside_top_two": 7,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 2020,
@@ -3622,7 +3720,9 @@
       "hybrid_flip": false,
       "ec_margin": 13.754646840148704,
       "pv_margin": 4.448892070847349,
-      "hybrid_margin": 9.101769455498026
+      "hybrid_margin": 9.101769455498026,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     },
     {
       "year": 2024,
@@ -3639,12 +3739,14 @@
       "hybrid_flip": false,
       "ec_margin": 15.98513011152416,
       "pv_margin": 1.4702811920895509,
-      "hybrid_margin": 8.727705651806861
+      "hybrid_margin": 8.727705651806861,
+      "electoral_votes_outside_top_two": 0,
+      "electors_without_a_counted_vote": 0
     }
   ],
   "meta": {
     "provenance": {
-      "snapshot_version": "0ad9ee528fb8e423f940e6f083bb1c525f89c32ac72dbbb62f704c8af47c8b3a",
+      "snapshot_version": "b09807fac51d8c6d51ec3cf4cff050aaf9ea3067bf83e625c73e25c1160c4113",
       "source": "MIT",
       "source_name": "MIT Election Lab",
       "license": "CC0-1.0",

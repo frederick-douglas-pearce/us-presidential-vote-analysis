@@ -1,6 +1,6 @@
 {
   "provenance": {
-    "snapshot_version": "0ad9ee528fb8e423f940e6f083bb1c525f89c32ac72dbbb62f704c8af47c8b3a",
+    "snapshot_version": "b09807fac51d8c6d51ec3cf4cff050aaf9ea3067bf83e625c73e25c1160c4113",
     "source": "MIT",
     "source_name": "MIT Election Lab",
     "license": "CC0-1.0",
@@ -25,8 +25,8 @@
     },
     "redistributable_note": "Redistributable data only. Electoral-college figures come from the U.S. National Archives and Records Administration — Public domain (a work of the U.S. Government, 17 U.S.C. § 105) — and cover every election in the snapshot. Popular-vote figures come from MIT Election Lab under CC0 1.0 Universal (Public Domain Dedication) and cover 1976–2024 only; earlier elections carry no popular vote on this surface, and each row's `pv_status` says whether that is because none was held or because no redistributable source reaches it. Per-capita population figures come from the U.S. Census Bureau — Public domain (a work of the U.S. Government, 17 U.S.C. § 105). Nominating parties come from the same Electoral College source, or, where a row's `nominating_party_source` is `USGOV`, from U.S. Government publications — Public domain (a work of the U.S. Government, 17 U.S.C. § 105). Non-redistributable UCSB / American Presidency Project data is excluded from this public API surface."
   },
-  "schema_version": 5,
+  "schema_version": 6,
   "row_count": 5623,
   "candidate_count": 96,
-  "build_timestamp": "2026-10-19T12:37:03.811450+00:00"
+  "build_timestamp": "2026-11-22T01:06:50.511761+00:00"
 }
