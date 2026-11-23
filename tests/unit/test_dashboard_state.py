@@ -122,12 +122,15 @@ def ga_per_capita() -> dict[str, Any]:
     return copy.deepcopy(RECORDED[GA_PER_CAPITA_PATH])
 
 
-def render(query: str = "", body: Any = None, index: Any = None) -> Any:
-    """The history page's body for ``query``, as the layout builds it."""
+def render(
+    query: str = "", body: Any = None, index: Any = None, usps: str = "GA"
+) -> Any:
+    """The history page's body for ``query``, as the layout builds it: ``usps``'s
+    recorded history unless ``body`` is given."""
     content, _ = MOD["render"](
-        ga_body() if body is None else body,
+        copy.deepcopy(RECORDED[f"/v1/states/{usps}"]) if body is None else body,
         copy.deepcopy(INDEX) if index is None else index,
-        "GA",
+        usps,
         MOD["parse_filters"](parse(query)),
     )
     return content
@@ -1709,6 +1712,25 @@ ELECTORS = MOD["ELECTORS_TABLE_ID"]
 #: recording stays test input for C7's reconciliation (D106(h)).
 N2: dict[str, Any] = RECORDED["/v1/elections/states"]
 SERVED = sorted(state_view.served_years(INDEX))
+#: The states whose history is recorded (``/v1/states/{usps}``): C7's and C10's
+#: oracles run over each, so a newly recorded state joins them with no edit.
+RECORDED_STATES = sorted(
+    path.rsplit("/", 1)[1]
+    for path in RECORDED
+    if path.startswith("/v1/states/") and path.count("/") == 3
+)
+#: Each recorded state's zero allotments and first election, written once as
+#: literals so the C7 tests built over ``RECORDED_STATES`` check against something
+#: other than the recording they read: Georgia took no part in 1864, Texas in 1864
+#: and 1868, and Texas's first election is 1848 (#575).
+ZERO_YEARS = {"GA": [1864], "TX": [1864, 1868]}
+FIRST_ELECTION = {"GA": 1824, "TX": 1848}
+
+
+def state_name(usps: str) -> str:
+    """The recorded history's one name for ``usps``."""
+    (name,) = {r["state"] for r in RECORDED[f"/v1/states/{usps}"]["data"]}
+    return str(name)
 
 
 def body_cells(tree: Any) -> list[tuple[str, str, str]]:
@@ -1797,26 +1819,35 @@ class TestC7:
         ]
         assert {r["state_usps"] for r in csv.rows} == {"GA"}
 
-    def test_its_points_are_n2_s_one_state_series_for_georgia(self) -> None:
-        # AC2 against the recorded N2 rows directly, never C4's render (D106(h)), so it
-        # survives #562; and the history and N2 agree on every year both hold.
+    def test_the_literals_cover_every_recorded_state(self) -> None:
+        assert sorted(ZERO_YEARS) == sorted(FIRST_ELECTION) == RECORDED_STATES
+        assert RECORDED_STATES == ["GA", "TX"]
+
+    @pytest.mark.parametrize("usps", RECORDED_STATES)
+    def test_its_points_are_n2_s_one_state_series(self, usps: str) -> None:
+        # AC2 (#560, and #575 for Texas) against the recorded N2 rows directly, never
+        # C4's render (D106(h)), so it survives #562; and the history and N2 agree on
+        # every year both hold.
+        path = f"/v1/states/{usps}"
         records = MOD["electors"](
-            state_view.rows(ga_body(), "GA", set(SERVED), GA_PATH),
+            state_view.rows(copy.deepcopy(RECORDED[path]), usps, set(SERVED), path),
             set(SERVED),
-            "GA",
-            GA_PATH,
+            usps,
+            path,
         )
-        n2 = n2_state("GA")
+        n2 = n2_state(usps)
         assert [
             (r["year"], r["state_electoral_votes"], r["pv_status"]) for r in records
         ] == [(r["year"], r["state_electoral_votes"], r["pv_status"]) for r in n2]
-        tree = render()
+        assert n2[0]["year"] == FIRST_ELECTION[usps]
+        name = state_name(usps)
+        tree = render(usps=usps)
         figure = c7_figure(tree)
         expected = over_time.c4_figure(
             over_time.appointed_points(n2),
             SERVED,
-            labels.C4_TITLE_STATE.format(state="Georgia"),
-            "Georgia",
+            labels.C4_TITLE_STATE.format(state=name),
+            name,
         ).figure
         # Aligned with C10 on the state page's one margin (#582, D113(f)).
         over_time.align(expected, over_time.STATE_MARGIN)
@@ -1826,7 +1857,7 @@ class TestC7:
         assert c7_title(tree) == title
 
     def test_every_n2_state_s_series_reads_the_same_through_c7(self) -> None:
-        # AC2 on the recorded N2 fixture (TX's history is #575's), against N2's rows
+        # AC2 on the recorded N2 fixture (beside the recorded histories), against N2's rows
         # directly and never C4's builders, so #562 can retire C4's one-state mode
         # (D106(h)): each state's rows, one per election, pass C7's collapse unchanged,
         # and its points word exactly N2's allotment and status.
@@ -1856,19 +1887,21 @@ class TestC7:
                 for r in n2
             ], usps
 
-    def test_the_chart_equals_its_table_s_cells(self) -> None:
-        tree = render()
+    @pytest.mark.parametrize("usps", RECORDED_STATES)
+    def test_the_chart_equals_its_table_s_cells(self, usps: str) -> None:
+        tree = render(usps=usps)
         figure = c7_figure(tree)
         rows = download(tree, ELECTORS).rows
         (bars,) = [t for t in figure["data"] if t["type"] == "bar"]
         drawn = dict(zip(bars["x"], bars["y"], strict=True))
         cells = {int(r["year"]): r for r in rows}
-        assert set(cells) == set(range(1824, 2025, 4))
+        assert set(cells) == set(range(FIRST_ELECTION[usps], 2025, 4))
         for year, value in drawn.items():
             assert cells[year]["state_electoral_votes"] == str(value), year
         markers = {y for t in figure["data"] if t["type"] != "bar" for y in t["x"]}
-        assert markers == {1864}
-        assert cells[1864]["state_electoral_votes"] == "0"
+        assert markers == set(ZERO_YEARS[usps])
+        for year in ZERO_YEARS[usps]:
+            assert cells[year]["state_electoral_votes"] == "0", year
         # Each hover writes the table's cells (D091).
         hovers = [h for t in figure["data"] for h in t["hovertext"]]
         assert len(hovers) == len(rows)
@@ -1877,7 +1910,7 @@ class TestC7:
             sorted(hovers, key=lambda h: int(h[:4])), body, strict=True
         ):
             assert hover == labels.C4_STATE_HOVER.format(
-                year=year, state="Georgia", appointed=appointed, pv_status=status
+                year=year, state=state_name(usps), appointed=appointed, pv_status=status
             )
 
     @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
@@ -1904,25 +1937,33 @@ class TestC7:
         assert at
         assert labels.C4_BASIS in texts(held[at[0] + 1 : at[0] + 4])
 
-    def test_a_zero_allotment_is_a_marker_by_its_cause(self) -> None:
-        # Georgia took no part in 1864 (recorded); Texas's 1864 and 1868 zeros through
-        # the recorded N2 rows (#575 records its history).
-        figure = c7_figure(render())
-        assert traces(figure)[labels.C4_NO_ELECTORS_TOOK_NO_PART] == [1864]
-        assert 1864 not in traces(figure)[labels.LABELS["state_electoral_votes"]]
-        assert labels.C4_ZERO_NOTE in c7_caption(render())
-        tx = over_time.c4_figure(
-            over_time.appointed_points(
-                MOD["electors"](n2_state("TX"), set(SERVED), "TX", "N2")
-            ),
-            SERVED,
-            "t",
-            "Texas",
-        ).figure
-        zeros = traces(tx).get(labels.C4_NO_ELECTORS_TOOK_NO_PART, []) + traces(tx).get(
-            labels.C4_NO_ELECTORS, []
+    @pytest.mark.parametrize("usps", RECORDED_STATES)
+    def test_a_zero_allotment_is_a_marker_by_its_cause(self, usps: str) -> None:
+        # AC2 (#575): each recorded state's zeros, read from its rendered page. Both
+        # states took no part in those years (D100(d)), so every zero is in that
+        # marker series, none in the no-electors one, and none is drawn as a bar.
+        zeros = [r["year"] for r in n2_state(usps) if r["state_electoral_votes"] == 0]
+        assert zeros == ZERO_YEARS[usps]  # the premise
+        assert {
+            r["pv_status"] for r in n2_state(usps) if r["year"] in zeros
+        } == {"not_participating"}
+        tree = render(usps=usps)
+        figure = c7_figure(tree)
+        assert traces(figure)[labels.C4_NO_ELECTORS_TOOK_NO_PART] == ZERO_YEARS[usps]
+        assert labels.C4_NO_ELECTORS not in traces(figure)
+        bar = traces(figure)[labels.LABELS["state_electoral_votes"]]
+        assert not set(ZERO_YEARS[usps]) & set(bar)
+        assert labels.C4_ZERO_NOTE in c7_caption(tree)
+
+    def test_texas_s_first_election_is_named_on_its_own_history(self) -> None:
+        """Texas's first election, 1848, is after the dataset's, so its caption names
+        it and its axis keeps the dataset's span (on real data; the doctored Georgia
+        case is :meth:`test_a_later_first_election_is_named_and_the_axis_keeps_the_dataset_s`)."""
+        tree = render(usps="TX")
+        assert labels.FIRST_ELECTION_NOTE.format(state="Texas", year=1848) in (
+            c7_caption(tree)
         )
-        assert sorted(zeros) == [1864, 1868]
+        assert c7_figure(tree)["layout"]["xaxis"] == components.year_axis(SERVED)
 
     @pytest.mark.parametrize(
         ("value", "label"),
@@ -2133,13 +2174,6 @@ TOTALS = MOD["TOTALS_TABLE_ID"]
 GA_SKIPPED_YEARS = (1976, 1988, 2004, 2016)
 COVERAGE: dict[str, Any] = INDEX["meta"]["provenance"]["coverage"]
 WINDOW = (COVERAGE["pv_year_min"], COVERAGE["pv_year_max"])
-#: The states whose history is recorded (``/v1/states/{usps}``): C10's oracle runs
-#: over each, so #575's TX recording joins it with no edit.
-RECORDED_STATES = sorted(
-    path.rsplit("/", 1)[1]
-    for path in RECORDED
-    if path.startswith("/v1/states/") and path.count("/") == 3
-)
 
 
 def c10_figure(tree: Any) -> Any:
@@ -2246,8 +2280,8 @@ class TestC10:
         """Across the recorded N2 fixture, C10's points carry each state's N2 total
         and status and choose ``NO_STATE_TOTAL`` as the cell inside the window: the
         field mapping only, not AC2's oracle, which is
-        :meth:`test_each_year_s_bar_is_n2_s_total` (Georgia's rendered history; TX's is
-        #575's). No N2 row goes through the collapse (B-1)."""
+        :meth:`test_each_year_s_bar_is_n2_s_total` (each recorded state's rendered
+        history). No N2 row goes through the collapse (B-1)."""
         states = {r["state_usps"] for r in N2["data"]}
         assert len(states) == 51
         for usps in sorted(states):
