@@ -260,16 +260,19 @@ def _n1_rows(
 
     Tier 1 is N1 unread, :func:`explore.elections_view.n1_items` failing, the index's
     popular-vote window's bounds failing :func:`explore.query.year_span` (a missing
-    bound is the page's: T1's download preamble reads it), or any served year's
+    bound is the page's in every view: read before the check), or any served year's
     item lacking a field T1's cells or :func:`explore.election_view.margin_cells` read.
     Every one of those reads is done here, for every served year before the filters
     apply, inside the ``try``; tier 2 is :func:`explore.elections_view.n1_recipients`
     failing. An index defect is the page's, raised before this is called."""
     coverage = index["meta"]["provenance"]["coverage"]
+    # Read before the check, so a missing bound is the page's in every view, the empty
+    # one included, as T1's download preamble makes it wherever there are rows.
+    bounds = coverage["pv_year_min"], coverage["pv_year_max"]
     try:
         if summary is None:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
-        query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
+        query.year_span(*bounds)
         items = elections_view.n1_items(index, summary)
         by_year = {
             year: (

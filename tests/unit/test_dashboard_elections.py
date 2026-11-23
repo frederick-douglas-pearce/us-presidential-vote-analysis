@@ -3535,7 +3535,7 @@ def _index_window(**changes: Any) -> dict[str, Any]:
 #: Every tier-1 trigger (D116(e)): N1 unread or malformed, a field T1's cells or
 #: ``margin_cells`` read missing from one item, and the index's popular-vote window
 #: present but failing ``query.year_span``; each as (index, N1, query). A missing bound
-#: is the page's defect, as before #563: T1's download preamble reads the window.
+#: is the page's defect in every view (``test_a_missing_window_bound_is_the_page_s``).
 TIER_ONE = [
     pytest.param(lambda: BODY, _n1_absent, {}, id="N1 unread"),
     pytest.param(lambda: BODY, _malformed, {}, id="N1 malformed"),
@@ -3600,6 +3600,19 @@ class TestC9Degraded:
         assert notes.index(MOD["T1_N1_UNAVAILABLE_NOTE"]) + 1 == notes.index(
             labels.HAS_POPULAR_VOTE_NOTE
         )
+
+    @pytest.mark.parametrize(
+        "query", [{}, {"year_to": "1972", "pv": "1"}], ids=["default", "empty"]
+    )
+    def test_a_missing_window_bound_is_the_page_s(self, query: dict[str, str]) -> None:
+        """A missing popular-vote bound degrades the whole page in every view, the empty
+        one included, never only T1's N1 cells (#627's review, r2.recheck.1)."""
+        with pytest.raises(KeyError):
+            MOD["render"](
+                _index_window(pv_year_min=None),
+                MOD["parse_filters"](query),
+                copy.deepcopy(SUMMARY),
+            )
 
     def test_the_tier_one_note_shows_when_a_filter_leaves_no_year(self) -> None:
         """The tier comes from the check, never a cell (D116(e)): with no row, the
