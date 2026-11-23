@@ -82,6 +82,38 @@ PC_PAGE_ID = PC_MOD["PAGE_ID"]
 PER_CAPITA = PC_MOD["PER_CAPITA_TABLE_ID"]
 
 
+#: Georgia's noted candidate-years (#575's re-record), in T4's order.
+GA_NOTED = (
+    (1824, "Henry Clay"),
+    (1832, "John Floyd"),
+    (1832, "William Wirt"),
+    (1836, "Daniel Webster"),
+    (1836, "Hugh L. White"),
+    (1856, "Millard Fillmore"),
+    (1860, "John Bell"),
+    (1872, "Benjamin Gratz Brown"),
+    (1872, "Charles J. Jenkins"),
+    (1872, "Horace Greeley"),
+    (1872, "Thomas A. Hendricks"),
+    (1892, "James B. Weaver"),
+    (1912, "William H. Taft"),
+    (1924, "Robert M. La Follette"),
+    (1948, "J. Strom Thurmond"),
+    (1956, "Walter B. Jones"),
+    (1960, "Harry F. Byrd"),
+    (1968, "George C. Wallace"),
+    (1972, "John Hospers"),
+    (1976, "Ronald Reagan"),
+    (1988, "Lloyd Bentsen"),
+    (2004, "John Edwards"),
+    (2016, "Bernie Sanders"),
+    (2016, "Colin Powell"),
+    (2016, "Faith Spotted Eagle"),
+    (2016, "John Kasich"),
+    (2016, "Ron Paul"),
+)
+
+
 def ga_body() -> dict[str, Any]:
     return copy.deepcopy(RECORDED[GA_PATH])
 
@@ -321,25 +353,39 @@ class TestGeorgia:
             (texts(r[0])[0], texts(r[1])[0]): r[index] for r in table_rows(render())
         }
         assert texts(cells[("1824", "Andrew Jackson")]) == ["Democratic-Republican"]
-        clay = cells[("1824", "Henry Clay")]
-        assert texts(clay) == [labels.NOT_IN_DATASET]
-        assert clay.title == labels.PARTY_NULL_NOTE
-        note = next(
-            r["nominating_party_note"]
+        # Clay's party comes from the USGOV catalog since #575's re-record (#388).
+        assert texts(cells[("1824", "Henry Clay")]) == ["Democratic-Republican"]
+        notes = {
+            (r["year"], r["candidate"]): r["nominating_party_note"]
             for r in ga_body()["data"]
-            if r["year"] == 1872 and r["candidate"] == "Horace Greeley"
+            if r["nominating_party_note"]
+        }
+        # A null with its one-cause note, on a recorded null row.
+        nulls = sorted(
+            {
+                (r["year"], r["candidate"])
+                for r in ga_body()["data"]
+                if r["nominating_party"] is None
+            }
         )
-        assert note
+        assert nulls == [(1836, "Willie P. Mangum"), (1872, "David Davis")]  # premise
+        for year, name in nulls:
+            null = cells[(str(year), name)]
+            assert texts(null) == [labels.NOT_IN_DATASET]
+            assert null.title == labels.PARTY_NULL_NOTE
+        note = notes[(1872, "Horace Greeley")]
         assert cells[("1872", "Horace Greeley")].title == note
         (block,) = [
             d
             for d in of_type(render(), "Div")
             if getattr(d, "className", None) == "party-notes"
         ]
+        # Every noted candidate-year once, in the table's year order.
         assert [li.children for li in of_type(block, "Li")] == [
             labels.PARTY_NOTE_ITEM.format(
-                candidate="Horace Greeley", year=1872, note=note
+                candidate=name, year=year, note=notes[(year, name)]
             )
+            for year, name in GA_NOTED
         ]
 
     def test_t4_s_column_name_list_names_the_count_reason_and_the_party_note(

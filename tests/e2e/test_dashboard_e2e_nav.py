@@ -54,7 +54,8 @@ SETTLE_MS = 500
 
 #: Each page template, what its body renders (a success marker, a not-found state or
 #: the degraded state), and the link it marks with its aria-current (None: none).
-#: /state/TX is served by the roster but its history is not recorded, so it degrades.
+#: /state/NY is served by the roster but its history is not recorded, so it degrades
+#: (it was /state/TX until #575 recorded Texas's history).
 TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
     "/": (HOME_SUCCESS, ("home", "page")),
     "/elections": (ELECTIONS_SUCCESS, ("elections", "page")),
@@ -71,7 +72,7 @@ TEMPLATES: dict[str, tuple[str, tuple[str, str] | None]] = {
     ),
     "/states": ("#states", ("states", "page")),
     "/state/GA": ("#state", ("states", "true")),
-    "/state/TX": (UNAVAILABLE, ("states", "true")),
+    "/state/NY": (UNAVAILABLE, ("states", "true")),
     # A state's people per electoral vote (#559).
     "/state/GA/per-capita": ("#state-per-capita-page", ("states", "true")),
     "/candidate/andrew-jackson": ("#candidate", None),

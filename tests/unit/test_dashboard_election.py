@@ -270,6 +270,10 @@ def test_every_recorded_response_is_one_snapshot(path: str) -> None:
     if per_state := re.fullmatch(r"/v1/states/([A-Z]{2})/per-capita", path):
         assert body["data"]
         assert {row["state_usps"] for row in body["data"]} == {per_state[1]}
+    # A state's history (#575): every row names the path's state.
+    if history := re.fullmatch(r"/v1/states/([A-Z]{2})", path):
+        assert body["data"]
+        assert {row["state_usps"] for row in body["data"]} == {history[1]}
     # The candidate history (#331): every row names the path's slug, and the recorded
     # index lists it.
     if slug := re.fullmatch(r"/v1/candidates/([a-z0-9-]+)", path):
@@ -662,6 +666,22 @@ class TestHeaders:
 # --- a null is never bare -------------------------------------------------------------
 
 
+#: 1872's noted candidates (#575's re-record), in each table's first-seen order: T3
+#: follows the summary, T2 its state rows.
+T3_NOTED_1872 = (
+    "Thomas A. Hendricks",
+    "Benjamin Gratz Brown",
+    "Charles J. Jenkins",
+    "Horace Greeley",
+)
+T2_NOTED_1872 = (
+    "Benjamin Gratz Brown",
+    "Charles J. Jenkins",
+    "Horace Greeley",
+    "Thomas A. Hendricks",
+)
+
+
 class TestNullCells:
     @pytest.mark.parametrize(
         ("value", "status", "year", "cell"),
@@ -785,7 +805,19 @@ class TestNullCells:
 
     @pytest.mark.parametrize("year", [1824, 1860, 1872])
     def test_a_pre_window_t3_explains_the_year(self, year: int) -> None:
-        tree = render(year)
+        # One candidate's party is doctored to null, so the null clause below runs in
+        # every year whatever the recording carries: the USGOV catalog (#388) keeps
+        # filling recorded nulls (#575).
+        body = year_body(year)
+        doctored = body["summary"][-1]["candidate"]
+        for row in [*body["data"], *body["summary"]]:
+            if row["candidate"] == doctored:
+                row.update(
+                    nominating_party=None,
+                    nominating_party_source=None,
+                    nominating_party_note=None,
+                )
+        tree = render(year, body=body)
         note = find(tree, MOD["NO_PV_ID"])
         assert note is not None
         assert note.children == MOD["NO_PV_SENTENCE"].format(
@@ -804,11 +836,9 @@ class TestNullCells:
         # A null party has nothing to do with the window (#389): it reads "Not in
         # this dataset", never the window's wording.
         null_party = [
-            r["candidate"]
-            for r in year_body(year)["summary"]
-            if r["nominating_party"] is None
+            r["candidate"] for r in body["summary"] if r["nominating_party"] is None
         ]
-        assert null_party  # the premise
+        assert doctored in null_party  # the premise
         for name in null_party:
             assert rows[name]["nominating_party"] == labels.NOT_IN_DATASET, (year, name)
 
@@ -874,18 +904,33 @@ class TestNullCells:
             assert row["has_popular_vote"] is inside, row["year"]
 
     def test_a_party_and_a_null_on_real_rows(self) -> None:
-        """AC1, AC2, AC4 (#389): 1860 gives a party for the President and the Main
-        Opponent and "Not in this dataset" (with its one-cause note) for the others;
-        1896's Bryan reads one joint value. AC7's third state, ``no_nomination``, is
-        ``test_a_no_nomination_row_reads_its_own_label``."""
+        """AC1, AC2, AC4 (#389): 1860 gives each candidate's party, the two the
+        Archives name and the two the USGOV catalog fills (#388); 1872's David Davis,
+        whom no source gives a party, reads "Not in this dataset" with its one-cause
+        note; 1896's Bryan reads one joint value. AC7's third state,
+        ``no_nomination``, is ``test_a_no_nomination_row_reads_its_own_label``."""
         tree = render(1860)
         nation = nation_rows(tree)
         assert nation["Abraham Lincoln"]["nominating_party"] == "Republican"
         assert nation["Stephen A. Douglas"]["nominating_party"] == "Democratic"
-        for name in ("John C. Breckinridge", "John Bell"):
-            assert nation[name]["nominating_party"] == labels.NOT_IN_DATASET, name
+        assert nation["John C. Breckinridge"]["nominating_party"] == (
+            "Southern Democratic"
+        )
+        assert nation["John Bell"]["nominating_party"] == "Constitutional Union"
         by_name = {r["candidate"]: r for r in state_rows(tree)}
         assert by_name["Abraham Lincoln"]["nominating_party"] == "Republican"
+        # The null half on a real row: 1872's (1860's nulls are filled since #575's
+        # re-record).
+        null_party = [
+            r["candidate"]
+            for r in year_body(1872)["summary"]
+            if r["nominating_party"] is None
+        ]
+        assert null_party == ["David Davis"]  # the premise
+        tree = render(1872)
+        assert nation_rows(tree)["David Davis"]["nominating_party"] == (
+            labels.NOT_IN_DATASET
+        )
         index = MOD["STATE_FIELDS"].index("nominating_party")
         null_cells = [
             row[index]
@@ -907,15 +952,19 @@ class TestNullCells:
         assert bryan["nominating_party"] == "Democratic and Populist"
 
     def test_a_row_note_is_help_text_and_listed_once(self) -> None:
-        """1872 Greeley (#389): the note is the cell's help text and one Party notes
-        item under each table, however many state rows repeat it."""
+        """1872 (#389): Greeley's note is his cell's help text, and each of the four
+        noted candidates (Greeley's and the three the USGOV catalog notes, #388) is one
+        Party notes item under each table, in that table's first-seen order, however
+        many state rows repeat it."""
         body = year_body(1872)
-        note = next(
-            r["nominating_party_note"]
+        notes = {
+            r["candidate"]: r["nominating_party_note"]
             for r in body["summary"]
-            if r["candidate"] == "Horace Greeley"
-        )
-        assert note
+            if r["nominating_party_note"]
+        }
+        # The premise: four noted candidates, Greeley among them.
+        assert set(notes) == {*T3_NOTED_1872}
+        note = notes["Horace Greeley"]
         tree = render(1872)
         index = MOD["NATION_FIELDS"].index("nominating_party")
         greeley = next(
@@ -930,16 +979,17 @@ class TestNullCells:
             for d in of_type(tree, "Div")
             if getattr(d, "className", None) == "party-notes"
         ]
-        assert len(lists) == 2  # under T2 and under T3
-        item = labels.PARTY_NOTE_ITEM.format(
-            candidate="Horace Greeley", year=1872, note=note
-        )
-        for block in lists:
-            assert [li.children for li in of_type(block, "Li")] == [item]
+        assert len(lists) == 2  # under T3 and under T2, in render order
+        for block, order in zip(lists, (T3_NOTED_1872, T2_NOTED_1872), strict=True):
+            assert [li.children for li in of_type(block, "Li")] == [
+                labels.PARTY_NOTE_ITEM.format(candidate=name, year=1872, note=notes[name])
+                for name in order
+            ]
 
     def test_t2_lists_only_the_notes_of_the_rows_it_shows(self) -> None:
-        """1872 filtered to Grant (#389): T2 shows none of Greeley's rows, so its Party
-        notes list is absent; T3, which the filter does not narrow, keeps his."""
+        """1872 filtered to Grant (#389): T2 shows no noted candidate's rows, so its
+        Party notes list is absent; T3, which the filter does not narrow, keeps all
+        four."""
         tree = render(1872, "candidate=ulysses-s-grant")
         assert {r["candidate"] for r in state_rows(tree)} == {"Ulysses S. Grant"}
         lists = [
@@ -948,30 +998,26 @@ class TestNullCells:
             if getattr(d, "className", None) == "party-notes"
         ]
         assert len(lists) == 1
+        notes = {
+            r["candidate"]: r["nominating_party_note"]
+            for r in year_body(1872)["summary"]
+        }
         assert [li.children for li in of_type(lists[0], "Li")] == [
-            labels.PARTY_NOTE_ITEM.format(
-                candidate="Horace Greeley",
-                year=1872,
-                note=next(
-                    r["nominating_party_note"]
-                    for r in year_body(1872)["summary"]
-                    if r["candidate"] == "Horace Greeley"
-                ),
-            )
+            labels.PARTY_NOTE_ITEM.format(candidate=name, year=1872, note=notes[name])
+            for name in T3_NOTED_1872
         ]
 
     def test_a_no_nomination_row_reads_its_own_label(self) -> None:
-        """AC3 (#389): no row is served with ``no_nomination`` yet, so the body is
-        doctored here, never in a recorded file."""
+        """AC3 (#389): 2016's Colin Powell, served as ``no_nomination`` from the USGOV
+        catalog (#388) since #575's re-record."""
         body = year_body(2016)
-        for row in [*body["data"], *body["summary"]]:
-            if row["candidate"] == "Colin Powell":
-                row.update(
-                    nominating_party="no_nomination",
-                    nominating_party_source="USGOV",
-                    nominating_party_note="A doctored note.",
-                )
-        tree = render(2016, body=body)
+        (row,) = [r for r in body["summary"] if r["candidate"] == "Colin Powell"]
+        note = row["nominating_party_note"]
+        # The premise: a real no_nomination row with a note.
+        assert row["nominating_party"] == "no_nomination"
+        assert row["nominating_party_source"] == "USGOV"
+        assert note
+        tree = render(2016)
         index = MOD["NATION_FIELDS"].index("nominating_party")
         powell = next(
             row[index]
@@ -980,9 +1026,9 @@ class TestNullCells:
         )
         assert cell_text(powell) == labels.NO_NOMINATION
         assert labels.NO_NOMINATION not in {labels.NOT_IN_DATASET, labels.UNRECOGNIZED}
-        assert powell.title == f"{labels.NO_NOMINATION_NOTE} A doctored note."
+        assert powell.title == f"{labels.NO_NOMINATION_NOTE} {note}"
         items = [li.children for li in of_type(tree, "Li")]
-        assert "Colin Powell, 2016: A doctored note." in items
+        assert f"Colin Powell, 2016: {note}" in items
 
     @pytest.mark.parametrize(
         ("row", "shown", "title"),
@@ -2983,8 +3029,13 @@ class TestPartyDisplay:
 
         walk(RECORDED)
         assert found - {None} <= set(NOMINATING_PARTIES)
-        # Non-vacuous: the recordings carry both joint codes now served.
-        assert {"liberal_republican_democratic", "democratic_populist"} <= found
+        # Non-vacuous: the recordings carry both joint codes now served, and
+        # ``no_nomination`` (#575's re-record).
+        assert {
+            "liberal_republican_democratic",
+            "democratic_populist",
+            "no_nomination",
+        } <= found
 
     def test_the_page_shows_the_form_and_its_downloads_keep_the_code(self) -> None:
         """T2 and T3 show the display form; both files carry the code (or an empty
@@ -2997,11 +3048,11 @@ class TestPartyDisplay:
         shown = {r["nominating_party"] for r in state_rows(tree)} - {
             labels.NOT_IN_DATASET
         }
-        assert shown == {"Democratic", "Republican"}
+        assert shown == {"Democratic", "Republican", labels.NO_NOMINATION}
         for table_id in (STATES, NATION):
             rows = Csv(links(tree)[export.link_id(table_id)].href).rows
             codes = {r["nominating_party"] for r in rows} - {""}
-            assert codes == {"democratic", "republican"}, table_id
+            assert codes == {"democratic", "republican", "no_nomination"}, table_id
             assert codes <= set(NOMINATING_PARTIES)
 
 

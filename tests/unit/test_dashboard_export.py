@@ -1550,12 +1550,23 @@ class TestNulls:
         recorded = RECORDED["/v1/elections/1860"]["data"]
         assert all(r["popular_votes"] is None for r in recorded)  # the premise
         assert {r["popular_votes"] for r in states.rows} == {""}
-        # Breckinridge and Bell carry no party row (#389): an empty cell, as served.
-        nulls = {r["candidate"] for r in states.rows if r["nominating_party"] == ""}
-        assert {"John C. Breckinridge", "John Bell"} <= nulls
+        # Breckinridge and Bell carry their codes since #575's re-record (#388).
+        codes = {r["candidate"]: r["nominating_party"] for r in states.rows}
+        assert codes["John C. Breckinridge"] == "southern_democratic"
+        assert codes["John Bell"] == "constitutional_union"
         tree, _ = render("/election/<year>", monkeypatch, year="1860")
         nation = download(tree, "election-nation")
         assert {r["hybrid_score"] for r in nation.rows} == {""}
+        # A null party is an empty cell, as served (#389): 1872's David Davis.
+        served = {
+            r["candidate"]
+            for r in RECORDED["/v1/elections/1872"]["data"]
+            if r["nominating_party"] is None
+        }
+        assert served == {"David Davis"}  # the premise
+        tree, _ = render("/election/<year>/states", monkeypatch, year="1872")
+        rows = download(tree, "election-states").rows
+        assert {r["candidate"] for r in rows if r["nominating_party"] == ""} == served
 
     def test_the_columns_that_explain_a_null_travel_with_it(
         self, monkeypatch: pytest.MonkeyPatch
