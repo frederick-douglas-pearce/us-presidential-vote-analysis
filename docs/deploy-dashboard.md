@@ -1914,3 +1914,77 @@ other text or outside the chart's width. Both charts read the year ticks 1840, 1
 value ticks (D113) read 0, 2M, 4M for GA; 0, 5M, 10M for TX; and 0, 100k, 200k, 300k for
 AK. §9's checks: `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200,
 and the plotly.js path a 404.
+
+### Chart C9 and T1's N1 columns on `/elections`, measured after deploy (2026-11-23, #563)
+
+#563 (D116) added C9, the number of candidates who received electoral votes in each
+election, to the list of elections, above T1, and appended to T1 four of N1's fields, the
+electoral and popular-vote margins and a page-only Recipients column. The page already read
+N1 (`/v1/elections/summary`) on a miss, so its fills are unchanged: one N1 fill on the first
+visit after a start. What changed is what that render does with N1: it checks N1's
+recipient rows and reconciles each year's count with `candidate_count` over every served
+year before the filters, then draws C9 and the new cells. #563 asked for D071(g)
+re-measured on `/elections` after deploy. The baseline is that page in
+[#562's record](#the-elections-index-and-its-two-subpages-measured-after-deploy-2026-11-19-562).
+
+Dashboard version `v-b688875e2ec2-r38-a1` (deploy run 45257702244 of b688875, the merge of
+#627), snapshot `b09807fa…`, revision `usvote-api-00014-q75`, as in
+[#582's record](#chart-c10-on-the-state-history-page-measured-after-deploy-2026-11-22-582)
+(the snapshot differs from the baseline's). The API origin was warm throughout: the
+keep-warm ping reached its `/health` at 20:16Z and 20:19Z, and its last `Starting new
+instance` was at 20:05Z, before the window. Measured 20:20–20:21Z, before the day's
+canary had started (its last run 2026-11-22 20:22Z), by #277's method:
+`scripts/measure_dashboard_cold_start.py` (390 px, 10 Mbps / 100 ms, a fresh browser
+context each run) with `--chart "#c9 .main-svg"`. The chart column is the time until C9 is
+drawn, which is not a D071(g) measure.
+
+**Two instances:**
+
+- **A**, the deploy's new instance, up since 20:19:16Z. The deploy's probes request `/`, so
+  A held only the two prefetched paths, and its first visit made the N1 fill. Three runs
+  from the cache followed.
+- **B**, after a [restart](#restarting-the-instance-to-empty-its-cache) at 20:20:39Z.
+  Warmup ran as a loading request (1.85 s), and B was serving its snapshot (2 responses)
+  about 4 s after the delete command was issued. One first visit, then three runs from the
+  cache.
+
+Each first visit was a genuine miss: no N1 fill on that instance before the run, and its
+`api fetch /v1/elections/summary` line was logged during it (20:20:03Z on A, 20:21:03Z on
+B). A's fill reached the warm origin (32 ms there); B's was an edge hit.
+
+| Run | Instance | TTFB (s) | First data (s) | Chart drawn (s) |
+|---|---|---|---|---|
+| `/elections`, first visit | A | 0.23 | 1.65 | 4.41 (C9) |
+| `/elections`, first visit | B | 0.16 | 1.55 | 4.11 (C9) |
+| `/elections`, from the cache (3 runs) | A | 0.13–0.17 | 0.99–1.10 | 3.61–3.80 (C9) |
+| `/elections`, from the cache (3 runs) | B | 0.09–0.21 | 0.97–1.08 | 3.60–3.65 (C9) |
+
+Every run reached data, with no degraded page and no section unavailable.
+
+- **TTFB met D071(g) on 8 of 8 runs** (0.09–0.23 s, against ≤ 1 s).
+- **First data met it on 8 of 8** (1.55–1.65 s on a first visit, 0.97–1.10 s from the
+  cache, against ≤ 3 s). From the cache this is the baseline's 1.00–1.09 s; a first visit
+  is about 0.5 s slower than the baseline's 1.10 s.
+- **The fill.** The routing callback that makes the fill took 0.68 s (A, origin) and
+  0.47 s (B, edge hit) on the server, against the baseline's 0.17 s; from the cache it took
+  0.023–0.036 s, against 0.013–0.032 s. The first visit's extra time is in the render that
+  first reads N1 (the reconciliation over every served year, C9 and the new cells), not in
+  the renders from the cache.
+- **C9 is drawn 2.5–2.8 s after first data** on every run, as C2, C5, C7 and C10 are in
+  their records (2.3–3.6 s).
+
+**Request budget held.** Besides the refresher's cycles and pings, the version logged only
+the expected fills: each instance's two prefetched paths as it started, and one N1 fill for
+each first visit. The runs from the cache and the checks below made none. The app logged no
+warnings and no 5xx since the deploy.
+
+**Memory** (`gcloud app instances list`, `instance.memoryUsage`, in bytes): B, 129.0 MB
+(123.1 MiB), 34 % of the 384 MB D071 names for F1, after its runs and the checks below (141
+requests). This is below #470's peak of 143.7 MB, so D071's F1 flip condition is not near.
+
+**Checked on the deployed version** with a scripted browser, after the runs, at 360 px and
+390 px, with the browser's color scheme light and dark (4 renders): no sideways scroll, no
+unavailable note, C9 drawn with 51 bars and T1 with 51 rows, the year ticks 1840, 1880,
+1920, 1960 and 2000 at least 18 px apart edge to edge at 360 px (24 px at 390 px), and no
+chart text outside the width. §9's checks: `/election/%2531824` is a 404 with `noindex`,
+`/election/%31824` a 200, and the plotly.js path a 404.
