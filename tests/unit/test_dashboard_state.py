@@ -2,7 +2,8 @@
 electoral vote page, T7 (#280; its own page since #559), with the section links
 between a state's two pages (#559, D105).
 
-Offline, against the recorded ``/v1/states/GA`` and the roster ``/v1/elections/2024``,
+Offline, against the recorded ``/v1/states/GA`` and ``/v1/states/TX`` (C7 and C10
+run over both, #575) and the roster ``/v1/elections/2024``,
 and ``/v1/states/GA/per-capita`` and ``/v1/states/TX/per-capita``
 (the same snapshot as every other fixture, ``test_every_recorded_response_is_one_
 snapshot``), through the helpers and the autouse offline process client of
@@ -20,7 +21,7 @@ import copy
 import inspect
 import random
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 import dash
 import pytest
@@ -363,17 +364,23 @@ class TestGeorgia:
             for r in ga_body()["data"]
             if r["nominating_party_note"]
         }
-        # A null with its one-cause note, on a recorded null row.
-        nulls = sorted(
-            {
-                (r["year"], r["candidate"])
-                for r in ga_body()["data"]
-                if r["nominating_party"] is None
-            }
-        )
-        assert nulls == [(1836, "Willie P. Mangum"), (1872, "David Davis")]  # premise
-        for year, name in nulls:
-            null = cells[(str(year), name)]
+        # A null with its one-cause note, on a doctored row: the USGOV catalog (#388)
+        # keeps filling the recorded nulls (#575).
+        body = ga_body()
+        target = [r for r in body["data"] if r["year"] == 1900]
+        assert target and all(r["nominating_party"] for r in target)  # the premise
+        for row in target:
+            row.update(
+                nominating_party=None,
+                nominating_party_source=None,
+                nominating_party_note=None,
+            )
+        doctored = {
+            (texts(r[0])[0], texts(r[1])[0]): r[index]
+            for r in table_rows(render(body=body))
+        }
+        for row in target:
+            null = doctored[("1900", row["candidate"])]
             assert texts(null) == [labels.NOT_IN_DATASET]
             assert null.title == labels.PARTY_NULL_NOTE
         note = notes[(1872, "Horace Greeley")]
@@ -1712,25 +1719,33 @@ ELECTORS = MOD["ELECTORS_TABLE_ID"]
 #: recording stays test input for C7's reconciliation (D106(h)).
 N2: dict[str, Any] = RECORDED["/v1/elections/states"]
 SERVED = sorted(state_view.served_years(INDEX))
-#: The states whose history is recorded (``/v1/states/{usps}``): C7's and C10's
-#: oracles run over each, so a newly recorded state joins them with no edit.
+#: The states whose history is recorded (``/v1/states/{usps}``). C10's oracle runs
+#: over each with no edit; C7's also reads the state's entry in :data:`HISTORIES`,
+#: so a newly recorded state needs one there, which
+#: ``TestC7.test_the_literals_cover_every_recorded_state`` enforces.
 RECORDED_STATES = sorted(
     path.rsplit("/", 1)[1]
     for path in RECORDED
     if path.startswith("/v1/states/") and path.count("/") == 3
 )
-#: Each recorded state's zero allotments and first election, written once as
-#: literals so the C7 tests built over ``RECORDED_STATES`` check against something
-#: other than the recording they read: Georgia took no part in 1864, Texas in 1864
-#: and 1868, and Texas's first election is 1848 (#575).
-ZERO_YEARS = {"GA": [1864], "TX": [1864, 1868]}
-FIRST_ELECTION = {"GA": 1824, "TX": 1848}
 
 
-def state_name(usps: str) -> str:
-    """The recorded history's one name for ``usps``."""
-    (name,) = {r["state"] for r in RECORDED[f"/v1/states/{usps}"]["data"]}
-    return str(name)
+class History(NamedTuple):
+    """A recorded state's name, first election and zero allotments."""
+
+    name: str
+    first: int
+    zeros: list[int]
+
+
+#: Each recorded state's facts, written as literals so the C7 tests built over
+#: ``RECORDED_STATES`` check against something other than the recording they read:
+#: Georgia took no part in 1864, Texas in 1864 and 1868, and Texas's first election
+#: is 1848 (#575).
+HISTORIES = {
+    "GA": History("Georgia", 1824, [1864]),
+    "TX": History("Texas", 1848, [1864, 1868]),
+}
 
 
 def body_cells(tree: Any) -> list[tuple[str, str, str]]:
@@ -1820,8 +1835,10 @@ class TestC7:
         assert {r["state_usps"] for r in csv.rows} == {"GA"}
 
     def test_the_literals_cover_every_recorded_state(self) -> None:
-        assert sorted(ZERO_YEARS) == sorted(FIRST_ELECTION) == RECORDED_STATES
-        assert RECORDED_STATES == ["GA", "TX"]
+        assert sorted(HISTORIES) == RECORDED_STATES
+        for usps, history in HISTORIES.items():
+            names = {r["state"] for r in RECORDED[f"/v1/states/{usps}"]["data"]}
+            assert names == {history.name}, usps
 
     @pytest.mark.parametrize("usps", RECORDED_STATES)
     def test_its_points_are_n2_s_one_state_series(self, usps: str) -> None:
@@ -1839,8 +1856,8 @@ class TestC7:
         assert [
             (r["year"], r["state_electoral_votes"], r["pv_status"]) for r in records
         ] == [(r["year"], r["state_electoral_votes"], r["pv_status"]) for r in n2]
-        assert n2[0]["year"] == FIRST_ELECTION[usps]
-        name = state_name(usps)
+        assert n2[0]["year"] == HISTORIES[usps].first
+        name = HISTORIES[usps].name
         tree = render(usps=usps)
         figure = c7_figure(tree)
         expected = over_time.c4_figure(
@@ -1895,22 +1912,23 @@ class TestC7:
         (bars,) = [t for t in figure["data"] if t["type"] == "bar"]
         drawn = dict(zip(bars["x"], bars["y"], strict=True))
         cells = {int(r["year"]): r for r in rows}
-        assert set(cells) == set(range(FIRST_ELECTION[usps], 2025, 4))
+        assert set(cells) == set(range(HISTORIES[usps].first, 2025, 4))
         for year, value in drawn.items():
             assert cells[year]["state_electoral_votes"] == str(value), year
         markers = {y for t in figure["data"] if t["type"] != "bar" for y in t["x"]}
-        assert markers == set(ZERO_YEARS[usps])
-        for year in ZERO_YEARS[usps]:
+        assert markers == set(HISTORIES[usps].zeros)
+        for year in HISTORIES[usps].zeros:
             assert cells[year]["state_electoral_votes"] == "0", year
         # Each hover writes the table's cells (D091).
         hovers = [h for t in figure["data"] for h in t["hovertext"]]
         assert len(hovers) == len(rows)
         body = body_cells(tree)
+        name = HISTORIES[usps].name
         for hover, (year, appointed, status) in zip(
             sorted(hovers, key=lambda h: int(h[:4])), body, strict=True
         ):
             assert hover == labels.C4_STATE_HOVER.format(
-                year=year, state=state_name(usps), appointed=appointed, pv_status=status
+                year=year, state=name, appointed=appointed, pv_status=status
             )
 
     @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
@@ -1943,16 +1961,16 @@ class TestC7:
         # states took no part in those years (D100(d)), so every zero is in that
         # marker series, none in the no-electors one, and none is drawn as a bar.
         zeros = [r["year"] for r in n2_state(usps) if r["state_electoral_votes"] == 0]
-        assert zeros == ZERO_YEARS[usps]  # the premise
+        assert zeros == HISTORIES[usps].zeros  # the premise
         assert {
             r["pv_status"] for r in n2_state(usps) if r["year"] in zeros
         } == {"not_participating"}
         tree = render(usps=usps)
         figure = c7_figure(tree)
-        assert traces(figure)[labels.C4_NO_ELECTORS_TOOK_NO_PART] == ZERO_YEARS[usps]
+        assert traces(figure)[labels.C4_NO_ELECTORS_TOOK_NO_PART] == HISTORIES[usps].zeros
         assert labels.C4_NO_ELECTORS not in traces(figure)
         bar = traces(figure)[labels.LABELS["state_electoral_votes"]]
-        assert not set(ZERO_YEARS[usps]) & set(bar)
+        assert not set(HISTORIES[usps].zeros) & set(bar)
         assert labels.C4_ZERO_NOTE in c7_caption(tree)
 
     def test_texas_s_first_election_is_named_on_its_own_history(self) -> None:

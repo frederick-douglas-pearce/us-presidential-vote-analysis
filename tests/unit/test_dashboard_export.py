@@ -1557,16 +1557,24 @@ class TestNulls:
         tree, _ = render("/election/<year>", monkeypatch, year="1860")
         nation = download(tree, "election-nation")
         assert {r["hybrid_score"] for r in nation.rows} == {""}
-        # A null party is an empty cell, as served (#389): 1872's David Davis.
-        served = {
-            r["candidate"]
-            for r in RECORDED["/v1/elections/1872"]["data"]
-            if r["nominating_party"] is None
-        }
-        assert served == {"David Davis"}  # the premise
-        tree, _ = render("/election/<year>/states", monkeypatch, year="1872")
+        # A null party is an empty cell (#389), on a doctored row: the USGOV catalog
+        # (#388) keeps filling the recorded nulls (#575).
+        body = copy.deepcopy(RECORDED["/v1/elections/1860"])
+        bell = [r for r in body["data"] if r["candidate"] == "John Bell"]
+        assert bell and all(r["nominating_party"] for r in bell)  # the premise
+        assert all(r["nominating_party"] for r in body["data"])
+        for row in bell:
+            row.update(
+                nominating_party=None,
+                nominating_party_source=None,
+                nominating_party_note=None,
+            )
+        monkeypatch.setitem(RECORDED, "/v1/elections/1860", body)
+        tree, _ = render("/election/<year>/states", monkeypatch, year="1860")
         rows = download(tree, "election-states").rows
-        assert {r["candidate"] for r in rows if r["nominating_party"] == ""} == served
+        assert {r["candidate"] for r in rows if r["nominating_party"] == ""} == {
+            "John Bell"
+        }
 
     def test_the_columns_that_explain_a_null_travel_with_it(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1603,10 +1611,22 @@ class TestNulls:
     def test_the_state_history_explains_its_null_party(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # A doctored null (#575): the USGOV catalog (#388) keeps filling the recorded
+        # ones.
+        body = copy.deepcopy(RECORDED["/v1/states/GA"])
+        target = [r for r in body["data"] if r["year"] == 1900]
+        assert target and all(r["nominating_party"] for r in target)  # the premise
+        for row in target:
+            row.update(
+                nominating_party=None,
+                nominating_party_source=None,
+                nominating_party_note=None,
+            )
+        monkeypatch.setitem(RECORDED, "/v1/states/GA", body)
         tree, _ = render("/state/<usps>", monkeypatch)
         history = download(tree, "state-history")
-        # the premise: a null party
-        assert "" in {r["nominating_party"] for r in history.rows}
+        rows = [r for r in history.rows if r["year"] == "1900"]
+        assert rows and {r["nominating_party"] for r in rows} == {""}
         for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
             assert note in history.lines
             assert note in [p.children for p in of_type(tree, "P")]

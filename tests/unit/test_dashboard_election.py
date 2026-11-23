@@ -835,10 +835,14 @@ class TestNullCells:
         assert {panel(tree)[f] for f in PV_FIELDS} == {labels.NOT_APPLICABLE}
         # A null party has nothing to do with the window (#389): it reads "Not in
         # this dataset", never the window's wording.
+        # The premise: the recording gives the doctored candidate a party, so the
+        # null below is the doctoring's.
+        (served,) = [r for r in year_body(year)["summary"] if r["candidate"] == doctored]
+        assert served["nominating_party"] is not None
         null_party = [
             r["candidate"] for r in body["summary"] if r["nominating_party"] is None
         ]
-        assert doctored in null_party  # the premise
+        assert doctored in null_party
         for name in null_party:
             assert rows[name]["nominating_party"] == labels.NOT_IN_DATASET, (year, name)
 
@@ -906,8 +910,11 @@ class TestNullCells:
     def test_a_party_and_a_null_on_real_rows(self) -> None:
         """AC1, AC2, AC4 (#389): 1860 gives each candidate's party, the two the
         Archives name and the two the USGOV catalog fills (#388); 1872's David Davis,
-        whom no source gives a party, reads "Not in this dataset" with its one-cause
-        note; 1896's Bryan reads one joint value. AC7's third state,
+        for whom this dataset records no party, reads "Not in this dataset" with its
+        one-cause note; 1896's Bryan reads one joint value. Davis is the one test of a
+        served null on a real row (#575): when the catalog fills him, this test fails
+        on its premise, and the null half is re-pointed or retired; every other null
+        test uses a doctored row. AC7's third state,
         ``no_nomination``, is ``test_a_no_nomination_row_reads_its_own_label``."""
         tree = render(1860)
         nation = nation_rows(tree)
@@ -1002,6 +1009,9 @@ class TestNullCells:
             r["candidate"]: r["nominating_party_note"]
             for r in year_body(1872)["summary"]
         }
+        # The premise: the four noted candidates, and none of them is Grant.
+        assert {name for name, note in notes.items() if note} == set(T3_NOTED_1872)
+        assert "Ulysses S. Grant" not in T3_NOTED_1872
         assert [li.children for li in of_type(lists[0], "Li")] == [
             labels.PARTY_NOTE_ITEM.format(candidate=name, year=1872, note=notes[name])
             for name in T3_NOTED_1872
@@ -3038,20 +3048,18 @@ class TestPartyDisplay:
         } <= found
 
     def test_the_page_shows_the_form_and_its_downloads_keep_the_code(self) -> None:
-        """T2 and T3 show the display form; both files carry the code (or an empty
-        cell), never a display form. T4's file: ``test_dashboard_export.py``."""
+        """T2 and T3 show the display form; both files carry the code, never a display
+        form. T4's file: ``test_dashboard_export.py``."""
         from tests.unit.test_dashboard_export import Csv, links
         from usvote.party import NOMINATING_PARTIES
 
         tree = render(2016)
         assert nation_rows(tree)["Hillary Clinton"]["nominating_party"] == "Democratic"
-        shown = {r["nominating_party"] for r in state_rows(tree)} - {
-            labels.NOT_IN_DATASET
-        }
+        shown = {r["nominating_party"] for r in state_rows(tree)}
         assert shown == {"Democratic", "Republican", labels.NO_NOMINATION}
         for table_id in (STATES, NATION):
             rows = Csv(links(tree)[export.link_id(table_id)].href).rows
-            codes = {r["nominating_party"] for r in rows} - {""}
+            codes = {r["nominating_party"] for r in rows}
             assert codes == {"democratic", "republican", "no_nomination"}, table_id
             assert codes <= set(NOMINATING_PARTIES)
 
