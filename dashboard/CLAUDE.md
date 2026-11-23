@@ -41,6 +41,11 @@ degraded state in `TestNoSectionNoCard`; tests elsewhere name the card that hold
 `card_children` (the page child at a position must be a card), `card_holding` and `cards`
 (a page's direct-child cards), or `in_one_card` (exactly one card in the whole tree holds
 an id), never by flattening a card away),
+`tests/unit/test_dashboard_ledes.py` (the filter sentence only where the filters show,
+#419: on every page that registers a `query=` parser, success shows the lede then its
+`FILTER_SENTENCE*`, and the unreachable, broken-read (page or section) and not-found states
+show none, in `TestFilterSentence`; no helper builds the lede, since each page decides when
+its sentence shows in its own way and a helper would hold none of that rule),
 `tests/unit/test_dashboard_charts.py` (the chart registry, `components.chart`, C5's short-tick exception, #596, in `TestShortValueTicks`, the figure
 rules, the template, the config and the chart callback, #432, the not-drawn log check, #467, and the check's totality, #484, in `TestTotality`, `TestSlotKinds`, `TestTotalityGuards` and `TestPlaceholderScan`) and
 `tests/unit/test_dashboard_guards.py`
