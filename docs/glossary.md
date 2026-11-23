@@ -310,11 +310,15 @@ articles and announcements). Every rule binds all three unless the rule states a
   the most in one election, with every year that ties for the most, or a sentence that none did.
   The year-range and popular-vote filters narrow C9 with T1 (D110, D116(b)); a filter leaving no
   year shows `labels.NO_ELECTIONS_MATCH` and no chart. Two degradation tiers (D116(e)). Tier 1:
-  N1 cannot be read, an `elections` item fails `elections_view.n1_items`, or an item lacks one of
-  T1's four N1 fields. C9 is replaced by `labels.C9_UNAVAILABLE` (id `elections-c9-unavailable`),
+  N1 cannot be read, its `elections` items fail `elections_view.n1_items`, the bounds of the
+  index's popular-vote window fail `query.year_span` (a missing bound is the whole page's defect),
+  or any served year's item lacks a field T1's N1 cells or `election_view.margin_cells` read (T1's
+  four N1 fields and `hybrid_margin`). C9 is replaced by `labels.C9_UNAVAILABLE` (id `elections-c9-unavailable`),
   and every N1 cell in T1 reads `T1_N1_UNAVAILABLE_CELL`. Tier 2: `elections_view.n1_recipients`
-  refuses a row, or a year's number of rows differs from its `candidate_count`. That check runs
-  over every served year, before the filters apply. C9 is replaced by the same sentence, and only
+  refuses a row (a row with no votes cast is refused, never left out), or a year's number of rows
+  differs from its `candidate_count`, which must also be at least 1. Both tiers' checks run over
+  every served year, before the filters apply, and the tier comes from the check, never from a
+  cell. C9 is replaced by the same sentence, and only
   T1's Recipients cells read `T1_N1_UNAVAILABLE_CELL`. Every drawn year's count is reconciled
   first, so C9 has no labeled marker.
 - **Shown as:** `labels.C9_TITLE`, `labels.C9_VALUE_AXIS`, `labels.C9_HOVER` (its recipients
@@ -618,11 +622,15 @@ articles and announcements). Every rule binds all three unless the rule states a
   read): each is the only section on its page, and the page keeps its heading, lede and section
   links. The averages' own unavailable state (`METRICS_UNAVAILABLE` in `pages/elections.py`): the
   count of elections shown and the rest of the page still show. C9's and T1's N1 columns' own
-  unavailable states on `/elections` (#563, D116(e)). In tier 1 (N1 cannot be read, or an
-  `elections` item fails its check or lacks a field): `labels.C9_UNAVAILABLE` (id
+  unavailable states on `/elections` (#563, D116(e)). In tier 1 (N1 cannot be read, its
+  `elections` items fail their check, the bounds of the popular-vote window fail theirs, or a
+  served year's item lacks a field T1's N1 cells are built from; checked over every served year
+  before the filters): `labels.C9_UNAVAILABLE` (id
   `elections-c9-unavailable`) in C9's place, `T1_N1_UNAVAILABLE_CELL` in each of T1's five N1
-  columns, and `T1_N1_UNAVAILABLE_NOTE` first among T1's notes and in its download. In tier 2 (a
-  recipient row fails its check, or a year's rows do not match its `candidate_count`):
+  columns, and `T1_N1_UNAVAILABLE_NOTE` first among T1's notes and in its download where one is offered,
+  and among the notes even when the filters leave no election (the tier comes from the check, never from a cell; C9 then shows nothing).
+  In tier 2 (a recipient row fails its check, a row with no votes cast included, or a year's rows
+  do not match its `candidate_count`, which must be at least 1):
   `labels.C9_UNAVAILABLE`, and `T1_N1_UNAVAILABLE_CELL` in the Recipients cells only, with no
   note. The rest of T1 and the page still show. In a download made while N1 can't be read, an
   empty cell in the four columns the note names means not read. It does not mean null, even
@@ -1877,9 +1885,11 @@ articles and announcements). Every rule binds all three unless the rule states a
   election, one line each, with their electoral votes cast and counted.
 - **Precise:** For one year, N1's `data` rows for that year, in served order, each written from
   `candidate`, `national_electoral_votes` (cast) and `national_electoral_votes_counted`. Every row
-  has more than 0 votes cast and from 0 to that number counted (`elections_view.n1_recipients`),
-  so the lines are exactly the candidates *Candidates with electoral votes (count per election)*
-  counts. Their number equals that year's `candidate_count`; a mismatch is C9's tier 2. Both
+  has more than 0 votes cast and from 0 to that number counted (`elections_view.n1_recipients`);
+  a row with none cast is refused, never left out, since the API counts every N1 row in
+  `candidate_count` (D116(d)). So the lines are exactly the candidates *Candidates with electoral
+  votes (count per election)* counts. Their number equals that year's `candidate_count`, which is
+  at least 1; a refused row, a mismatch or a count below 1 is C9's tier 2. Both
   numbers always show, even when they are equal. It is a page-only column (D116(a), amending
   D075), the last in T1 after its seven served columns. It is built through
   `components.table(..., page_only=)`, with its header marked `components.PAGE_ONLY_CLASS` and
