@@ -275,18 +275,14 @@ def test_a_navigation_marks_by_the_routers_rule(
     expect_marked(page, mark)
 
 
-#: dcc's lazily loaded graph chunk, which a page with a chart may request on a
-#: client-side navigation to it (#563: /elections draws C9).
-GRAPH_CHUNK = ("script", "GET", "/_dash-component-suites/dash/dcc/async-graph.js")
-
-
 def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> None:
     page.goto("/elections")
     assert_rendered(page, ELECTIONS_SUCCESS)
     expect_marked(page, ("elections", "page"))
-    # /elections draws C9 since #563, so its return below may request dcc's lazily
-    # loaded graph chunk (GRAPH_CHUNK) and nothing else; plotly.js is already loaded
-    # in this document and is never fetched again.
+    # /elections draws C9 since #563: wait for it to be drawn, so dcc's graph chunk
+    # and plotly.js, each fetched once per document, are already loaded and nothing
+    # but the router is requested on any navigation below, the return included.
+    page.locator("#c9 .main-svg").first.wait_for()
     seen: list[tuple[str, str, str]] = []
 
     def on_request(request: Request) -> None:
@@ -301,10 +297,10 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
 
     page.on("request", on_request)
     page.evaluate("window.__e2e_mark = 1")
-    for key, success, mark, chunk in (
-        ("states", "#states", ("states", "page"), ()),
-        ("home", HOME_SUCCESS, ("home", "page"), ()),
-        ("elections", ELECTIONS_SUCCESS, ("elections", "page"), (GRAPH_CHUNK,)),
+    for key, success, mark in (
+        ("states", "#states", ("states", "page")),
+        ("home", HOME_SUCCESS, ("home", "page")),
+        ("elections", ELECTIONS_SUCCESS, ("elections", "page")),
     ):
         seen.clear()
         page.locator(f"#{LINK_IDS[key]}").click()
@@ -313,10 +309,7 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
         page.wait_for_timeout(SETTLE_MS)
         # The router's one request, and nothing else: no document, no re-bootstrap, no
         # asset, and no request for the marker, which runs in the browser.
-        router = ("callback", "POST", ROUTER_OUTPUT)
-        assert router in seen, (key, seen)
-        assert sorted(set(seen) - {router}) == sorted(set(chunk) & set(seen)), (key, seen)
-        assert seen.count(router) == 1, (key, seen)
+        assert seen == [("callback", "POST", ROUTER_OUTPUT)], (key, seen)
     assert page.evaluate("window.__e2e_mark") == 1
 
 
