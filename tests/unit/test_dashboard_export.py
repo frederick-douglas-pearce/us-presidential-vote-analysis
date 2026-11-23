@@ -2823,7 +2823,8 @@ class Served(NamedTuple):
     #: The fields a figure reads only through a type check that refuses every
     #: unexpected kind (#563: C9's recipients), so doctoring one degrades the section
     #: instead of changing the figure. For an entry naming them, the premise that the
-    #: doctored row reaches the figure is that each one changed it or degraded it.
+    #: doctored row reaches the figure is that each one changed it or degraded its
+    #: section alone, the page's success marker kept.
     checked: tuple[str, ...] = ()
 
 
@@ -2968,6 +2969,7 @@ class TestServedValuesReachNoFigureUntyped:
         assert plain is not None  # the premise: drawn from the recorded body
         outcomes: dict[str, list[str]] = {}
         changed = []
+        section_degraded = []
         for field in fields:
             with monkeypatch.context() as patch:
 
@@ -2992,16 +2994,19 @@ class TestServedValuesReachNoFigureUntyped:
                 tree, SECTION_UNAVAILABLE.get(chart_id, "")
             ):
                 outcome = "degraded"
+                if _contains(tree, success) and chart_id in SECTION_UNAVAILABLE:
+                    section_degraded.append(field)
             else:
                 outcome = "missing"
             outcomes.setdefault(outcome, []).append(field)
         assert set(outcomes) <= {"drawn", "degraded"}, outcomes
         assert "drawn" in outcomes  # the premise: most fields leave the chart drawn
         # The premise: the doctored row reaches the figure, through a field that
-        # changed it, or, for a checked field, one that changed or degraded it.
+        # changed it, or, for a checked field, one that changed it or degraded its
+        # section alone (the success marker kept): never the whole page (#563, AC5).
         if checked:
-            reached = set(changed) | set(outcomes.get("degraded", []))
-            assert set(checked) <= reached, outcomes
+            reached = set(changed) | set(section_degraded)
+            assert set(checked) <= reached, (outcomes, section_degraded)
         else:
             assert changed, outcomes
 

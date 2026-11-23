@@ -77,9 +77,8 @@ def margin_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, s
     panel block or its N1 ``elections`` item; a missing field is a ``KeyError``."""
     applicable = labels.in_pv_window(year, coverage)
     return {
-        "ec_margin": labels.margin(block["ec_margin"], True),
-        "pv_margin": labels.margin(block["pv_margin"], applicable),
-        "hybrid_margin": labels.margin(block["hybrid_margin"], applicable),
+        field: labels.margin(block[field], field == "ec_margin" or applicable)
+        for field in MARGINS
     }
 
 

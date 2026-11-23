@@ -3283,6 +3283,9 @@ def t1_field_cell(tree: Any, year: int, field: str) -> list[str]:
 
 class TestC9:
     def test_each_height_is_the_served_count_and_its_recipient_rows(self) -> None:
+        # The premise: every recorded N1 row has votes cast, so AC2's "rows with cast
+        # votes above zero" is every row, which the refusal rule (D116(d)) requires.
+        assert all(r["national_electoral_votes"] > 0 for r in SUMMARY["data"])
         figure = c9_figure(render_n1())
         assert figure is not None
         (bars,) = figure["data"]
@@ -3436,14 +3439,30 @@ class TestT1Columns:
             for field in ("ec_margin", "pv_margin"):
                 assert t1_field_cell(tree, year, field) == [panel[field]], (year, field)
 
-    def test_the_panel_calls_the_shared_margin_function(self) -> None:
+    def test_the_panel_and_t1_both_call_the_shared_margin_function(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """D116(f): both build their margins with ``election_view.margin_cells``, seen
+        through a spy whose sentinel cells only that function could have written."""
+        calls: list[int] = []
+
+        def spy(block: Any, year: int, coverage: Any) -> dict[str, str]:
+            calls.append(year)
+            return {field: f"S-{field}" for field in election_view.MARGINS}
+
+        monkeypatch.setattr(election_view, "margin_cells", spy)
         election = dash.page_registry["pages.election"]["layout"].__globals__
         block = RECORDED["/v1/elections/2016"]["election"]
         coverage = BODY["meta"]["provenance"]["coverage"]
         cells = election["_panel_cells"](block, 2016, coverage)
-        assert {f: cells[f] for f in election_view.MARGINS} == (
-            election_view.margin_cells(block, 2016, coverage)
-        )
+        assert {f: cells[f] for f in election_view.MARGINS} == {
+            f: f"S-{f}" for f in election_view.MARGINS
+        }
+        assert calls == [2016]
+        tree = render_n1()
+        assert t1_field_cell(tree, 2016, "ec_margin") == ["S-ec_margin"]
+        assert t1_field_cell(tree, 2016, "pv_margin") == ["S-pv_margin"]
+        assert set(calls[1:]) == set(YEARS)  # every served year, before the filters
 
     def test_a_year_before_the_window_reads_the_labeled_not_served_state(
         self,
@@ -3489,28 +3508,88 @@ def _malformed() -> dict[str, Any]:
     return {"elections": "no", "data": []}
 
 
-def _item_without_pv_margin() -> dict[str, Any]:
-    summary = copy.deepcopy(SUMMARY)
-    del summary["elections"][3]["pv_margin"]
-    return summary
+def _item_without(field: str, year: int = 1836) -> Callable[[], dict[str, Any]]:
+    """N1 with one year's ``elections`` item missing ``field``."""
+
+    def build() -> dict[str, Any]:
+        summary = copy.deepcopy(SUMMARY)
+        (item,) = [i for i in summary["elections"] if i["year"] == year]
+        del item[field]
+        return summary
+
+    return build
+
+
+def _index_window(**changes: Any) -> dict[str, Any]:
+    """The index with its popular-vote window changed (a value ``None`` drops it)."""
+    index = copy.deepcopy(BODY)
+    coverage = index["meta"]["provenance"]["coverage"]
+    for key, value in changes.items():
+        if value is None:
+            del coverage[key]
+        else:
+            coverage[key] = value
+    return index
+
+
+#: Every tier-1 trigger (D116(e)): N1 unread or malformed, a field T1's cells or
+#: ``margin_cells`` read missing from one item, and the index's popular-vote window
+#: present but failing ``query.year_span``; each as (index, N1, query). A missing bound
+#: is the page's defect, as before #563: T1's download preamble reads the window.
+TIER_ONE = [
+    pytest.param(lambda: BODY, _n1_absent, {}, id="N1 unread"),
+    pytest.param(lambda: BODY, _malformed, {}, id="N1 malformed"),
+    *(
+        pytest.param(lambda: BODY, _item_without(field), {}, id=f"no {field}")
+        for field in (
+            "electoral_votes_outside_top_two",
+            "electors_without_a_counted_vote",
+            "ec_margin",
+            "pv_margin",
+            "hybrid_margin",
+        )
+    ),
+    pytest.param(
+        lambda: _index_window(pv_year_min="x"), lambda: SUMMARY, {}, id="window bound text"
+    ),
+    pytest.param(
+        lambda: _index_window(pv_year_min=2024, pv_year_max=1976),
+        lambda: SUMMARY,
+        {},
+        id="window reversed",
+    ),
+    pytest.param(
+        lambda: BODY,
+        _item_without("hybrid_margin", 1824),
+        {"year_from": "2000"},
+        id="a field missing in a year the filters hide",
+    ),
+]
 
 
 class TestC9Degraded:
-    @pytest.mark.parametrize("summary", [_n1_absent, _malformed, _item_without_pv_margin])
+    @pytest.mark.parametrize(("index", "summary", "query"), TIER_ONE)
     def test_tier_one_empties_every_n1_cell_and_c9_and_keeps_t1(
-        self, summary: Callable[[], Any]
+        self,
+        index: Callable[[], Any],
+        summary: Callable[[], Any],
+        query: dict[str, str],
     ) -> None:
-        tree = MOD["render"](copy.deepcopy(BODY), [], summary())
+        tree = MOD["render"](
+            copy.deepcopy(index()), MOD["parse_filters"](query), copy.deepcopy(summary())
+        )
         assert find(tree, MOD["PAGE_ID"]) is not None
+        years, pv = controls(tree)
+        assert years is not None and pv is not None  # the filters stay
         assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
         assert c9_figure(tree) is None
         assert labels.C9_UNAVAILABLE in texts(find(tree, MOD["C9_UNAVAILABLE_ID"]))
         headers = of_type(find(tree, TABLE_ID), "Th")
         assert len(headers) == len(MOD["FIELDS"]) + 1
         cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        assert rows(tree)
         for row in rows(tree):
             assert row[3:] == [cell] * 5
-        assert shown_years(tree) == YEARS
         file = download(tree)
         assert file.header == list(MOD["FIELDS"])
         assert all(row[f] == "" for row in file.rows for f in MOD["N1_FIELDS"])
@@ -3521,6 +3600,35 @@ class TestC9Degraded:
         assert notes.index(MOD["T1_N1_UNAVAILABLE_NOTE"]) + 1 == notes.index(
             labels.HAS_POPULAR_VOTE_NOTE
         )
+
+    def test_the_tier_one_note_shows_when_a_filter_leaves_no_year(self) -> None:
+        """The tier comes from the check, never a cell (D116(e)): with no row, the
+        note still shows beside the other notes under the empty note."""
+        tree = MOD["render"](
+            copy.deepcopy(BODY),
+            MOD["parse_filters"]({"year_to": "1972", "pv": "1"}),
+            None,
+        )
+        notes = [p.children for p in classed(tree, "note")]
+        assert labels.NO_ELECTIONS_MATCH in texts(tree)
+        assert MOD["T1_N1_UNAVAILABLE_NOTE"] in notes
+
+    def test_a_count_of_zero_with_no_rows_is_tier_two(self) -> None:
+        """A year served with ``candidate_count`` 0 and no N1 rows never reconciles
+        (D116(d)): no empty bar, no blank Recipients cell."""
+        index = copy.deepcopy(BODY)
+        (row,) = [r for r in index["data"] if r["year"] == 1872]
+        row["candidate_count"] = 0
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"] = [r for r in summary["data"] if r["year"] != 1872]
+        tree = render_n1(summary, index=index)
+        assert find(tree, MOD["PAGE_ID"]) is not None
+        assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
+        assert c9_figure(tree) is None
+        cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        assert recipients_cell(tree, 1872) == [cell]
+        assert t1_field_cell(tree, 1872, "electoral_votes_outside_top_two") == ["24"]
+        assert t1_field_cell(tree, 2016, "ec_margin") != [cell]
 
     def test_tier_two_empties_only_recipients_and_c9(self) -> None:
         index = copy.deepcopy(BODY)
@@ -3584,6 +3692,15 @@ class TestN1Recipients:
                 )
                 for r in oracle[year]
             ]
+
+    def test_a_row_with_no_votes_cast_is_refused_not_left_out(self) -> None:
+        """D116(d): the API counts every N1 row in ``candidate_count``, so a row with
+        no votes cast is a contract break, never filtered."""
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"][0]["national_electoral_votes"] = 0
+        summary["data"][0]["national_electoral_votes_counted"] = 0
+        with pytest.raises(TypeError):
+            elections_view.n1_recipients(BODY, summary)
 
     def test_a_count_that_is_a_bool_or_a_string_is_refused(self) -> None:
         for value in (True, "6", 6.0):

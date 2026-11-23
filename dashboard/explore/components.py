@@ -520,7 +520,8 @@ def metric_entry(key: str, ident: str, value: str, rest: str | None) -> list[Any
 
 
 #: A page-only column's header class (#563, D116): the table shows the column and its
-#: download leaves it out, so the export tests skip it in the download's header check.
+#: download leaves it out, so the dashboard export tests' ``link_problems`` (through
+#: ``TestEveryTable``) checks the download's header against the other headers.
 PAGE_ONLY_CLASS = "page-only"
 
 

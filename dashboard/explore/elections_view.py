@@ -142,10 +142,12 @@ def n1_recipients(index: dict[str, Any], summary: Any) -> dict[int, list[Recipie
     Each row's year is one the index serves (:func:`explore.election_view.row_year`
     checks it), its ``candidate`` has text, its ``national_electoral_votes`` (cast) is
     an ``int`` above zero, and its ``national_electoral_votes_counted`` an ``int`` from
-    zero to cast; ``bool`` is never an ``int`` here. Then, for every index row, its
-    ``candidate_count`` is an ``int`` equal to its year's number of rows. It is run over
-    every served year before the filters apply, so a defect in a year the filters hide
-    still shows. It formats nothing.
+    zero to cast; ``bool`` is never an ``int`` here. A row with no votes cast is
+    refused, never left out: the API counts every N1 row in ``candidate_count``
+    (D116(d)). Then, for every index row, its ``candidate_count`` is an ``int`` of at
+    least 1 equal to its year's number of rows, so no year reconciles to an empty bar.
+    It is run over every served year before the filters apply, so a defect in a year
+    the filters hide still shows. It formats nothing.
 
     Pure; raises ``KeyError`` for a missing key and ``TypeError`` for anything else
     above.
@@ -173,7 +175,11 @@ def n1_recipients(index: dict[str, Any], summary: Any) -> dict[int, list[Recipie
         by_year[year].append(Recipient(name, cast, counted))
     for election in index["data"]:
         count = election["candidate_count"]
-        if type(count) is not int or count != len(by_year[election["year"]]):
+        if (
+            type(count) is not int
+            or count < 1
+            or count != len(by_year[election["year"]])
+        ):
             raise TypeError(f"{N1}: a year's rows do not match its candidate count")
     return by_year
 

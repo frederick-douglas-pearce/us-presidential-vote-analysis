@@ -29,11 +29,14 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   :func:`explore.election_view.margin_cells`) and, last and on the page only, who
   received electoral votes (:data:`RECIPIENTS_HEADER`), from N1's ``elections`` items
   and ``data`` rows. Chart C9 draws each shown year's served ``candidate_count`` above
-  T1, its hover the year's Recipients cell, and narrows with T1 (D110). Two tiers: N1
-  unread, an item check failing or a field missing empties every N1 cell
-  (:data:`T1_N1_UNAVAILABLE_CELL`) and C9; a recipient row check or the reconciliation
-  with ``candidate_count`` failing in any served year empties the Recipients cells and
-  C9 only.
+  T1, its hover the year's Recipients cell, and narrows with T1 (D110). Two tiers
+  (D116(e)): N1 unread, its items failing their check, the popular-vote window's
+  bounds failing ``query.year_span``, or a served year's item lacking a field T1's
+  cells read empties every N1 cell (:data:`T1_N1_UNAVAILABLE_CELL`) and C9; a
+  recipient row check or the
+  reconciliation with ``candidate_count`` failing in any served year empties the
+  Recipients cells and C9 only. Both are checked over every served year before the
+  filters apply (:func:`_n1_rows`).
 """
 
 from __future__ import annotations
@@ -246,23 +249,52 @@ def _row(election: dict[str, Any], cells: N1Cells) -> html.Tr:
 
 def _n1_rows(
     index: dict[str, Any], summary: Any, shown: list[Any]
-) -> tuple[list[dict[str, Any]], list[N1Cells], dict[int, tuple[str, ...]] | None]:
+) -> tuple[
+    list[dict[str, Any]], list[N1Cells], dict[int, tuple[str, ...]] | None, bool
+]:
     """T1's shown rows with N1's four fields joined on (``None`` each where N1 cannot be
     read, so the download's cells are empty and it never raises), each row's
-    :class:`N1Cells`, and each served year's Recipients lines, or ``None`` where C9
-    cannot be drawn (#563, D116's two tiers). Index defects are the page's, raised
-    before this is called; anything here degrades only N1's cells and C9."""
+    :class:`N1Cells`, each served year's Recipients lines (``None`` where C9 cannot be
+    drawn), and whether N1 could not be read at all (tier 1), from the check itself,
+    never from a cell (#563, D116(e)).
+
+    Tier 1 is N1 unread, :func:`explore.elections_view.n1_items` failing, the index's
+    popular-vote window's bounds failing :func:`explore.query.year_span` (a missing
+    bound is the page's: T1's download preamble reads it), or any served year's
+    item lacking a field T1's cells or :func:`explore.election_view.margin_cells` read.
+    Every one of those reads is done here, for every served year before the filters
+    apply, inside the ``try``; tier 2 is :func:`explore.elections_view.n1_recipients`
+    failing. An index defect is the page's, raised before this is called."""
     coverage = index["meta"]["provenance"]["coverage"]
     try:
         if summary is None:
             raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
+        query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
         items = elections_view.n1_items(index, summary)
-        for item in items.values():
-            for field in N1_FIELDS:
-                item[field]  # a missing field is tier 1, never a raise later
+        by_year = {
+            year: (
+                {field: item[field] for field in N1_FIELDS},
+                {
+                    "electoral_votes_outside_top_two": labels.number(
+                        item["electoral_votes_outside_top_two"]
+                    ),
+                    "electors_without_a_counted_vote": labels.number(
+                        item["electors_without_a_counted_vote"]
+                    ),
+                    **{
+                        field: cell
+                        for field, cell in election_view.margin_cells(
+                            item, year, coverage
+                        ).items()
+                        if field in N1_FIELDS
+                    },
+                },
+            )
+            for year, item in items.items()
+        }
     except (KeyError, TypeError):
         rows = [{**e, **dict.fromkeys(N1_FIELDS)} for e in shown]
-        return rows, [UNAVAILABLE_CELLS] * len(rows), None
+        return rows, [UNAVAILABLE_CELLS] * len(rows), None, True
     try:
         lines: dict[int, tuple[str, ...]] | None = {
             year: recipient_lines(found)
@@ -273,25 +305,10 @@ def _n1_rows(
     rows, cells = [], []
     for election in shown:
         year = _shown_year(election)
-        item = items[year]
-        rows.append({**election, **{field: item[field] for field in N1_FIELDS}})
-        margins = election_view.margin_cells(item, year, coverage)
-        cells.append(
-            N1Cells(
-                {
-                    "electoral_votes_outside_top_two": labels.number(
-                        item["electoral_votes_outside_top_two"]
-                    ),
-                    "electors_without_a_counted_vote": labels.number(
-                        item["electors_without_a_counted_vote"]
-                    ),
-                    "ec_margin": margins["ec_margin"],
-                    "pv_margin": margins["pv_margin"],
-                },
-                None if lines is None else lines[year],
-            )
-        )
-    return rows, cells, lines
+        values, worded = by_year[year]
+        rows.append({**election, **values})
+        cells.append(N1Cells(worded, None if lines is None else lines[year]))
+    return rows, cells, lines, False
 
 
 def _c9_caption(counts: dict[int, int]) -> str:
@@ -314,7 +331,7 @@ def _c9_caption(counts: dict[int, int]) -> str:
                     n=n,
                     most=labels.number(most),
                     years=labels.metric_years(
-                        [year for year, count in counts.items() if count == most]
+                        sorted(year for year, count in counts.items() if count == most)
                     ),
                 )
             )
@@ -469,7 +486,7 @@ def render(
         for e in elections
         if elections_view.shows(e["year"], e["has_popular_vote"], chosen)
     ]
-    rows, cells, lines = _n1_rows(body, summary, shown)
+    rows, cells, lines, unread = _n1_rows(body, summary, shown)
     notes: tuple[str, ...] = (
         labels.HAS_POPULAR_VOTE_NOTE,
         RECIPIENTS_DOWNLOAD_NOTE,
@@ -477,8 +494,10 @@ def render(
         NO_COUNTED_VOTE_NOTE,
         labels.MARGIN_NOTE,
     )
-    if cells and cells[0] is UNAVAILABLE_CELLS:
+    if unread:
         notes = (T1_N1_UNAVAILABLE_NOTE, *notes)
+    # Keyed by identity: ``rows`` holds every dict for the whole render, and
+    # ``components.table`` passes each one to ``_row`` as given.
     by_row = {id(r): c for r, c in zip(rows, cells, strict=True)}
     first, last = span(coverage)
     search = applied_search(chosen, first, last)

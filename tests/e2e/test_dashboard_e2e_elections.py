@@ -52,6 +52,7 @@ from tests.e2e.dashboard_pages import (
     assert_rendered,
     assert_year_ticks_apart,
     lower_thumb,
+    recorded,
     rect,
     rects,
     row_years,
@@ -443,6 +444,20 @@ C9_CHART_TEXTS = ", ".join(
     for part in (".xtick text", ".ytick text", ".g-xtitle text", ".g-ytitle text")
 )
 C9_BARS = f"{C9} .barlayer .point path"
+#: Each recorded year's Recipients lines (#563), as T1's cell and C9's hover write
+#: them, from the recorded N1; and the year whose longest line is the longest.
+RECIPIENT_LINES: dict[int, list[str]] = {}
+for _row in recorded("/v1/elections/summary")["data"]:
+    RECIPIENT_LINES.setdefault(_row["year"], []).append(
+        labels.RECIPIENT_LINE.format(
+            candidate=_row["candidate"],
+            cast=labels.number(_row["national_electoral_votes"]),
+            counted=labels.number(_row["national_electoral_votes_counted"]),
+        )
+    )
+LONGEST_RECIPIENT_YEAR = max(
+    RECIPIENT_LINES, key=lambda y: max(len(line) for line in RECIPIENT_LINES[y])
+)
 
 
 def open_c9(page: Page, query: str = "", *, width: int = 390) -> None:
@@ -457,7 +472,8 @@ def open_c9(page: Page, query: str = "", *, width: int = 390) -> None:
 def test_c9_is_readable_at_phone_width(page: Page, width: int) -> None:
     """AC phone width (#563): year along the bottom, its ticks apart, every text inside
     the width and none over another, no sideways scroll, one bar per served year with
-    no bar text, and a hover naming its year and listing its recipients."""
+    no bar text, and the widest and the tallest hovers each naming its year and listing
+    its recipients inside the width."""
     page.set_viewport_size({"width": width, "height": 844})
     open_c9(page, width=width)
     expect(page.locator(f"{C9} .chart-title")).to_have_text(labels.C9_TITLE)
@@ -473,12 +489,20 @@ def test_c9_is_readable_at_phone_width(page: Page, width: int) -> None:
         assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
         for b in texts_[i + 1 :]:
             assert not overlaps(a, b), (a, b)
-    last = served_years()[-1]
-    assert_hover_names_year(page, C9, f"{C9_BARS} >> nth=-1", last)
+    years = sorted({int(y) for y in served_years()})
     hover = page.locator(f"{C9} .hoverlayer .hovertext")
-    expect(hover).to_contain_text(labels.C9_HOVER.split("<br>")[1].split("{")[0])
-    for line in boxes(page, f"{C9} .hoverlayer .hovertext text"):
-        assert line["x"] >= 0 and line["x"] + line["w"] <= width, line
+    # The widest hover (the year holding the longest Recipients line) and the tallest
+    # (2016's seven lines), each naming its year and its recipients inside the width.
+    for year in (LONGEST_RECIPIENT_YEAR, 2016):
+        page.mouse.move(0, 0)
+        expect(hover).to_have_count(0)
+        assert_hover_names_year(
+            page, C9, f"{C9_BARS} >> nth={years.index(year)}", str(year)
+        )
+        for line in RECIPIENT_LINES[year]:
+            expect(hover).to_contain_text(line)
+        for box in boxes(page, f"{C9} .hoverlayer .hovertext text"):
+            assert box["x"] >= 0 and box["x"] + box["w"] <= width, (year, box)
 
 
 @pytest.mark.plotlyjs_fetches(1)
