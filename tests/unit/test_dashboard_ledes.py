@@ -3,112 +3,90 @@
 A filtered page's lede names its filters ("Narrow the …") in a sentence of its own,
 added to the lede only when the filter controls render: on a successful render. The
 not-found state shows no lede at all (#325), and the degraded states show the lede
-alone. Each page's own tests cover some of these states; this module checks all of
-them on every page that registers a ``query=`` parser, in the style of
-``TestRegistryCoverage``, so a new filtered page is covered as soon as it registers.
+alone. Each page's own tests cover some of these states; this module checks the
+states below on every page that registers a ``query=`` parser. A new filtered page
+fails ``test_every_filtered_page_is_listed`` until it gets an entry in
+:data:`BREAKS`; its success and not-found paths are then derived from the registry,
+in the style of ``test_dashboard_app.TestRegistryCoverage``.
 
-The states, each reached and confirmed before the sentence's absence is asserted:
+The states, each confirmed before the sentence's absence is asserted:
 
-- **degraded, unreachable API**: nothing can be read, so the page shows its
-  unavailable state before any read (on the validated pages, inside ``api.accepted``);
-- **degraded after validation**: the page's own data path is served malformed, so the
-  page's ``render`` runs and raises (on the two elections subpages, whose read is N1,
-  the section degrades instead and the page keeps its success marker; that is the
-  one state where the page's ``filtered`` flag, not the success path, withholds the
-  sentence);
-- **not-found**, on the five pages that validate a path value.
+- **degraded, unreachable API**: the client has no snapshot, so the page fails at
+  ``api.CLIENT.view()``, before ``api.accepted`` or any read;
+- **degraded after a broken read**: one read the page makes is broken, and the reads
+  the test records show the page got past validation. A malformed body (the pattern
+  of ``test_dashboard_state.TestMalformedBodies.client_with``) makes the page's
+  ``render`` raise. On the elections subpages, whose read is N1, a failed N1 degrades
+  the section instead and the page keeps its success marker: the one state where the
+  page's ``filtered`` flag, not the success path, withholds the sentence;
+- **not-found**, on the pages that validate a path value.
 
-What this does not catch: a filter sentence rendered from text other than the page's
-``FILTER_SENTENCE*`` constants. Only the filter sentence is enforced, not the
-glossary's general rule that a page-level sentence shows only where it is true (owner
-decision on #419, 2026-11-22). No helper builds the lede: each page decides when its
-sentence shows in its own way (after ``render``, from ``filtered``, or inside
-``render``), so a helper would hold none of the rule (architect ruling on #419).
+Not covered: a validate source failing inside ``api.accepted`` while a snapshot
+serves, and a sentence rendered from text other than the page's ``FILTER_SENTENCE*``
+constants. The candidate page's one-year sentence is never the one a default render
+shows; ``test_dashboard_candidate.TestRequestBudget.
+test_a_one_election_candidate_reads_the_one_state_sentence`` shows it renders. Only
+the filter sentence is enforced, not the glossary's general rule that a page-level
+sentence shows only where it is true (owner decision on #419, 2026-11-22). No helper
+builds the lede: each page decides when its sentence shows in its own way (after
+``render``, from ``filtered``, or inside ``render``), so a helper would hold none of
+the rule (architect ruling on #419).
 """
 
 from __future__ import annotations
 
-import copy
+import json
+import re
+import sys
 from typing import Any, NamedTuple
 
 import dash
 import pytest
 
+import tests.unit.test_dashboard_state as state_tests
 from explore import api
 from tests.unit.test_dashboard_app import (
     RECORDED,
+    UNSERVED_VALUES,
     VERSION,
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     cached_client,
+    concrete_page_path,
     failing_fetch,
+    fake_fetch,
     offline_client,
     route,
     routed_ids,
 )
 
 
-class Filtered(NamedTuple):
-    """How to reach each state of one filtered page."""
+class Break(NamedTuple):
+    """The read to break on one filtered page."""
 
-    #: A served path whose default render succeeds.
-    success: str
-    #: A path the page validates and refuses, or ``None`` where it validates none.
-    not_found: str | None
-    #: The read to serve malformed (``page``) or failed (``section``).
-    breaks: str
-    #: ``page``: the whole page degrades; ``section``: one section does, and the page
-    #: keeps its success marker.
-    degrades: str
-    #: The id the section shows when it degrades (``section`` only).
+    #: A path the page reads after validation: served malformed, so the whole page
+    #: degrades, or, with ``section_unavailable``, failed, so one section does.
+    path: str
+    #: The id the section shows when it degrades; ``None`` when the page degrades.
     section_unavailable: str | None = None
 
 
-#: Every filtered page: the registered pages with a ``query=`` parser.
-FILTERED_PAGES: dict[str, Filtered] = {
-    "pages.elections": Filtered("/elections", None, api.ELECTIONS_PATH, "page"),
-    "pages.elections_majority": Filtered(
-        "/elections/majority",
-        None,
-        api.SUMMARY_PATH,
-        "section",
-        "elections-leader-unavailable",
+#: Every filtered page (a registered ``query=`` parser) and the read to break on it.
+BREAKS: dict[str, Break] = {
+    # The index is the read /elections validates nothing against; N1 would leave the
+    # filters rendered.
+    "pages.elections": Break(api.ELECTIONS_PATH),
+    "pages.elections_majority": Break(api.SUMMARY_PATH, "elections-leader-unavailable"),
+    "pages.elections_over_time": Break(
+        api.SUMMARY_PATH, "elections-over-time-unavailable"
     ),
-    "pages.elections_over_time": Filtered(
-        "/elections/over-time",
-        None,
-        api.SUMMARY_PATH,
-        "section",
-        "elections-over-time-unavailable",
-    ),
-    "pages.election_states": Filtered(
-        "/election/1824/states",
-        "/election/1825/states",
-        "/v1/elections/1824",
-        "page",
-    ),
-    "pages.election_per_capita": Filtered(
-        "/election/1824/per-capita",
-        "/election/1825/per-capita",
-        "/v1/elections/1824/per-capita",
-        "page",
-    ),
-    "pages.state": Filtered("/state/GA", "/state/ZZ", "/v1/states/GA", "page"),
-    "pages.state_per_capita": Filtered(
-        "/state/GA/per-capita",
-        "/state/ZZ/per-capita",
-        "/v1/states/GA/per-capita",
-        "page",
-    ),
-    "pages.candidate": Filtered(
-        "/candidate/andrew-jackson",
-        "/candidate/nobody-ever",
-        "/v1/candidates/andrew-jackson",
-        "page",
-    ),
+    "pages.election_states": Break("/v1/elections/1824"),
+    "pages.election_per_capita": Break("/v1/elections/1824/per-capita"),
+    "pages.state": Break("/v1/states/GA"),
+    "pages.state_per_capita": Break("/v1/states/GA/per-capita"),
+    "pages.candidate": Break("/v1/candidates/andrew-jackson"),
 }
 
-NAMES = sorted(FILTERED_PAGES)
-NOT_FOUND_NAMES = sorted(n for n, p in FILTERED_PAGES.items() if p.not_found)
+NAMES = sorted(BREAKS)
 
 
 def page(name: str) -> dict[str, Any]:
@@ -117,10 +95,21 @@ def page(name: str) -> dict[str, Any]:
 
 
 def module(name: str) -> dict[str, Any]:
-    """The page module's namespace, reached through its layout (Dash loads it by
-    path)."""
-    namespace: dict[str, Any] = page(name)["layout"].__globals__
-    return namespace
+    """The page module's namespace (Dash loads it by path, under its registry name)."""
+    return vars(sys.modules[page(name)["module"]])
+
+
+def validates(name: str) -> bool:
+    return page(name).get("validate") is not None
+
+
+NOT_FOUND_NAMES = [n for n in NAMES if validates(n)]
+
+
+def unserved_path(name: str) -> str:
+    """The page's path at a well-formed value it does not serve."""
+    template = page(name)["path_template"]
+    return re.sub(r"<(.*?)>", lambda m: UNSERVED_VALUES[m.group(1)], template)
 
 
 def sentences(name: str) -> list[str]:
@@ -134,35 +123,50 @@ def sentences(name: str) -> list[str]:
     return found
 
 
-def body_of(response: Any) -> str:
+def text_of(response: Any) -> str:
+    """The routing response, decoded: Dash escapes non-ASCII characters and quotes in
+    the raw body, so a sentence holding one would never match it there."""
     assert response.status_code == 200, response.status_code
-    return str(response.get_data(as_text=True))
+    return json.dumps(response.get_json(), ensure_ascii=False)
 
 
 def unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A process client that can read nothing, built as ``TestLede`` builds it."""
-    client = offline_client(failing_fetch, prefetch_paths=lambda: [])
+    """A process client that can read nothing, as ``test_dashboard_state.TestLede``
+    builds it, and that does not wait for a snapshot that will never come."""
+    client = offline_client(
+        failing_fetch, prefetch_paths=lambda: [], max_request_wait=0
+    )
     client.ensure_refresher = lambda: None  # type: ignore[method-assign]
     monkeypatch.setattr(api, "CLIENT", client)
 
 
-def broken(monkeypatch: pytest.MonkeyPatch, spec: Filtered) -> None:
-    """A process client serving the recorded responses with ``spec.breaks`` broken:
-    a failed read for a section (never a changed value, which could reach a figure),
-    a body without ``meta`` for a page (``TestMalformedBodies.client_with``)."""
-    bodies = copy.deepcopy(RECORDED)
-    if spec.degrades == "page":
-        del bodies[spec.breaks]["meta"]
+def broken(monkeypatch: pytest.MonkeyPatch, spec: Break) -> list[str]:
+    """A process client serving the recorded responses with ``spec.path`` broken, and
+    the paths it then fetches. A page's body loses its ``meta``
+    (``test_dashboard_state.TestMalformedBodies.client_with``); a section's read fails
+    (never a changed value, which could reach a figure)."""
+    if spec.section_unavailable is None:
+        return state_tests.TestMalformedBodies.client_with(monkeypatch, spec.path)
+    good, calls = fake_fetch(RECORDED, VERSION)
 
     def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
-        if spec.degrades == "section" and path == spec.breaks:
+        if path == spec.path:
+            calls.append(path)
             raise api.ApiUnavailable("down")
-        return api.Response(body=bodies[path], version=VERSION)
+        return good(path, timeout)  # type: ignore[no-any-return]
 
     client = offline_client(fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH])
     client.ensure_refresher = lambda: None  # type: ignore[method-assign]
     client.refresh()
+    calls.clear()
     monkeypatch.setattr(api, "CLIENT", client)
+    return calls
+
+
+def assert_lede_alone(name: str, text: str) -> None:
+    assert module(name)["LEDE"] in text
+    for sentence in sentences(name):
+        assert sentence not in text, (name, sentence)
 
 
 class TestFilterSentence:
@@ -173,10 +177,10 @@ class TestFilterSentence:
         with_query = {n for n, p in dash.page_registry.items() if p.get("query")}
         with_sentence = {
             n
-            for n, p in dash.page_registry.items()
-            if any(k.startswith("FILTER_SENTENCE") for k in p["layout"].__globals__)
+            for n in dash.page_registry
+            if any(k.startswith("FILTER_SENTENCE") for k in module(n))
         }
-        assert with_query == with_sentence == set(FILTERED_PAGES)
+        assert with_query == with_sentence == set(BREAKS)
         # /election/<year> has had no filters since #465; its subpages carry them.
         assert "pages.election" not in with_query
 
@@ -187,55 +191,56 @@ class TestFilterSentence:
         # The positive control: without it, the negatives below would pass for a
         # constant that never renders.
         cached_client(monkeypatch)
-        response = route(FILTERED_PAGES[name].success)
+        response = route(concrete_page_path(page(name)))
         assert page(name)["success"] in routed_ids(response)
-        body = body_of(response)
+        text = text_of(response)
         lede = module(name)["LEDE"]
-        shown = [s for s in sentences(name) if f"{lede} {s}" in body]
+        shown = [s for s in sentences(name) if f"{lede} {s}" in text]
         assert len(shown) == 1, (name, shown)
-        assert body.count(shown[0]) == 1
+        assert text.count(shown[0]) == 1
 
     @pytest.mark.parametrize("name", NAMES)
     def test_the_unreachable_api_shows_the_lede_alone(
         self, monkeypatch: pytest.MonkeyPatch, name: str
     ) -> None:
         unreachable(monkeypatch)
-        response = route(FILTERED_PAGES[name].success)
+        response = route(concrete_page_path(page(name)))
         ids = routed_ids(response)
         assert "unavailable" in ids and page(name)["success"] not in ids
-        body = body_of(response)
-        assert module(name)["LEDE"] in body
-        for sentence in sentences(name):
-            assert sentence not in body, (name, sentence)
+        assert_lede_alone(name, text_of(response))
 
     @pytest.mark.parametrize("name", NAMES)
     def test_a_broken_read_shows_the_lede_alone(
         self, monkeypatch: pytest.MonkeyPatch, name: str
     ) -> None:
-        spec = FILTERED_PAGES[name]
-        broken(monkeypatch, spec)
-        response = route(spec.success)
+        spec = BREAKS[name]
+        calls = broken(monkeypatch, spec)
+        response = route(concrete_page_path(page(name)))
         ids = routed_ids(response)
-        if spec.degrades == "page":
+        if spec.section_unavailable is None:
             assert "unavailable" in ids and page(name)["success"] not in ids
+            if validates(name):
+                # Fetched only once validation accepted the path, so ``render`` ran.
+                assert spec.path in calls, calls
+                assert module(name)["NOT_FOUND_ID"] not in ids
+            else:
+                # The index is served from the snapshot; N1 is read after it, in
+                # ``render``'s view.
+                assert api.SUMMARY_PATH in calls, calls
         else:
+            assert spec.path in calls, calls
             assert spec.section_unavailable in ids
             assert page(name)["success"] in ids
-        body = body_of(response)
-        assert module(name)["LEDE"] in body
-        for sentence in sentences(name):
-            assert sentence not in body, (name, sentence)
+        assert_lede_alone(name, text_of(response))
 
     @pytest.mark.parametrize("name", NOT_FOUND_NAMES)
     def test_not_found_shows_neither(
         self, monkeypatch: pytest.MonkeyPatch, name: str
     ) -> None:
         cached_client(monkeypatch)
-        not_found = FILTERED_PAGES[name].not_found
-        assert not_found is not None
-        response = route(not_found)
+        response = route(unserved_path(name))
         assert module(name)["NOT_FOUND_ID"] in routed_ids(response)
-        body = body_of(response)
-        assert module(name)["LEDE"] not in body
+        text = text_of(response)
+        assert module(name)["LEDE"] not in text
         for sentence in sentences(name):
-            assert sentence not in body, (name, sentence)
+            assert sentence not in text, (name, sentence)
