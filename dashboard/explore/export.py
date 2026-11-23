@@ -82,6 +82,10 @@ EC_FIELDS = frozenset(
         # The appointed allotment on N1's ``elections`` items, in C4's companion table
         # (#436).
         "electoral_denominator",
+        # T1's N1 columns (#563): the two #570 fields and the electoral margin.
+        "electoral_votes_outside_top_two",
+        "electors_without_a_counted_vote",
+        "ec_margin",
     }
 )
 
@@ -105,6 +109,8 @@ POPULAR_VOTE_FIELDS = frozenset(
         # state's, in C10's (#582; C5's one-state mode showed it until #562).
         "national_pv_denominator",
         "state_popular_total",
+        # T1's popular-vote margin (#563).
+        "pv_margin",
     }
 )
 

@@ -613,8 +613,8 @@ def unrendered_charts(registry):
 assert not unrendered_charts(_charts.CHARTS), unrendered_charts(_charts.CHARTS)
 # Non-vacuity: a live row no page renders fails; a retired one is not required.
 assert unrendered_charts(
-    {{"C9": _charts.Chart("/elections", "t"), "C8": _charts.Chart("/elections", "t", True)}}
-) == ["C9"]
+    {{"C99": _charts.Chart("/elections", "t"), "C98": _charts.Chart("/elections", "t", True)}}
+) == ["C99"]
 
 for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r}:
     assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)

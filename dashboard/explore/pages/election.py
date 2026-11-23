@@ -483,9 +483,8 @@ def _panel_cells(block: dict[str, Any], year: int, coverage: Any) -> dict[str, s
         "hybrid_flip": labels.flip(
             block["hybrid_flip"], "hybrid", applicable, determinative=determinative
         ),
-        "ec_margin": labels.margin(block["ec_margin"], True),
-        "pv_margin": labels.margin(block["pv_margin"], applicable),
-        "hybrid_margin": labels.margin(block["hybrid_margin"], applicable),
+        # The margins' one cell function, which T1 on /elections shares (#563).
+        **election_view.margin_cells(block, year, coverage),
         "ec_determinative": labels.ec_majority(determinative),
         "pv_coverage": labels.share_cell(block["pv_coverage"]),
     }

@@ -89,6 +89,10 @@ CHARTS: Mapping[str, Chart] = {
     # narrowed by the page's filters, beside its own companion table; its value axis
     # writes its numbers short, as C5's does (#582, D113).
     "C10": Chart("/state/<usps>", "state-popular-total", short_value_ticks=True),
+    # How many candidates received electoral votes in each election, on the list of
+    # elections, narrowed by its year filters (D110), above T1, its companion table
+    # (#563, D116).
+    "C9": Chart("/elections", "elections-table"),
 }
 
 

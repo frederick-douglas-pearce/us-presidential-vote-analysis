@@ -36,8 +36,25 @@ UPPER_THUMB = f"{YEARS} [role=slider].dash-slider-thumb-2"
 MARKS = f"{YEARS} .dash-slider-mark"
 #: T1's column-name list, by its id: the page has three since #436.
 GLOSSARY = "#elections-glossary"
-#: T1's columns, as pages/elections.py's ``FIELDS`` lists them.
-FIELDS = ("year", "candidate_count", "has_popular_vote")
+#: T1's columns, as pages/elections.py's ``FIELDS`` lists them (#563: N1's four after
+#: the index's three).
+FIELDS = (
+    "year",
+    "candidate_count",
+    "has_popular_vote",
+    "electoral_votes_outside_top_two",
+    "electors_without_a_counted_vote",
+    "ec_margin",
+    "pv_margin",
+)
+#: T1's page-only column (#563, D116), as pages/elections.py's ``PAGE_ONLY`` lists it:
+#: its header and the served fields it is built from.
+RECIPIENTS = (
+    "Who received electoral votes (cast, counted)",
+    "candidate, national_electoral_votes, national_electoral_votes_counted",
+)
+#: Chart C9 (#563), above T1 on the list of elections.
+C9 = "#c9"
 
 #: The section links between the three elections pages (#562).
 ELECTIONS_SECTIONS = "#elections-sections"

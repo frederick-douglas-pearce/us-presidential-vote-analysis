@@ -113,8 +113,8 @@ def test_the_installed_plotlyjs_is_the_version_the_address_names() -> None:
 @pytest.mark.plotlyjs_fetches(0)
 @pytest.mark.parametrize(
     # A state's history draws C7 since #560, so the page with filters but no chart is
-    # a candidate's (a state's per-capita page gains C8 in #561; /elections has had no
-    # chart since #562 and gains C9 in #563).
+    # a candidate's (a state's per-capita page gains C8 in #561; /elections draws C9
+    # since #563).
     ("path", "success"),
     [("/", HOME_SUCCESS), ("/candidate/andrew-jackson", CANDIDATE_SUCCESS)],
 )

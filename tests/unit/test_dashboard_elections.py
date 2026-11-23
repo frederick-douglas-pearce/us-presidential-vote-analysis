@@ -18,6 +18,7 @@ import json
 import sys
 import unicodedata
 import urllib.parse
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar, TypeGuard
 
@@ -26,7 +27,16 @@ import pytest
 from dash import html, no_update
 from dash.development.base_component import Component
 
-from explore import api, charts, components, elections_view, labels, metrics
+from explore import (
+    api,
+    charts,
+    components,
+    election_view,
+    elections_view,
+    export,
+    labels,
+    metrics,
+)
 from explore import app as appmod
 from tests.dashboard_cards import card_children, card_holding, cards, in_one_card
 from tests.unit.test_dashboard_app import (
@@ -213,9 +223,11 @@ class TestTable:
             {"year": 2032, "candidate_count": 3, "has_popular_vote": True},
         ]
         tree = render(body=body)
+        # No N1 here: T1's N1 cells read the unavailable cell (#563).
+        unavailable = [MOD["T1_N1_UNAVAILABLE_CELL"]] * 5
         assert rows(tree) == [
-            ["1788", "12", labels.NOT_IN_DATASET],
-            ["2032", "3", "Yes"],
+            ["1788", "12", labels.NOT_IN_DATASET, *unavailable],
+            ["2032", "3", "Yes", *unavailable],
         ]
         years, _ = controls(tree)
         assert (years.min, years.max, years.value) == (1788, 2032, [1788, 2032])
@@ -747,25 +759,47 @@ def label_key_problems(keys: Any) -> list[str]:
 
 
 class TestLabels:
-    def test_t1_shows_exactly_its_three_fields(self) -> None:
-        assert MOD["FIELDS"] == ("year", "candidate_count", "has_popular_vote")
+    def test_t1_shows_exactly_its_seven_fields_then_its_page_only_column(self) -> None:
+        """The index's three fields, N1's four (#563), each served where T1 reads it,
+        then one page-only column whose header is no ``LABELS`` key (D116)."""
+        assert MOD["INDEX_FIELDS"] == ("year", "candidate_count", "has_popular_vote")
+        assert MOD["N1_FIELDS"] == (
+            "electoral_votes_outside_top_two",
+            "electors_without_a_counted_vote",
+            "ec_margin",
+            "pv_margin",
+        )
+        assert MOD["FIELDS"] == MOD["INDEX_FIELDS"] + MOD["N1_FIELDS"]
         for record in BODY["data"]:
-            assert set(MOD["FIELDS"]) <= set(record)
+            assert set(MOD["INDEX_FIELDS"]) <= set(record)
+        for item in SUMMARY["elections"]:
+            assert set(MOD["N1_FIELDS"]) <= set(item)
+        header, sources = MOD["RECIPIENTS_HEADER"], MOD["RECIPIENTS_FIELDS"]
+        assert MOD["PAGE_ONLY"] == ((header, sources),)
+        assert header not in labels.LABELS.values()
+        assert sources.split(", ") == [
+            "candidate",
+            "national_electoral_votes",
+            "national_electoral_votes_counted",
+        ]
+        for row in SUMMARY["data"]:
+            assert set(sources.split(", ")) <= set(row)
 
     def test_each_header_is_its_label_with_the_raw_field_name_on_demand(self) -> None:
         tree = render()
         headers = of_type(find(tree, TABLE_ID), "Th")
+        header, sources = MOD["RECIPIENTS_HEADER"], MOD["RECIPIENTS_FIELDS"]
         assert [h.children for h in headers] == [
             labels.LABELS[f] for f in MOD["FIELDS"]
-        ]
-        assert [h.title for h in headers] == list(MOD["FIELDS"])
-        assert [h.scope for h in headers] == ["col"] * len(MOD["FIELDS"])
+        ] + [header]
+        assert [h.title for h in headers] == [*MOD["FIELDS"], sources]
+        assert [h.scope for h in headers] == ["col"] * (len(MOD["FIELDS"]) + 1)
         glossary = of_type(tree, "Details")
         assert len(glossary) == 1
         pairs = list(zip(of_type(glossary, "Dt"), of_type(glossary, "Dd"), strict=True))
         assert [(dt.children, texts(dd.children)) for dt, dd in pairs] == [
             (labels.LABELS[f], [f]) for f in MOD["FIELDS"]
-        ]
+        ] + [(header, [sources])]
 
     def test_the_approved_labels(self) -> None:
         assert labels.LABELS["year"] == "Election year"
@@ -3196,3 +3230,371 @@ class TestTotalAndElectionsWording:
             "3",
             " elections (1824–1832)",
         )
+
+
+# --- #563 (D116): T1's N1 columns and chart C9 ---------------------------------------
+
+C9 = charts.dom_id("C9")
+
+
+def c9_figure(tree: Any) -> dict[str, Any] | None:
+    """C9's figure, from the source store ``components.chart`` gave it, or ``None``."""
+    stores = [
+        node
+        for node in of_type(tree, "Store")
+        if isinstance(getattr(node, "id", None), dict) and node.id.get("chart") == C9
+    ]
+    if not stores:
+        return None
+    (store,) = stores
+    figure: dict[str, Any] = store.data
+    return figure
+
+
+def recorded_recipients() -> dict[int, list[dict[str, Any]]]:
+    """N1's recorded ``data`` rows with votes cast above zero, by year, read straight
+    from the recording: the oracle C9's heights and T1's Recipients cells answer to."""
+    found: dict[int, list[dict[str, Any]]] = {}
+    for row in SUMMARY["data"]:
+        if row["national_electoral_votes"] > 0:
+            found.setdefault(row["year"], []).append(row)
+    return found
+
+
+def t1_cell(tree: Any, year: int, column: int) -> Any:
+    """T1's ``column``-th cell (a ``Td``) in the row of ``year``."""
+    table = find(tree, TABLE_ID)
+    (row,) = [
+        tr
+        for tr in of_type(of_type(table, "Tbody"), "Tr")
+        if texts(tr.children[0]) == [str(year)]
+    ]
+    return row.children[column]
+
+
+def recipients_cell(tree: Any, year: int) -> list[str]:
+    """T1's Recipients cell in the row of ``year``, as its lines."""
+    return texts(t1_cell(tree, year, len(MOD["FIELDS"])))
+
+
+def t1_field_cell(tree: Any, year: int, field: str) -> list[str]:
+    return texts(t1_cell(tree, year, MOD["FIELDS"].index(field)))
+
+
+class TestC9:
+    def test_each_height_is_the_served_count_and_its_recipient_rows(self) -> None:
+        figure = c9_figure(render_n1())
+        assert figure is not None
+        (bars,) = figure["data"]
+        heights = dict(zip(bars["x"], bars["y"], strict=True))
+        assert bars["x"] == sorted(set(YEARS))
+        for year, count in {2016: 7, 1872: 6, 1836: 5, 1824: 4, 1832: 4, 1860: 4}.items():
+            assert heights[year] == count, year
+        oracle = recorded_recipients()
+        served = {row["year"]: row["candidate_count"] for row in BODY["data"]}
+        for year, height in heights.items():
+            assert height == len(oracle[year]) == served[year], year
+
+    def test_no_bar_carries_text(self) -> None:
+        (bars,) = c9_figure(render_n1())["data"]  # type: ignore[index]
+        assert bars["type"] == "bar"
+        assert "text" not in bars and "texttemplate" not in bars
+        assert bars["showlegend"] is False
+
+    def test_the_year_axis_is_the_years_shown(self) -> None:
+        tree = render_n1()
+        figure = c9_figure(tree)
+        assert figure is not None
+        assert figure["layout"]["xaxis"] == components.year_axis(sorted(set(YEARS)))
+        assert find(tree, f"{C9}-title").children == labels.C9_TITLE
+        assert figure["layout"]["yaxis"]["title"]["text"] == labels.C9_VALUE_AXIS
+
+    def test_each_hover_is_the_year_the_count_and_t1_s_recipients_cell(self) -> None:
+        tree = render_n1()
+        (bars,) = c9_figure(tree)["data"]  # type: ignore[index]
+        for year, height, hover in zip(
+            bars["x"], bars["y"], bars["hovertext"], strict=True
+        ):
+            lines = recipients_cell(tree, year)
+            assert len(lines) == height
+            assert hover == labels.C9_HOVER.format(
+                year=year,
+                count=labels.number(height),
+                recipients="<br>".join(charts.escaped(line) for line in lines),
+            )
+        assert "Horace Greeley: 3 cast, 0 counted" in recipients_cell(tree, 1872)
+        (hover,) = [
+            h for x, h in zip(bars["x"], bars["hovertext"], strict=True) if x == 1872
+        ]
+        assert "<br>Horace Greeley: 3 cast, 0 counted" in hover
+
+    def test_the_recipients_cell_is_each_row_in_served_order(self) -> None:
+        tree = render_n1()
+        for year, found in recorded_recipients().items():
+            assert recipients_cell(tree, year) == [
+                labels.RECIPIENT_LINE.format(
+                    candidate=r["candidate"],
+                    cast=labels.number(r["national_electoral_votes"]),
+                    counted=labels.number(r["national_electoral_votes_counted"]),
+                )
+                for r in found
+            ], year
+
+    def test_a_name_is_escaped_in_the_hover_and_shown_as_served_in_the_cell(
+        self,
+    ) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r
+            for r in summary["data"]
+            if r["year"] == 1872 and r["candidate"] == "Horace Greeley"
+        ]
+        row["candidate"] = "<b>Greeley</b>"
+        tree = render_n1(summary)
+        assert "<b>Greeley</b>: 3 cast, 0 counted" in recipients_cell(tree, 1872)
+        (bars,) = c9_figure(tree)["data"]  # type: ignore[index]
+        (hover,) = [
+            h for x, h in zip(bars["x"], bars["hovertext"], strict=True) if x == 1872
+        ]
+        assert "<b>" not in hover
+        assert charts.escaped("<b>Greeley</b>") in hover
+
+    def test_c9_sits_after_the_pair_and_before_t1_in_the_list_s_card(self) -> None:
+        tree = render_n1()
+        assert in_one_card(tree, C9) is in_one_card(tree, TABLE_ID)
+        ids = [getattr(c, "id", None) for c in in_order(tree)]
+        assert ids.index(MOD["LIST_PAIR_ID"]) < ids.index(C9) < ids.index(TABLE_ID)
+
+    def test_it_narrows_with_t1_s_filters(self) -> None:
+        tree = render_n1(query={"year_from": "1860", "year_to": "1880"})
+        (bars,) = c9_figure(tree)["data"]  # type: ignore[index]
+        assert bars["x"] == shown_years(tree) == [1860, 1864, 1868, 1872, 1876, 1880]
+        figure = c9_figure(tree)
+        assert figure["layout"]["xaxis"] == components.year_axis(bars["x"])  # type: ignore[index]
+
+    def test_a_filter_leaving_no_year_shows_t1_s_empty_note_and_no_chart(
+        self,
+    ) -> None:
+        tree = render_n1(query={"year_to": "1972", "pv": "1"})
+        assert c9_figure(tree) is None
+        assert find(tree, C9) is None
+        assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is None
+        assert labels.NO_ELECTIONS_MATCH in texts(tree)
+
+
+class TestC9Caption:
+    def test_the_full_span_s_finding_is_derived_from_the_served_counts(self) -> None:
+        counts = {row["year"]: row["candidate_count"] for row in BODY["data"]}
+        more = sum(1 for count in counts.values() if count > 2)
+        most = max(counts.values())
+        tied = sorted(year for year, count in counts.items() if count == most)
+        (caption,) = of_type(find(render_n1(), C9), "Figcaption")
+        assert caption_text(caption) == " ".join(
+            [
+                labels.C9_BASIS,
+                labels.C9_CAST_NOTE,
+                labels.C9_FINDING.format(
+                    more=more,
+                    n=len(counts),
+                    most=most,
+                    years=labels.metric_years(tied),
+                ),
+                labels.C9_HOVER_NOTE,
+            ]
+        )
+        assert (more, most, tied) == (18, 7, [2016])  # the recording's premise
+
+    def test_one_year_none_above_two_and_a_tie(self) -> None:
+        caption = MOD["_c9_caption"]
+        assert labels.C9_FINDING_ONE.format(year=1872, count="6") in caption({1872: 6})
+        assert labels.C9_FINDING_NONE.format(n="2") in caption({2000: 2, 2004: 2})
+        assert (
+            labels.C9_FINDING.format(more="2", n="3", most="4", years="1824 and 1836")
+            in caption({1824: 4, 1828: 2, 1836: 4})
+        )
+
+
+class TestT1Columns:
+    def test_the_two_served_counts_read_as_served(self) -> None:
+        tree = render_n1()
+        for year, outside, without in ((1872, "24", "17"), (2016, "7", "0"), (2000, "0", "1")):
+            assert t1_field_cell(tree, year, "electoral_votes_outside_top_two") == [
+                outside
+            ], year
+            assert t1_field_cell(tree, year, "electors_without_a_counted_vote") == [
+                without
+            ], year
+
+    def test_the_margins_are_the_panel_s_cells_for_each_recorded_year(self) -> None:
+        """One cell function (D116): T1's margins equal the election panel's, which
+        :func:`explore.election_view.margin_cells` builds for both."""
+        tree = render_n1()
+        coverage = BODY["meta"]["provenance"]["coverage"]
+        for year in (1824, 1860, 1868, 1872, 1896, 2016, 2024):
+            block = RECORDED[f"/v1/elections/{year}"]["election"]
+            panel = election_view.margin_cells(block, year, coverage)
+            for field in ("ec_margin", "pv_margin"):
+                assert t1_field_cell(tree, year, field) == [panel[field]], (year, field)
+
+    def test_the_panel_calls_the_shared_margin_function(self) -> None:
+        election = dash.page_registry["pages.election"]["layout"].__globals__
+        block = RECORDED["/v1/elections/2016"]["election"]
+        coverage = BODY["meta"]["provenance"]["coverage"]
+        cells = election["_panel_cells"](block, 2016, coverage)
+        assert {f: cells[f] for f in election_view.MARGINS} == (
+            election_view.margin_cells(block, 2016, coverage)
+        )
+
+    def test_a_year_before_the_window_reads_the_labeled_not_served_state(
+        self,
+    ) -> None:
+        tree = render_n1()
+        assert t1_field_cell(tree, 1824, "pv_margin") == [labels.NOT_APPLICABLE]
+        assert t1_field_cell(tree, 2016, "pv_margin") != [labels.NOT_APPLICABLE]
+
+    def test_the_download_holds_the_n1_fields_as_served_and_no_recipients(
+        self,
+    ) -> None:
+        file = download(render_n1())
+        assert file.header == list(MOD["FIELDS"])
+        by_year = {row["year"]: row for row in file.rows}
+        items = {item["year"]: item for item in SUMMARY["elections"]}
+        for year in ("1872", "2016"):
+            for field in MOD["N1_FIELDS"]:
+                value = items[int(year)][field]
+                assert by_year[year][field] == ("" if value is None else str(value))
+        for note in (
+            MOD["RECIPIENTS_DOWNLOAD_NOTE"],
+            MOD["OUTSIDE_TOP_TWO_NOTE"],
+            MOD["NO_COUNTED_VOTE_NOTE"],
+            labels.MARGIN_NOTE,
+        ):
+            assert note in file.lines
+        assert MOD["T1_N1_UNAVAILABLE_NOTE"] not in file.lines
+
+
+def download(tree: Any) -> Any:
+    """T1's download, decoded (the export tests' ``Csv``; imported here, since that
+    module imports this one)."""
+    from tests.unit.test_dashboard_export import Csv, links
+
+    return Csv(str(links(tree)[export.link_id(TABLE_ID)].href))
+
+
+def _n1_absent() -> None:
+    return None
+
+
+def _malformed() -> dict[str, Any]:
+    return {"elections": "no", "data": []}
+
+
+def _item_without_pv_margin() -> dict[str, Any]:
+    summary = copy.deepcopy(SUMMARY)
+    del summary["elections"][3]["pv_margin"]
+    return summary
+
+
+class TestC9Degraded:
+    @pytest.mark.parametrize("summary", [_n1_absent, _malformed, _item_without_pv_margin])
+    def test_tier_one_empties_every_n1_cell_and_c9_and_keeps_t1(
+        self, summary: Callable[[], Any]
+    ) -> None:
+        tree = MOD["render"](copy.deepcopy(BODY), [], summary())
+        assert find(tree, MOD["PAGE_ID"]) is not None
+        assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
+        assert c9_figure(tree) is None
+        assert labels.C9_UNAVAILABLE in texts(find(tree, MOD["C9_UNAVAILABLE_ID"]))
+        headers = of_type(find(tree, TABLE_ID), "Th")
+        assert len(headers) == len(MOD["FIELDS"]) + 1
+        cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        for row in rows(tree):
+            assert row[3:] == [cell] * 5
+        assert shown_years(tree) == YEARS
+        file = download(tree)
+        assert file.header == list(MOD["FIELDS"])
+        assert all(row[f] == "" for row in file.rows for f in MOD["N1_FIELDS"])
+        assert file.lines[file.lines.index(MOD["T1_N1_UNAVAILABLE_NOTE"]) + 1] == (
+            labels.HAS_POPULAR_VOTE_NOTE
+        )
+        notes = [p.children for p in classed(tree, "note")]
+        assert notes.index(MOD["T1_N1_UNAVAILABLE_NOTE"]) + 1 == notes.index(
+            labels.HAS_POPULAR_VOTE_NOTE
+        )
+
+    def test_tier_two_empties_only_recipients_and_c9(self) -> None:
+        index = copy.deepcopy(BODY)
+        (row,) = [r for r in index["data"] if r["year"] == 1872]
+        row["candidate_count"] = 5  # six recipient rows
+        tree = render_n1(index=index)
+        assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
+        assert c9_figure(tree) is None
+        cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        assert recipients_cell(tree, 2016) == [cell]
+        assert t1_field_cell(tree, 1872, "electoral_votes_outside_top_two") == ["24"]
+        assert t1_field_cell(tree, 2016, "ec_margin") != [cell]
+        assert MOD["T1_N1_UNAVAILABLE_NOTE"] not in texts(tree)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("national_electoral_votes", 0),
+            ("national_electoral_votes", True),
+            ("national_electoral_votes_counted", 4),  # more than cast (3)
+            ("national_electoral_votes_counted", -1),
+            ("candidate", " "),
+            ("year", 1825),
+        ],
+    )
+    def test_a_bad_recipient_row_is_tier_two(self, field: str, value: Any) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        (row,) = [
+            r
+            for r in summary["data"]
+            if r["year"] == 1872 and r["candidate"] == "Horace Greeley"
+        ]
+        row[field] = value
+        tree = render_n1(summary)
+        assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
+        assert recipients_cell(tree, 2016) == [MOD["T1_N1_UNAVAILABLE_CELL"]]
+        assert t1_field_cell(tree, 2016, "electoral_votes_outside_top_two") == ["7"]
+
+    def test_a_defect_in_a_year_the_filters_hide_still_degrades(self) -> None:
+        summary = copy.deepcopy(SUMMARY)
+        summary["data"][0]["national_electoral_votes"] = 0
+        assert summary["data"][0]["year"] < 2000
+        tree = render_n1(summary, query={"year_from": "2000"})
+        assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
+        assert c9_figure(tree) is None
+
+
+class TestN1Recipients:
+    def test_every_served_year_gets_its_rows_in_served_order(self) -> None:
+        found = elections_view.n1_recipients(BODY, SUMMARY)
+        assert set(found) == set(YEARS)
+        oracle = recorded_recipients()
+        for year, recipients in found.items():
+            assert [
+                (r.candidate, r.cast, r.counted) for r in recipients
+            ] == [
+                (
+                    r["candidate"],
+                    r["national_electoral_votes"],
+                    r["national_electoral_votes_counted"],
+                )
+                for r in oracle[year]
+            ]
+
+    def test_a_count_that_is_a_bool_or_a_string_is_refused(self) -> None:
+        for value in (True, "6", 6.0):
+            index = copy.deepcopy(BODY)
+            (row,) = [r for r in index["data"] if r["year"] == 1872]
+            row["candidate_count"] = value
+            with pytest.raises(TypeError):
+                elections_view.n1_recipients(index, SUMMARY)
+
+    def test_no_data_list_is_refused(self) -> None:
+        with pytest.raises(TypeError):
+            elections_view.n1_recipients(BODY, {"data": None})
+        with pytest.raises(KeyError):
+            elections_view.n1_recipients(BODY, {})

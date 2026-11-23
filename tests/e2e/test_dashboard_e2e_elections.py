@@ -19,8 +19,9 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from explore import components, labels
+from explore import charts, components, labels
 from tests.e2e.dashboard_pages import (
+    C9,
     ELECTIONS_ROWS,
     ELECTIONS_SECTIONS,
     ELECTIONS_SUCCESS,
@@ -38,14 +39,18 @@ from tests.e2e.dashboard_pages import (
     PV,
     PV_BOX,
     PV_FIRST,
+    RECIPIENTS,
+    RESOURCE_ERROR,
     ROUTER_OUTPUT,
     UNAVAILABLE,
     UPDATE_PATH,
     WIDE_WIDTHS,
     YEARS,
     assert_chunk_failure_stops,
+    assert_hover_names_year,
     assert_layout_holds,
     assert_rendered,
+    assert_year_ticks_apart,
     lower_thumb,
     rect,
     rects,
@@ -103,8 +108,10 @@ def test_the_column_name_list_names_each_column(page: Page) -> None:
     glossary.locator("summary").click()
     expect(glossary).to_have_attribute("open", "")
     expect(glossary.locator("dt").first).to_be_visible()
-    expect(glossary.locator("dt")).to_have_text([labels.LABELS[f] for f in FIELDS])
-    expect(glossary.locator("dd")).to_have_text(list(FIELDS))
+    expect(glossary.locator("dt")).to_have_text(
+        [*(labels.LABELS[f] for f in FIELDS), RECIPIENTS[0]]
+    )
+    expect(glossary.locator("dd")).to_have_text([*FIELDS, RECIPIENTS[1]])
 
 
 def test_a_filter_change_writes_the_url_and_narrows_the_rows(page: Page) -> None:
@@ -425,3 +432,97 @@ def test_the_section_links_carry_the_filters_and_a_change_stays_on_the_page(
     expect(page).to_have_url(re.compile(r"/elections/majority\?pv=1$"))
     expect(page.locator(f"{PV} input")).to_be_checked()
     assert page.evaluate("window.__e2e_mark") == 1  # no document load
+
+
+# --- chart C9 (#563, D116) ------------------------------------------------------------
+
+#: C9's drawn texts (D104): its year ticks, its count ticks and both axes' titles; no
+#: bar draws text and it has no key.
+C9_CHART_TEXTS = ", ".join(
+    f"{C9} {part}"
+    for part in (".xtick text", ".ytick text", ".g-xtitle text", ".g-ytitle text")
+)
+C9_BARS = f"{C9} .barlayer .point path"
+
+
+def open_c9(page: Page, query: str = "", *, width: int = 390) -> None:
+    page.goto(f"/elections{query}")
+    assert_rendered(page, ELECTIONS_SUCCESS, width=width)
+    page.locator(f"{C9} .main-svg").first.wait_for()
+    page.locator(f"{C9} .xtick text").first.wait_for()
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_c9_is_readable_at_phone_width(page: Page, width: int) -> None:
+    """AC phone width (#563): year along the bottom, its ticks apart, every text inside
+    the width and none over another, no sideways scroll, one bar per served year with
+    no bar text, and a hover naming its year and listing its recipients."""
+    page.set_viewport_size({"width": width, "height": 844})
+    open_c9(page, width=width)
+    expect(page.locator(f"{C9} .chart-title")).to_have_text(labels.C9_TITLE)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    assert_year_ticks_apart(page, C9)
+    expect(page.locator(C9_BARS)).to_have_count(len(set(served_years())))
+    expect(page.locator(f"{C9} .bartext")).to_have_count(0)
+    texts_ = [b for b in boxes(page, C9_CHART_TEXTS) if b["w"] > 0]
+    found = [b["text"] for b in texts_]
+    assert found.count(labels.C9_VALUE_AXIS) == 1, found
+    assert found.count(labels.LABELS["year"]) == 1, found
+    for i, a in enumerate(texts_):
+        assert a["x"] >= 0 and a["x"] + a["w"] <= width, a
+        for b in texts_[i + 1 :]:
+            assert not overlaps(a, b), (a, b)
+    last = served_years()[-1]
+    assert_hover_names_year(page, C9, f"{C9_BARS} >> nth=-1", last)
+    hover = page.locator(f"{C9} .hoverlayer .hovertext")
+    expect(hover).to_contain_text(labels.C9_HOVER.split("<br>")[1].split("{")[0])
+    for line in boxes(page, f"{C9} .hoverlayer .hovertext text"):
+        assert line["x"] >= 0 and line["x"] + line["w"] <= width, line
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_year_filters_narrow_c9_and_t1(page: Page) -> None:
+    open_c9(page, "?year_from=1860&year_to=1880")
+    expect(page.locator(C9_BARS)).to_have_count(6)
+    expect(page.locator(ELECTIONS_ROWS)).to_have_count(6)
+
+
+@pytest.mark.plotlyjs_fetches(1)
+def test_c9_redraws_on_a_theme_switch_with_no_reload_or_request(page: Page) -> None:
+    open_c9(page)
+    bar = page.locator(C9_BARS).first
+    light = bar.evaluate("el => getComputedStyle(el).fill")
+    assert light == rgb(token(page, "--chart-ec"))
+    seen: list[str] = []
+
+    def on_request(request: Request) -> None:
+        seen.append(f"{request.method} {urlsplit(request.url).path}")
+
+    page.on("request", on_request)
+    page.evaluate("window.__e2e_mark = 1")
+    page.locator(f"#{components.THEME_BUTTON_IDS['dark']}").click()
+    expect(bar).not_to_have_css("fill", light)
+    assert bar.evaluate("el => getComputedStyle(el).fill") == rgb(
+        token(page, "--chart-ec")
+    )
+    page.wait_for_timeout(SETTLE_MS)
+    assert seen == [], seen
+    assert page.evaluate("window.__e2e_mark") == 1
+
+
+@pytest.mark.plotlyjs_fetches(1, abort=True)
+@pytest.mark.expected_console_error(RESOURCE_ERROR)
+def test_with_plotlyjs_blocked_c9_s_title_caption_and_t1_render(page: Page) -> None:
+    page.goto("/elections")
+    assert_rendered(page, ELECTIONS_SUCCESS)
+    memo = f"window.{charts.PLOTLYJS_MEMO}"
+    page.wait_for_function(f"{memo} !== undefined")
+    assert page.evaluate(f"async () => await {memo}") is False
+    expect(page.locator(f"{C9} .chart-title")).to_have_text(labels.C9_TITLE)
+    expect(page.locator(f"{C9} figcaption")).to_contain_text(labels.C9_BASIS)
+    expect(page.locator(f"{C9} figcaption a")).to_have_attribute(
+        "href", "#elections-table"
+    )
+    expect(page.locator(ELECTIONS_ROWS)).to_have_count(len(served_years()))
+    expect(page.locator(f"{C9} .js-plotly-plot")).to_have_count(0)

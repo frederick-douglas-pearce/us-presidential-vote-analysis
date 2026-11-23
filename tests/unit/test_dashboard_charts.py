@@ -53,6 +53,7 @@ ISSUED: dict[str, tuple[str, str, bool, bool]] = {
     "C5": ("/elections/over-time", "elections-over-time-table", False, True),
     "C7": ("/state/<usps>", "state-electors", False, False),
     "C10": ("/state/<usps>", "state-popular-total", False, True),
+    "C9": ("/elections", "elections-table", False, False),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.

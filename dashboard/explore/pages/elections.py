@@ -24,23 +24,35 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   and N1's ``elections`` items (:func:`explore.elections_view.n1_items`, the one check
   C2 shares), N1 (:data:`explore.api.SUMMARY_PATH`) filled on a miss. A failed or
   malformed N1 replaces the averages with :data:`METRICS_UNAVAILABLE`; the count stays.
+- **T1's N1 columns and chart C9** (#563, D116): T1 appends the two #570 fields, the
+  electoral and popular-vote margins (the election panel's one cell function,
+  :func:`explore.election_view.margin_cells`) and, last and on the page only, who
+  received electoral votes (:data:`RECIPIENTS_HEADER`), from N1's ``elections`` items
+  and ``data`` rows. Chart C9 draws each shown year's served ``candidate_count`` above
+  T1, its hover the year's Recipients cell, and narrows with T1 (D110). Two tiers: N1
+  unread, an item check failing or a field missing empties every N1 cell
+  (:data:`T1_N1_UNAVAILABLE_CELL`) and C9; a recipient row check or the reconciliation
+  with ``candidate_count`` failing in any served year empties the Recipients cells and
+  C9 only.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 import dash
 from dash import dcc, html
 
 from explore import (
     api,
+    charts,
     components,
     election_view,
     elections_view,
     export,
     labels,
     metrics,
+    over_time,
     query,
 )
 from explore.config import CANONICAL_HOST, SITE_TITLE
@@ -58,15 +70,31 @@ GLOSSARY_ID = "elections-glossary"
 #: The list's pair (#553, D102): its filters left, the count and averages right.
 LIST_PAIR_ID = "elections-list-pair"
 
-#: T1's columns, in display order, by public field name.
-FIELDS = ("year", "candidate_count", "has_popular_vote")
+#: T1's columns, in display order, by public field name: the index's three, then N1's
+#: four (#563), each from the year's ``elections`` item.
+INDEX_FIELDS = ("year", "candidate_count", "has_popular_vote")
+N1_FIELDS = (
+    "electoral_votes_outside_top_two",
+    "electors_without_a_counted_vote",
+    "ec_margin",
+    "pv_margin",
+)
+FIELDS = (*INDEX_FIELDS, *N1_FIELDS)
+#: T1's page-only column (#563, D116): its header and the served fields its cells are
+#: built from (the header's tooltip and the column-name list's entry). Not a ``LABELS``
+#: key, and never in T1's download.
+RECIPIENTS_HEADER = "Who received electoral votes (cast, counted)"
+RECIPIENTS_FIELDS = (
+    "candidate, national_electoral_votes, national_electoral_votes_counted"
+)
+PAGE_ONLY = ((RECIPIENTS_HEADER, RECIPIENTS_FIELDS),)
 
 #: Page-level wording (ba spec, approved by the owner at #434's plan gate, 2026-11-11).
 LEDE = "Every US presidential election in this dataset."
 #: Shown only on success, after :data:`LEDE` (the degraded page has no filters).
 FILTER_SENTENCE = (
-    "Narrow the list of elections by year, or to the years with a popular vote in "
-    "this dataset."
+    "Narrow the chart and the list of elections by year, or to the years with a "
+    "popular vote in this dataset."
 )
 LIST_HEADING = "List of elections"
 
@@ -88,6 +116,38 @@ MEANS = tuple(key for key in METRIC_IDS if metrics.METRICS[key].kind == "mean")
 METRICS_UNAVAILABLE = (
     "The average margins can't be shown right now. Please try again in a minute."
 )
+
+#: T1's notes (ba spec, approved at #563's plan gate, 2026-11-22), shown under T1 and
+#: written into its download.
+RECIPIENTS_DOWNLOAD_NOTE = (
+    'The download leaves out the "Who received electoral votes" column. Each '
+    "election's own page lists them, with their electoral votes cast and counted, in "
+    "its national results table and that table's download."
+)
+OUTSIDE_TOP_TWO_NOTE = (
+    "Electoral votes cast outside the top two are the votes cast for candidates ranked "
+    "below second by electoral votes counted. Candidates with equal counted totals "
+    "share a rank. A candidate whose votes were cast but not counted ranks below "
+    "second and still adds to it: in 1872, Horace Greeley's 3."
+)
+NO_COUNTED_VOTE_NOTE = (
+    "Electors without a counted vote are electors appointed whose vote is not in "
+    "Congress's count: either the elector did not vote, or the vote was cast and not "
+    "counted. In 2000, one elector from the District of Columbia did not vote."
+)
+#: Each N1 cell, and the note first among T1's, when N1 cannot be read (tier 1); in a
+#: recipient-row fault (tier 2) only the Recipients cells read the cell, with no note.
+T1_N1_UNAVAILABLE_CELL = "Not available right now"
+T1_N1_UNAVAILABLE_NOTE = (
+    "Some columns can't be shown right now: electoral votes cast outside the top two, "
+    "electors without a counted vote, the electoral and popular-vote margins, and who "
+    "received electoral votes. In the download, the first four of these have empty "
+    "cells because they could not be read right now, not because the dataset holds no "
+    "value there. Please try again in a minute."
+)
+#: Chart C9 (#563): its registry id, and its unavailable note's DOM id.
+C9_ID = "C9"
+C9_UNAVAILABLE_ID = "elections-c9-unavailable"
 
 #: The query keys and the one parser, shared with the two chart pages (#596, D110):
 #: :func:`explore.elections_view.parse_filters`.
@@ -132,16 +192,193 @@ merged_search = elections_view.merged_search
 next_search = elections_view.next_search
 
 
-def _row(election: dict[str, Any]) -> html.Tr:
+class N1Cells(NamedTuple):
+    """T1's N1 cells for one row (#563), built once per row per render and read by its
+    ``Tr`` and, for the Recipients lines, C9's hover: each N1 field's cell by field,
+    and the Recipients lines (one per recipient, served order), or ``None`` where they
+    are unavailable."""
+
+    fields: dict[str, str]
+    recipients: tuple[str, ...] | None
+
+
+#: Every N1 cell when N1 cannot be read (tier 1).
+UNAVAILABLE_CELLS = N1Cells(dict.fromkeys(N1_FIELDS, T1_N1_UNAVAILABLE_CELL), None)
+
+
+def recipient_lines(recipients: list[elections_view.Recipient]) -> tuple[str, ...]:
+    """A year's Recipients cell, one line per recipient in served order
+    (:data:`explore.labels.RECIPIENT_LINE`), as the page writes it: C9's hover escapes
+    each line."""
+    return tuple(
+        labels.RECIPIENT_LINE.format(
+            candidate=r.candidate,
+            cast=labels.number(r.cast),
+            counted=labels.number(r.counted),
+        )
+        for r in recipients
+    )
+
+
+def _row(election: dict[str, Any], cells: N1Cells) -> html.Tr:
     year = election["year"]
+    lines = cells.recipients
     return html.Tr(
         [
             # A year links to its one-election view (#307).
             html.Td(dcc.Link(str(year), href=f"/election/{year}")),
             labels.cell(labels.number(election["candidate_count"])),
             labels.cell(labels.has_popular_vote(election["has_popular_vote"])),
+            *(labels.cell(cells.fields[field]) for field in N1_FIELDS),
+            # The page-only column, last (D116): one line per recipient.
+            html.Td(
+                T1_N1_UNAVAILABLE_CELL
+                if lines is None
+                else [
+                    part
+                    for i, line in enumerate(lines)
+                    for part in ((html.Br(),) if i else ()) + (line,)
+                ]
+            ),
         ]
     )
+
+
+def _n1_rows(
+    index: dict[str, Any], summary: Any, shown: list[Any]
+) -> tuple[list[dict[str, Any]], list[N1Cells], dict[int, tuple[str, ...]] | None]:
+    """T1's shown rows with N1's four fields joined on (``None`` each where N1 cannot be
+    read, so the download's cells are empty and it never raises), each row's
+    :class:`N1Cells`, and each served year's Recipients lines, or ``None`` where C9
+    cannot be drawn (#563, D116's two tiers). Index defects are the page's, raised
+    before this is called; anything here degrades only N1's cells and C9."""
+    coverage = index["meta"]["provenance"]["coverage"]
+    try:
+        if summary is None:
+            raise TypeError(f"{api.SUMMARY_PATH} is unavailable")
+        items = elections_view.n1_items(index, summary)
+        for item in items.values():
+            for field in N1_FIELDS:
+                item[field]  # a missing field is tier 1, never a raise later
+    except (KeyError, TypeError):
+        rows = [{**e, **dict.fromkeys(N1_FIELDS)} for e in shown]
+        return rows, [UNAVAILABLE_CELLS] * len(rows), None
+    try:
+        lines: dict[int, tuple[str, ...]] | None = {
+            year: recipient_lines(found)
+            for year, found in elections_view.n1_recipients(index, summary).items()
+        }
+    except (KeyError, TypeError):
+        lines = None
+    rows, cells = [], []
+    for election in shown:
+        year = _shown_year(election)
+        item = items[year]
+        rows.append({**election, **{field: item[field] for field in N1_FIELDS}})
+        margins = election_view.margin_cells(item, year, coverage)
+        cells.append(
+            N1Cells(
+                {
+                    "electoral_votes_outside_top_two": labels.number(
+                        item["electoral_votes_outside_top_two"]
+                    ),
+                    "electors_without_a_counted_vote": labels.number(
+                        item["electors_without_a_counted_vote"]
+                    ),
+                    "ec_margin": margins["ec_margin"],
+                    "pv_margin": margins["pv_margin"],
+                },
+                None if lines is None else lines[year],
+            )
+        )
+    return rows, cells, lines
+
+
+def _c9_caption(counts: dict[int, int]) -> str:
+    """C9's caption (ba spec): what a bar is, the cast-not-counted note, the finding
+    over the years shown and the hover note; ``components.chart`` adds the pointer."""
+    parts = [labels.C9_BASIS, labels.C9_CAST_NOTE]
+    if len(counts) == 1:
+        ((year, count),) = counts.items()
+        parts.append(
+            labels.C9_FINDING_ONE.format(year=year, count=labels.number(count))
+        )
+    else:
+        more = sum(1 for count in counts.values() if count > 2)
+        n = labels.number(len(counts))
+        if more:
+            most = max(counts.values())
+            parts.append(
+                labels.C9_FINDING.format(
+                    more=labels.number(more),
+                    n=n,
+                    most=labels.number(most),
+                    years=labels.metric_years(
+                        [year for year, count in counts.items() if count == most]
+                    ),
+                )
+            )
+        else:
+            parts.append(labels.C9_FINDING_NONE.format(n=n))
+    parts.append(labels.C9_HOVER_NOTE)
+    return " ".join(parts)
+
+
+def _c9_figure(
+    counts: dict[int, int], lines: dict[int, tuple[str, ...]]
+) -> dict[str, Any]:
+    """C9's figure (#563, D116): one bar per distinct year shown, at its year on the
+    year axis (D104), its height the served ``candidate_count`` (already reconciled
+    with N1's rows, so a figure), no bar text (D104(c)), and a hover writing the year,
+    T1's count cell and the year's Recipients lines, escaped (D091)."""
+    years = sorted(counts)
+    hovers = [
+        labels.C9_HOVER.format(
+            year=year,
+            count=labels.number(counts[year]),
+            recipients="<br>".join(charts.escaped(line) for line in lines[year]),
+        )
+        for year in years
+    ]
+    bars = {
+        "type": "bar",
+        "name": labels.LABELS["candidate_count"],
+        "showlegend": False,
+        "ids": [str(year) for year in years],
+        "x": years,
+        "y": [counts[year] for year in years],
+        "marker": {"color": charts.EC_COLOR},
+        "hovertext": hovers,
+        "hovertemplate": "%{hovertext}<extra></extra>",
+    }
+    layout = over_time.time_layout(
+        labels.C9_TITLE,
+        labels.C9_VALUE_AXIS,
+        years,
+        max(counts.values()),
+        marked=False,
+    )
+    return {"data": [bars], "layout": layout}
+
+
+def _c9(
+    shown: list[Any], lines: dict[int, tuple[str, ...]] | None
+) -> list[Any]:
+    """C9 over the years T1 shows (D110), or :data:`explore.labels.C9_UNAVAILABLE`
+    where N1's rows could not be read or reconciled; nothing when no year is shown,
+    where T1's empty note stands. ``components.chart`` sits outside the ``try``
+    (D095(f))."""
+    if not shown:
+        return []
+    try:
+        if lines is None:
+            raise TypeError("C9's rows are unavailable")
+        counts = {_shown_year(e): e["candidate_count"] for e in shown}
+        figure = _c9_figure(counts, lines)
+        caption = _c9_caption(counts)
+    except (KeyError, TypeError):
+        return [html.P(labels.C9_UNAVAILABLE, id=C9_UNAVAILABLE_ID, className="note")]
+    return [components.chart(C9_ID, figure, TABLE_ID, caption)]
 
 
 def _shown_year(row: Any) -> int:
@@ -232,6 +469,17 @@ def render(
         for e in elections
         if elections_view.shows(e["year"], e["has_popular_vote"], chosen)
     ]
+    rows, cells, lines = _n1_rows(body, summary, shown)
+    notes: tuple[str, ...] = (
+        labels.HAS_POPULAR_VOTE_NOTE,
+        RECIPIENTS_DOWNLOAD_NOTE,
+        OUTSIDE_TOP_TWO_NOTE,
+        NO_COUNTED_VOTE_NOTE,
+        labels.MARGIN_NOTE,
+    )
+    if cells and cells[0] is UNAVAILABLE_CELLS:
+        notes = (T1_N1_UNAVAILABLE_NOTE, *notes)
+    by_row = {id(r): c for r, c in zip(rows, cells, strict=True)}
     first, last = span(coverage)
     search = applied_search(chosen, first, last)
     controls = elections_view.filter_controls(first, last, chosen)
@@ -274,16 +522,19 @@ def render(
                         LIST_PAIR_ID,
                         right_id=METRICS_ID,
                     ),
+                    # C9 below the pair, full width, above its companion T1 (#563).
+                    *_c9(shown, lines),
                     *components.table(
-                        shown,
-                        _row,
+                        rows,
+                        lambda r: _row(r, by_row[id(r)]),
                         FIELDS,
                         TABLE_ID,
                         download,
-                        notes=(labels.HAS_POPULAR_VOTE_NOTE,),
+                        notes=notes,
                         empty=labels.NO_ELECTIONS_MATCH,
+                        page_only=PAGE_ONLY,
                     ),
-                    labels.glossary(FIELDS, ident=GLOSSARY_ID),
+                    labels.glossary(FIELDS, ident=GLOSSARY_ID, page_only=PAGE_ONLY),
                 ]
             ),
             components.provenance_footer(provenance),

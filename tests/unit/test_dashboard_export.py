@@ -249,10 +249,20 @@ def link_problems(table: Any, after: Any) -> list[str]:
     if not str(link.href).startswith(export.DATA_URL_PREFIX):
         return [f"{table.id}: the link is not a data: URL"]
     file = Csv(link.href)
-    headers = [th.title for th in of_type(table, "Th")]
+    cells = of_type(table, "Th")
+    headers = [th.title for th in cells]
     if not headers or not all(isinstance(h, str) and h for h in headers):
         return [f"{table.id}: no column headers"]
     problems = []
+    # A page-only column (#563, D116) is shown and never downloaded: its headers may
+    # only end the row, and the download's header is checked against the others.
+    page_only = [
+        getattr(th, "className", None) == components.PAGE_ONLY_CLASS for th in cells
+    ]
+    served = page_only.index(True) if True in page_only else len(cells)
+    if not all(page_only[served:]):
+        problems.append(f"{table.id}: a page-only column is not at the end")
+    headers = headers[:served]
     if file.header[: len(headers)] != headers:
         problems.append(f"{table.id}: columns {file.header} do not start {headers}")
     if len(file.rows) != len(of_type(of_type(table, "Tbody"), "Tr")):
@@ -472,6 +482,13 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
     # tables (NARROWED_CHARTS). A span across the window's start, the popular-vote
     # years alone, and an out-of-span year, which falls back to every year. A filter
     # leaving no year shows the empty note instead (its own tests, not listed here).
+    # #563 (D116): C9 and T1 narrow with the list's year filters, as C2's page does.
+    "/elections": [
+        ({}, "year_from=1900&year_to=1990", "filtered"),
+        ({}, "pv=1", "filtered"),
+        ({}, "year_to=1972", "filtered"),
+        ({}, "year_from=1700", "absent"),
+    ],
     "/elections/majority": [
         ({}, "year_from=1900&year_to=1990", "filtered"),
         ({}, "pv=1", "filtered"),
@@ -509,9 +526,8 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
 #: with a ``query=`` parser that lists none.
 FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/election/<year>/per-capita": {"election-per-capita": ("state",)},
-    # ``/elections`` has no chart since #562 (D107), so it is listed again when #563
-    # brings C9 there; T1's narrowing is checked by ``TestFilters`` in
-    # ``test_dashboard_elections.py``.
+    # C9's companion table, T1 (#563, D116; the list had no chart from #562 to #563).
+    "/elections": {"elections-table": ("year_from", "year_to", "pv")},
     # #596 (D110): the elections pages' year filters narrow each chart's table.
     "/elections/majority": {
         "elections-leader-table": ("year_from", "year_to", "pv"),
@@ -548,6 +564,7 @@ NARROWED_CHARTS: dict[str, tuple[str, ...]] = {
     charts.dom_id("C2"): ("year_from", "year_to", "pv"),
     charts.dom_id("C4"): ("year_from", "year_to", "pv"),
     charts.dom_id("C5"): ("year_from", "year_to", "pv"),
+    charts.dom_id("C9"): ("year_from", "year_to", "pv"),
 }
 
 #: Each chart's selected-item trace, by the chart's DOM id and the trace's name (#435,
@@ -567,6 +584,7 @@ ROW_AXES: dict[str, str] = {
     charts.dom_id("C5"): "xaxis",
     charts.dom_id("C7"): "xaxis",
     charts.dom_id("C10"): "xaxis",
+    charts.dom_id("C9"): "xaxis",
 }
 
 
@@ -1140,6 +1158,46 @@ class TestEveryTable:
         assert table_problems(tree) == []
         assert unbuilt == {"by-hand"}
 
+    @staticmethod
+    def _page_only_table() -> Any:
+        dl = export.Download("t.csv", "t", provenance(), "u")
+        return html.Div(
+            components.table(
+                [{"year": 1824}],
+                lambda r: html.Tr([html.Td("1824"), html.Td("A: 1 cast, 1 counted")]),
+                ("year",),
+                "page-only",
+                dl,
+                page_only=(("Who", "candidate, national_electoral_votes"),),
+            )
+        )
+
+    def test_a_page_only_column_ends_the_row_and_is_never_downloaded(self) -> None:
+        """#563, D116: a page-only column's header ends the row, carries its sources as
+        its tooltip and the marker class, and its download leaves it out, which
+        ``link_problems`` accepts."""
+        tree = self._page_only_table()
+        (table,) = of_type(tree, "Table")
+        last = of_type(table, "Th")[-1]
+        assert (last.children, last.title, last.className) == (
+            "Who",
+            "candidate, national_electoral_votes",
+            components.PAGE_ONLY_CLASS,
+        )
+        assert Csv(links(tree)[export.link_id("page-only")].href).header == ["year"]
+        assert link_problems(table, tree) == []
+
+    def test_a_page_only_header_before_a_served_one_fails(self) -> None:
+        """Non-vacuity for ``link_problems``' page-only rule: the same table with its
+        page-only header moved first fails."""
+        tree = self._page_only_table()
+        (table,) = of_type(tree, "Table")
+        (row,) = of_type(of_type(table, "Thead"), "Tr")
+        row.children = list(reversed(row.children))
+        assert link_problems(table, tree) == [
+            "page-only: a page-only column is not at the end"
+        ]
+
     def test_the_registry_and_the_table_literals_agree(self) -> None:
         assert set(READS_BEFORE) == {page_key(p) for p in dash.page_registry.values()}
         assert {export.link_id(table) for table in TABLES} == set(DOWNLOAD_IDS)
@@ -1389,7 +1447,16 @@ class TestExactlyTheView:
             (
                 "/elections",
                 "elections-table",
-                ("year", "candidate_count", "has_popular_vote"),
+                # The download leaves out the page-only Recipients column (#563).
+                (
+                    "year",
+                    "candidate_count",
+                    "has_popular_vote",
+                    "electoral_votes_outside_top_two",
+                    "electors_without_a_counted_vote",
+                    "ec_margin",
+                    "pv_margin",
+                ),
             ),
             (
                 "/election/<year>/states",
@@ -2368,6 +2435,19 @@ def _over_time(body: dict[str, Any]) -> None:
             row["national_pv_denominator"] = SENTINEL
 
 
+#: T1's two served N1 counts (#563, from #570), which no other table shows.
+T1_ITEM_FIELDS = ("electoral_votes_outside_top_two", "electors_without_a_counted_vote")
+
+
+def _list(body: dict[str, Any]) -> None:
+    """N1 as ``/elections`` reads it (#563): C4 and C5's doctoring, which also reaches
+    the averages' margins (T1's margin cells since #563), and T1's two counts on the
+    first item."""
+    _over_time(body)
+    for field in T1_ITEM_FIELDS:
+        body["elections"][0][field] = SENTINEL
+
+
 #: How many candidate rows Georgia's first recorded election has (#560), derived from
 #: the recording.
 GA_FIRST_ROWS = sum(
@@ -2382,7 +2462,7 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {},
         {
             "/v1/elections": _row("has_popular_vote", "candidate_count"),
-            "/v1/elections/summary": _over_time,
+            "/v1/elections/summary": _list,
         },
     ),
     # C2's leader table, and C4 and C5's, on their own pages since #562.
@@ -2420,7 +2500,8 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
 #: worded column must join for its cell to be checked.
 UNRECOGNIZED_CELLS = {
     "/elections": {
-        "elections-table": 2,
+        # The index's two, and since #563 the first item's margins and two counts.
+        "elections-table": 2 + len(AVERAGED_FIELDS) + len(T1_ITEM_FIELDS),
         # One per average whose field a doctored item holds (#437).
         "elections-metrics": len(AVERAGED_FIELDS),
     },
@@ -2739,6 +2820,11 @@ class Served(NamedTuple):
     query: str
     path: str
     rows: Callable[[dict[str, Any]], list[dict[str, Any]]]
+    #: The fields a figure reads only through a type check that refuses every
+    #: unexpected kind (#563: C9's recipients), so doctoring one degrades the section
+    #: instead of changing the figure. For an entry naming them, the premise that the
+    #: doctored row reaches the figure is that each one changed it or degraded it.
+    checked: tuple[str, ...] = ()
 
 
 def _first(key: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
@@ -2792,6 +2878,18 @@ SERVED_ROWS: dict[str, list[Served]] = {
     # #582: the same, since C10 collapses them to one total; its figure reads each
     # row's ``popular_votes`` too, which decides whether its total is read (D113(b)).
     "C10": [Served({"usps": "GA"}, "", "/v1/states/GA", _year_rows(2016))],
+    # #563: every N1 row of one election, its recipients. The index row's
+    # ``candidate_count`` is checked against them (D116), so doctoring it degrades the
+    # section and changes no drawn figure: no entry of its own.
+    "C9": [
+        Served(
+            {},
+            "",
+            api.SUMMARY_PATH,
+            _year_rows(2016),
+            ("candidate", "national_electoral_votes", "national_electoral_votes_counted"),
+        )
+    ],
 }
 
 #: What a chart's section shows when its own read fails, where it has one: C2's (#434),
@@ -2803,6 +2901,7 @@ SECTION_UNAVAILABLE = {
     "C5": "elections-over-time-unavailable",
     "C7": "state-electors-unavailable",
     "C10": "state-popular-total-unavailable",
+    "C9": "elections-c9-unavailable",
 }
 
 #: The unexpected kinds a served field is doctored to (#484).
@@ -2848,7 +2947,7 @@ class TestServedValuesReachNoFigureUntyped:
         self, chart_id: str, entry: int, kind: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         row = charts.CHARTS[chart_id]
-        values, search, path, rows = SERVED_ROWS[chart_id][entry]
+        values, search, path, rows, checked = SERVED_ROWS[chart_id][entry]
         success = page_of(row.page)["success"]
         dom = charts.dom_id(chart_id)
         targets = rows(RECORDED[path])
@@ -2898,7 +2997,13 @@ class TestServedValuesReachNoFigureUntyped:
             outcomes.setdefault(outcome, []).append(field)
         assert set(outcomes) <= {"drawn", "degraded"}, outcomes
         assert "drawn" in outcomes  # the premise: most fields leave the chart drawn
-        assert changed, outcomes  # the premise: the doctored row reaches the figure
+        # The premise: the doctored row reaches the figure, through a field that
+        # changed it, or, for a checked field, one that changed or degraded it.
+        if checked:
+            reached = set(changed) | set(outcomes.get("degraded", []))
+            assert set(checked) <= reached, outcomes
+        else:
+            assert changed, outcomes
 
 
 #: Every dropdown that lists names, by DOM id (#540): its options must be a list
