@@ -35,7 +35,6 @@ the rule (architect ruling on #419).
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from typing import Any, NamedTuple
@@ -123,11 +122,24 @@ def sentences(name: str) -> list[str]:
     return found
 
 
+def strings(node: Any) -> list[str]:
+    """Every string in a decoded JSON value, in document order."""
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [s for value in node.values() for s in strings(value)]
+    if isinstance(node, list):
+        return [s for value in node for s in strings(value)]
+    return []
+
+
 def text_of(response: Any) -> str:
-    """The routing response, decoded: Dash escapes non-ASCII characters and quotes in
-    the raw body, so a sentence holding one would never match it there."""
+    """The routing response's strings as they render, one per line. The raw body is
+    JSON, which escapes quotes and backslashes (and Dash, non-ASCII characters too),
+    so a sentence holding one would never match it there; each string is matched
+    whole, never across two."""
     assert response.status_code == 200, response.status_code
-    return json.dumps(response.get_json(), ensure_ascii=False)
+    return "\n".join(strings(response.get_json()))
 
 
 def unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
