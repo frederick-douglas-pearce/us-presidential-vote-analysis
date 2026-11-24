@@ -149,7 +149,6 @@ DOWNLOAD_IDS_BY_PAGE = {
     "/election/<year>/per-capita": ("election-per-capita-csv",),
     "/state/<usps>": (
         "state-electors-csv",
-        "state-popular-total-csv",
         "state-history-csv",
     ),
     "/state/<usps>/per-capita": ("state-per-capita-csv",),

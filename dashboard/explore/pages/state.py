@@ -1,12 +1,13 @@
 """One state's history (#279): chart C7, its electors appointed in each election (#560),
-chart C10, its total popular vote in each election (#582), and T4, its rows in every
-election this dataset holds for it.
+chart C10, its total popular vote in each election (#582), the one table the two share
+(#618), and T4, its rows in every election this dataset holds for it.
 
 Its people per electoral vote (T7, #280) is a page of its own since #559,
 ``pages/state_per_capita.py``; what the two share is in :mod:`explore.state_view`, and
 the section links join them (D105). T4, C7 and C10 come from one response,
 ``/v1/states/{usps}``, filled on a miss; C7 and C10 collapse its rows, one per
-candidate, to one per election (D106, D113). The state is the path (``/state/<usps>``,
+candidate, to one per election (D106, D113), and their table joins the two collapses on
+the year (#618, D117). The state is the path (``/state/<usps>``,
 an item singular as ``/states`` is plural), in upper case as the API writes a USPS code.
 It is validated against the state roster before it is formatted into an API path: the
 latest election's rows (``/v1/elections/{year_max}``, :data:`explore.api.ROSTER_PATH`),
@@ -62,13 +63,17 @@ CANDIDATE_ID = "state-candidate"
 PV_STATUS_ID = "state-pv-status"
 
 #: Chart C7 (#560, D106): the state's electors appointed in each election, before the
-#: filters, with its own companion table, which no filter reaches (D093(a)).
+#: filters. Its companion table, which no filter reaches (D093(a)), is the one C10
+#: shares since #618 (D117): it kept C7's id and C10's, ``state-popular-total``, is
+#: retired, never reused (D097(g)).
 C7_ID = "C7"
 ELECTORS_TABLE_ID = "state-electors"
 ELECTORS_GLOSSARY_ID = "state-electors-glossary"
-#: The degraded section's sentence (D096(d)'s rule): C7's section alone, when the
-#: rows T4 shows cannot be read as one allotment per election.
+#: The sentence in C7's place (D096(d)'s rule) when the rows T4 shows cannot be read as
+#: one allotment per election.
 C7_UNAVAILABLE_ID = "state-electors-unavailable"
+#: The sentence in the shared table's place when neither chart can be built (D117).
+ELECTORS_TABLE_UNAVAILABLE_ID = "state-electors-table-unavailable"
 #: The headline figures (#601, D112(e), (g), D115): the block and each figure's value,
 #: by metric key, in display order, the page's one per-key table (D114(d)); DOM ids are
 #: stable and never renamed (D097(g)). In C7's card, after its heading.
@@ -79,20 +84,17 @@ METRIC_IDS = {
 }
 #: The note under the figures naming the years with no electors appointed.
 METRICS_NOTE_ID = "state-history-metrics-note"
-#: The companion table's columns, by public field name, and what its CSV adds.
-ELECTORS_FIELDS = ("year", "state_electoral_votes", "pv_status")
+#: The shared table's columns, by public field name, append-only from C7's own table
+#: (#618), and what its CSV adds.
+ELECTORS_FIELDS = ("year", "state_electoral_votes", "pv_status", "state_popular_total")
 ELECTORS_EXTRA = ("state_usps",)
 
-#: Chart C10 (#582, D113): the state's total popular vote in each election, below C7,
-#: before the filters, with its own companion table, which no filter reaches (D093(a)).
+#: Chart C10 (#582, D113): the state's total popular vote in each election, directly
+#: below C7, before the filters; its companion table is C7's (#618, D117).
 C10_ID = "C10"
-TOTALS_TABLE_ID = "state-popular-total"
-TOTALS_GLOSSARY_ID = "state-popular-total-glossary"
-#: The degraded section's sentence (D096(d)'s rule): C10's section alone, when the
-#: rows T4 shows cannot be read as one total per election.
+#: The sentence in C10's place (D096(d)'s rule) when the rows T4 shows cannot be read as
+#: one total per election. Its id keeps the retired table's prefix and is live (D117).
 C10_UNAVAILABLE_ID = "state-popular-total-unavailable"
-TOTALS_FIELDS = ("year", "state_popular_total", "pv_status")
-TOTALS_EXTRA = ("state_usps",)
 #: What C10's figure is drawn with: C5's figure, one state's (#582, D113), on C7's
 #: year-tick size, since the two stack on one page.
 C10_CHART = over_time.TotalChart(
@@ -151,21 +153,39 @@ FILTER_SENTENCE = (
     "Narrow the table of each candidate's electoral votes by year, candidate or "
     "popular-vote status."
 )
-#: The page's two sections' headings (#560; ba spec, approved at its plan gate,
-#: 2026-11-18): C7 and its table, then T4, which its filters belong to.
+#: The page's headings (#560, #582, #618; ba specs, approved at their plan gates,
+#: 2026-11-18, 2026-11-21 and 2026-11-23): C7, C10, their one table, then T4, which
+#: its filters belong to.
 C7_HEADING = "Electors appointed over time"
-C7_TABLE_HEADING = "This state's electors appointed in each election"
 HISTORY_TABLE_HEADING = "Each candidate's electoral votes in each election"
 C7_UNAVAILABLE = (
-    "The chart and table of this state's electors appointed in each election can't "
-    "be shown right now. Please try again in a minute."
+    "The chart of this state's electors appointed in each election can't be shown "
+    "right now. Please try again in a minute."
 )
-#: C10's section (#582; ba spec, approved at its plan gate, 2026-11-21), after C7's.
 C10_HEADING = "Total popular vote over time"
-C10_TABLE_HEADING = "This state's total popular vote in each election"
 C10_UNAVAILABLE = (
-    "The chart and table of this state's total popular vote in each election can't "
-    "be shown right now. Please try again in a minute."
+    "The chart of this state's total popular vote in each election can't be shown "
+    "right now. Please try again in a minute."
+)
+#: The table C7 and C10 share (#618, D117; ba spec, approved at its plan gate,
+#: 2026-11-23), its note when neither chart can be built, and the note first among its
+#: notes when one chart's column reads :data:`explore.labels.UNAVAILABLE_CELL`.
+ELECTORS_TOTALS_TABLE_HEADING = (
+    "This state's electors appointed and total popular vote in each election"
+)
+ELECTORS_TOTALS_TABLE_UNAVAILABLE = (
+    "The table of this state's electors appointed and total popular vote in each "
+    "election can't be shown right now. Please try again in a minute."
+)
+ELECTORS_UNAVAILABLE_NOTE = (
+    "One column can't be shown right now: electors appointed. In the download, its "
+    "cells are empty because they could not be read right now, not because the "
+    "dataset holds no value there. Please try again in a minute."
+)
+TOTALS_UNAVAILABLE_NOTE = (
+    "One column can't be shown right now: the total popular vote. In the download, "
+    "its cells are empty because they could not be read right now, not because the "
+    "dataset holds no value there. Please try again in a minute."
 )
 
 
@@ -567,16 +587,179 @@ def _figures(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> html.
     return html.Div(block, id=METRICS_ID)
 
 
-def _electors_row(point: over_time.Point) -> html.Tr:
-    """A row of C7's companion table: the year, linked to its election, and the cells
-    C7's hover writes."""
+class Part(NamedTuple):
+    """One chart's half of the shared section (#618, D117): the collapsed records, the
+    points its hover and its table column are written from, its figure and caption,
+    and, for C10, the popular-vote window it read (``None`` for C7)."""
+
+    records: list[dict[str, Any]]
+    points: list[over_time.Point]
+    figure: dict[str, Any]
+    caption: str
+    window: tuple[int, int] | None
+
+
+class Merged(NamedTuple):
+    """A row of the table C7 and C10 share (#618, D117): the record its CSV writes and
+    the three cells its row shows. A chart that could not be built leaves its field
+    ``None`` and its cell :data:`explore.labels.UNAVAILABLE_CELL`."""
+
+    record: dict[str, Any]
+    electors_cell: str
+    status_cell: str
+    total_cell: str
+
+
+def _electors_part(
+    rows: list[dict[str, Any]], served: set[int], usps: str, source: str
+) -> Part | None:
+    """C7's half (#560, D106): ``None`` when the rows T4 shows cannot be read as one
+    allotment per election, or a served name has nothing in it (the rule D101 set for
+    N2's rows, which D106 keeps for C7's). ``components.chart`` is never called here
+    (D095(f))."""
+    try:
+        records = electors(rows, served, usps, source)
+        points = over_time.appointed_points(records)
+        years = sorted(served)
+        name = rows[0]["state"]
+        # A name a hover would write as "None", a number or nothing names no state.
+        if not labels.has_text(name):
+            raise TypeError(f"{source} names {usps} with no text")
+        plain = over_time.plain(name)
+        title = (
+            labels.C7_TITLE_THIS_STATE
+            if plain is None
+            else labels.C4_TITLE_STATE.format(state=plain)
+        )
+        c7 = over_time.c4_figure(points, years, title, charts.escaped(str(name)))
+        # Stacked above C10, the two plots line up on one year axis (#582, D113).
+        over_time.align(c7.figure, over_time.STATE_MARGIN)
+        first = points[0].year if points[0].year > years[0] else None
+        caption = _electors_caption(c7, plain, first)
+    except (KeyError, TypeError):
+        return None
+    return Part(records, points, c7.figure, caption, None)
+
+
+def _totals_part(
+    rows: list[dict[str, Any]],
+    served: set[int],
+    usps: str,
+    body: dict[str, Any],
+    source: str,
+) -> Part | None:
+    """C10's half (#582, D113): ``None`` when the rows T4 shows cannot be read as one
+    total per election, the popular-vote window is malformed where T4 can still compare
+    it, or a served name has nothing in it. ``components.chart`` is never called here
+    (D095(f))."""
+    try:
+        coverage = body["meta"]["provenance"]["coverage"]
+        # Checked as C2 and C5 check theirs: a malformed window fails C10's half alone.
+        window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
+        records = popular_totals(rows, served, usps, source)
+        points = over_time.total_points(records, coverage)
+        years = sorted(served)
+        name = rows[0]["state"]
+        # A name a hover would write as "None", a number or nothing names no state.
+        if not labels.has_text(name):
+            raise TypeError(f"{source} names {usps} with no text")
+        plain = over_time.plain(name)
+        title = (
+            labels.C10_TITLE_THIS_STATE
+            if plain is None
+            else labels.C10_TITLE_STATE.format(state=plain)
+        )
+        c10 = over_time.total_figure(
+            points, years, title, window, charts.escaped(str(name)), C10_CHART
+        )
+        over_time.align(c10.figure, over_time.STATE_MARGIN)
+        first = points[0].year if points[0].year > years[0] else None
+        caption = _totals_caption(c10, window, plain, first)
+    except (KeyError, TypeError):
+        return None
+    return Part(records, points, c10.figure, caption, window)
+
+
+def merge(c7: Part | None, c10: Part | None) -> list[Merged]:
+    """The shared table's rows (#618, D117): one per election, joined on the year from
+    whichever half was built, each column's cell the one its chart's hover writes
+    (D091). Pure and, over halves that were built, total: it reads only what the two
+    collapses already checked. Both halves list the same years (both end in
+    :func:`explore.over_time.state_series` over the same rows), so a mismatch is a code
+    fault and raises ``ValueError``; with neither half there are no rows."""
+    if c7 is not None and c10 is not None:
+        for a, b in zip(c7.points, c10.points, strict=True):
+            if a.year != b.year:
+                raise ValueError(f"C7 and C10 disagree on a year: {a.year}, {b.year}")
+    base = c7 if c7 is not None else c10
+    if base is None:
+        return []
+    merged: list[Merged] = []
+    for i, (record, point) in enumerate(zip(base.records, base.points, strict=True)):
+        appointed = None if c7 is None else c7.records[i]
+        total = None if c10 is None else c10.records[i]
+        merged.append(
+            Merged(
+                record={
+                    "year": record["year"],
+                    "state_usps": record["state_usps"],
+                    "state_electoral_votes": (
+                        None
+                        if appointed is None
+                        else appointed["state_electoral_votes"]
+                    ),
+                    "pv_status": record["pv_status"],
+                    "state_popular_total": (
+                        None if total is None else total["state_popular_total"]
+                    ),
+                },
+                electors_cell=(
+                    labels.UNAVAILABLE_CELL
+                    if c7 is None
+                    else c7.points[i].appointed_cell
+                ),
+                status_cell=point.status_cell or labels.UNRECOGNIZED,
+                total_cell=(
+                    labels.UNAVAILABLE_CELL
+                    if c10 is None
+                    else c10.points[i].total_cell
+                ),
+            )
+        )
+    return merged
+
+
+def _merged_row(row: Merged) -> html.Tr:
+    """A row of the shared table: the year, linked to its election, and the cells C7's
+    and C10's hovers write."""
+    year = row.record["year"]
     return html.Tr(
         [
-            html.Td(dcc.Link(str(point.year), href=f"/election/{point.year}")),
-            labels.cell(point.appointed_cell),
-            labels.cell(point.status_cell or labels.UNRECOGNIZED),
+            html.Td(dcc.Link(str(year), href=f"/election/{year}")),
+            labels.cell(row.electors_cell),
+            labels.cell(row.status_cell),
+            labels.cell(row.total_cell),
         ]
     )
+
+
+def _notes(c7: Part | None, c10: Part | None) -> tuple[str, ...]:
+    """The shared table's notes (#618, D117): the note naming a column that could not
+    be built first, then both columns' bases, which define headers that stay, then the
+    popular-vote window only when C10's half read it."""
+    first = (
+        () if c7 is not None else (ELECTORS_UNAVAILABLE_NOTE,)
+    ) + (() if c10 is not None else (TOTALS_UNAVAILABLE_NOTE,))
+    window = (
+        ()
+        if c10 is None or c10.window is None
+        else (
+            labels.OVER_TIME_WINDOW_NOTE.format(
+                pv_year_min=c10.window[0], pv_year_max=c10.window[1]
+            ),
+        )
+    )
+    return (*first, labels.C4_BASIS, labels.C5_BASIS, *window)
 
 
 def _electors_caption(
@@ -600,87 +783,6 @@ def _electors_caption(
         )
     parts.append(labels.C7_FILTERS_NOTE)
     return " ".join(parts)
-
-
-def _electors_section(
-    rows: list[dict[str, Any]],
-    served: set[int],
-    usps: str,
-    body: dict[str, Any],
-    source: str,
-) -> list[Any]:
-    """C7's section (#560, D106): its heading, the chart, its heading-led companion
-    table and that table's column-name list, for the rows T4 shows from the API path
-    ``source``. Rows that cannot be read as one allotment per election, or a served
-    name with nothing in it (the rule D101 set for N2's rows, which D106 keeps for
-    C7's and D107 retired for N2), show the
-    heading and :data:`C7_UNAVAILABLE` only, with no chart (D096(d)'s rule), while T4
-    and the page stay. The ``try`` covers everything built from the rows, never
-    ``components.chart`` (D095(f)), nor the headline figures (#601, D115), which sit
-    after the heading and before the chart and are built from C7's collapse outside it,
-    so a fault only they can see never removes C7."""
-    heading = html.H2(C7_HEADING)
-    try:
-        records = electors(rows, served, usps, source)
-        points = over_time.appointed_points(records)
-        years = sorted(served)
-        name = rows[0]["state"]
-        # A name a hover would write as "None", a number or nothing names no state.
-        if not labels.has_text(name):
-            raise TypeError(f"{source} names {usps} with no text")
-        plain = over_time.plain(name)
-        title = (
-            labels.C7_TITLE_THIS_STATE
-            if plain is None
-            else labels.C4_TITLE_STATE.format(state=plain)
-        )
-        c7 = over_time.c4_figure(points, years, title, charts.escaped(str(name)))
-        # Stacked above C10, the two plots line up on one year axis (#582, D113).
-        over_time.align(c7.figure, over_time.STATE_MARGIN)
-        first = points[0].year if points[0].year > years[0] else None
-        caption = _electors_caption(c7, plain, first)
-        by_row = {id(r): p for r, p in zip(records, points, strict=True)}
-        table = components.table(
-            records,
-            lambda r: _electors_row(by_row[id(r)]),
-            ELECTORS_FIELDS,
-            ELECTORS_TABLE_ID,
-            export.Download(
-                filename=f"state-{usps}-electors.csv",
-                name="this state's electors appointed in each election",
-                provenance=body["meta"]["provenance"],
-                view_url=export.view_url(
-                    CANONICAL_HOST, state_view.path(usps, state_view.HISTORY), ""
-                ),
-            ),
-            extra=ELECTORS_EXTRA,
-            notes=(labels.C4_BASIS,),
-        )
-    except (KeyError, TypeError):
-        return [
-            heading,
-            html.P(C7_UNAVAILABLE, id=C7_UNAVAILABLE_ID, className="note"),
-        ]
-    return [
-        heading,
-        _figures(records, rows),
-        components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, caption),
-        html.H2(C7_TABLE_HEADING),
-        *table,
-        labels.glossary(ELECTORS_FIELDS, ident=ELECTORS_GLOSSARY_ID),
-    ]
-
-
-def _totals_row(point: over_time.Point) -> html.Tr:
-    """A row of C10's companion table: the year, linked to its election, and the cells
-    C10's hover writes."""
-    return html.Tr(
-        [
-            html.Td(dcc.Link(str(point.year), href=f"/election/{point.year}")),
-            labels.cell(point.total_cell),
-            labels.cell(point.status_cell or labels.UNRECOGNIZED),
-        ]
-    )
 
 
 def _totals_caption(
@@ -713,81 +815,81 @@ def _totals_caption(
     return " ".join(parts)
 
 
-def _totals_section(
+def _charts_section(
     rows: list[dict[str, Any]],
     served: set[int],
     usps: str,
     body: dict[str, Any],
     source: str,
 ) -> list[Any]:
-    """C10's section (#582, D113): its heading, the chart, its heading-led companion
-    table and that table's column-name list, for the rows T4 shows from the API path
-    ``source``. Rows that cannot be read as one total per election, or a served name
-    with nothing in it, show the heading and :data:`C10_UNAVAILABLE` only, with no
-    chart (D096(d)'s rule), while T4 and the page stay. A fault in a total, or in the
-    popular-vote window where T4 can still compare it, degrades C10 alone; one in what
-    C7 reads too (the years, the state's name, ``pv_status``) degrades both; one T4
-    cannot read (a window it cannot compare) degrades the page (D113(c), as amended).
-    The ``try`` covers everything built from the rows, never ``components.chart``
-    (D095(f))."""
-    heading = html.H2(C10_HEADING)
-    try:
-        coverage = body["meta"]["provenance"]["coverage"]
-        # Checked as C2 and C5 check theirs: a malformed window degrades C10 alone.
-        window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
-        records = popular_totals(rows, served, usps, source)
-        points = over_time.total_points(records, coverage)
-        years = sorted(served)
-        name = rows[0]["state"]
-        # A name a hover would write as "None", a number or nothing names no state.
-        if not labels.has_text(name):
-            raise TypeError(f"{source} names {usps} with no text")
-        plain = over_time.plain(name)
-        title = (
-            labels.C10_TITLE_THIS_STATE
-            if plain is None
-            else labels.C10_TITLE_STATE.format(state=plain)
+    """C7 and C10's one section (#560, #582, #618; D106, D113, D117): C7's heading, the
+    headline figures (#601, D115), C7, C10's heading, C10, then the table the two share
+    and its column-name list, for the rows T4 shows from the API path ``source``.
+
+    Each chart is built in a ``try`` of its own (:func:`_electors_part`,
+    :func:`_totals_part`); one that cannot be built shows its sentence in its place
+    (D096(d)'s rule) and its column of the table reads
+    :data:`explore.labels.UNAVAILABLE_CELL`, with a note first among the table's, while
+    the other chart, its column, T4 and the page stay. The figures are built from C7's
+    collapse, so they go with C7. With neither half built, the table's heading shows
+    :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE` in its place. ``components.chart`` and
+    the table are built after both ``try`` blocks (D095(f)), from records the halves
+    already checked."""
+    c7 = _electors_part(rows, served, usps, source)
+    c10 = _totals_part(rows, served, usps, body, source)
+    content: list[Any] = [html.H2(C7_HEADING)]
+    if c7 is None:
+        content.append(html.P(C7_UNAVAILABLE, id=C7_UNAVAILABLE_ID, className="note"))
+    else:
+        content += [
+            _figures(c7.records, rows),
+            components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, c7.caption),
+        ]
+    content.append(html.H2(C10_HEADING))
+    if c10 is None:
+        content.append(
+            html.P(C10_UNAVAILABLE, id=C10_UNAVAILABLE_ID, className="note")
         )
-        c10 = over_time.total_figure(
-            points, years, title, window, charts.escaped(str(name)), C10_CHART
+    else:
+        content.append(
+            components.chart(C10_ID, c10.figure, ELECTORS_TABLE_ID, c10.caption)
         )
-        over_time.align(c10.figure, over_time.STATE_MARGIN)
-        first = points[0].year if points[0].year > years[0] else None
-        caption = _totals_caption(c10, window, plain, first)
-        by_row = {id(r): p for r, p in zip(records, points, strict=True)}
-        table = components.table(
-            records,
-            lambda r: _totals_row(by_row[id(r)]),
-            TOTALS_FIELDS,
-            TOTALS_TABLE_ID,
+    content.append(html.H2(ELECTORS_TOTALS_TABLE_HEADING))
+    if c7 is None and c10 is None:
+        content.append(
+            html.P(
+                ELECTORS_TOTALS_TABLE_UNAVAILABLE,
+                id=ELECTORS_TABLE_UNAVAILABLE_ID,
+                className="note",
+            )
+        )
+        return content
+    merged = merge(c7, c10)
+    by_row = {id(m.record): m for m in merged}
+    content += [
+        *components.table(
+            [m.record for m in merged],
+            lambda r: _merged_row(by_row[id(r)]),
+            ELECTORS_FIELDS,
+            ELECTORS_TABLE_ID,
             export.Download(
-                filename=f"state-{usps}-total-popular-vote.csv",
-                name="this state's total popular vote in each election",
+                filename=f"state-{usps}-electors-and-total-popular-vote.csv",
+                name=(
+                    "this state's electors appointed and total popular vote in each "
+                    "election"
+                ),
                 provenance=body["meta"]["provenance"],
+                # Unfiltered: no filter reaches this table (D093(a)).
                 view_url=export.view_url(
                     CANONICAL_HOST, state_view.path(usps, state_view.HISTORY), ""
                 ),
             ),
-            extra=TOTALS_EXTRA,
-            notes=(
-                labels.C5_BASIS,
-                labels.OVER_TIME_WINDOW_NOTE.format(
-                    pv_year_min=window[0], pv_year_max=window[1]
-                ),
-            ),
-        )
-    except (KeyError, TypeError):
-        return [
-            heading,
-            html.P(C10_UNAVAILABLE, id=C10_UNAVAILABLE_ID, className="note"),
-        ]
-    return [
-        heading,
-        components.chart(C10_ID, c10.figure, TOTALS_TABLE_ID, caption),
-        html.H2(C10_TABLE_HEADING),
-        *table,
-        labels.glossary(TOTALS_FIELDS, ident=TOTALS_GLOSSARY_ID),
+            extra=ELECTORS_EXTRA,
+            notes=_notes(c7, c10),
+        ),
+        labels.glossary(ELECTORS_FIELDS, ident=ELECTORS_GLOSSARY_ID),
     ]
+    return content
 
 
 def _download(
@@ -817,8 +919,8 @@ def render(
     for one ``/v1/states/{usps}`` response and
     the ``/v1/elections`` index (read through the same view), and this page's filter
     pairs. The section links come first, carrying the year range applied (#559), then
-    C7's section, C10's (#582, D113), then T4's, under its own heading, with the
-    filters that narrow it (#560, D106)."""
+    C7 and C10's section with the table they share (#582, #618; D113, D117), then T4's,
+    under its own heading, with the filters that narrow it (#560, D106)."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     span = query.year_span(coverage["year_min"], coverage["year_max"])
@@ -834,10 +936,9 @@ def render(
                 state_view.HISTORY,
                 state_view.year_search(chosen.year_from, chosen.year_to, span),
             ),
-            # Three sections, three cards (#567, D111; #582): C7 with its table, C10
-            # with its table, and T4 with the filters that narrow only it.
-            components.card(_electors_section(rows, served, usps, body, source)),
-            components.card(_totals_section(rows, served, usps, body, source)),
+            # Two sections, two cards (#567, D111; #618, D117): C7 and C10 with the
+            # table they share, and T4 with the filters that narrow only it.
+            components.card(_charts_section(rows, served, usps, body, source)),
             components.card(
                 [
                     html.H2(HISTORY_TABLE_HEADING),
