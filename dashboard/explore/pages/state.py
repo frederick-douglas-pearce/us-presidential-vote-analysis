@@ -683,10 +683,11 @@ def _totals_part(
 def merge(c7: Part | None, c10: Part | None) -> list[Merged]:
     """The shared table's rows (#618, D117): one per election, joined on the year from
     whichever half was built, each column's cell the one its chart's hover writes
-    (D091). Pure and, over halves that were built, total: it reads only what the two
-    collapses already checked. Both halves list the same years (both end in
-    :func:`explore.over_time.state_series` over the same rows), so a mismatch is a code
-    fault and raises ``ValueError``; with neither half there are no rows."""
+    (D091). Pure; over two halves built from one response it reads only what they
+    checked. Both halves list the same years (both end in
+    :func:`explore.over_time.state_series` over the same rows), so a year mismatch
+    between them is a code fault and raises ``ValueError``; with neither half there are
+    no rows."""
     if c7 is not None and c10 is not None:
         for a, b in zip(c7.points, c10.points, strict=True):
             if a.year != b.year:
@@ -750,6 +751,7 @@ def _notes(c7: Part | None, c10: Part | None) -> tuple[str, ...]:
     first = (
         () if c7 is not None else (ELECTORS_UNAVAILABLE_NOTE,)
     ) + (() if c10 is not None else (TOTALS_UNAVAILABLE_NOTE,))
+    # ``c10.window is None`` only narrows the type: C10's half always sets its window.
     window = (
         ()
         if c10 is None or c10.window is None
@@ -834,7 +836,8 @@ def _charts_section(
     collapse, so they go with C7. With neither half built, the table's heading shows
     :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE` in its place. ``components.chart`` and
     the table are built after both ``try`` blocks (D095(f)), from records the halves
-    already checked."""
+    already checked and the response's provenance, whose popular-vote bounds
+    :func:`render` reads first."""
     c7 = _electors_part(rows, served, usps, source)
     c10 = _totals_part(rows, served, usps, body, source)
     content: list[Any] = [html.H2(C7_HEADING)]
@@ -924,6 +927,11 @@ def render(
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
     span = query.year_span(coverage["year_min"], coverage["year_max"])
+    # Read before either chart's half (#629's review, D117 as amended), so a missing
+    # popular-vote bound is the page's in every view, an empty T4 included, as the
+    # shared table's download preamble makes it; a bound that is present and malformed
+    # is C10's half's to refuse (as pages/elections.py reads its own, D116).
+    coverage["pv_year_min"], coverage["pv_year_max"]
     source = f"/v1/states/{usps}"
     served = state_view.served_years(index)
     rows = state_view.rows(body, usps, served, source)

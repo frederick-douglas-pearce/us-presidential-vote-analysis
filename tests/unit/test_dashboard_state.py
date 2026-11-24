@@ -1826,7 +1826,7 @@ class TestC7:
         assert margin["t"] == over_time.TOP_PX
         assert figure["layout"]["yaxis"]["automargin"] is False
 
-    def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
+    def test_it_is_registered_on_the_history_page_with_the_shared_table(self) -> None:
         assert charts.CHARTS["C7"] == charts.Chart("/state/<usps>", ELECTORS)
         tree = render()
         figure, _ = of_type(tree, "Figure")
@@ -1942,10 +1942,10 @@ class TestC7:
 
     @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
     def test_the_table_s_links_view_and_note(self, query: str) -> None:
-        # Its own table, never T4's: each year links to that election's page, its
-        # file names the history page with no filter whatever the render applied
-        # (D093(a)), and its note, the allotment's basis, is under the table and in
-        # the file's preamble (#560's acceptance gate, Class B).
+        # The table C7 shares with C10 (#618), never T4: each year links to that
+        # election's page, its file names the history page with no filter whatever the
+        # render applied (D093(a)), and the allotment's basis is among its notes, under
+        # the table and in the file's preamble (#560's acceptance gate, Class B).
         tree = render(query)
         rows = body_rows(tree, ELECTORS)
         assert rows
@@ -2090,6 +2090,22 @@ def column(tree: Any, field: str) -> list[str]:
     return [r[field] for r in download(tree, ELECTORS).rows]
 
 
+#: Every note the shared table can carry (#618, D117(d)), so a degrade test can pin the
+#: exact list it shows, not only an order among some of them.
+def shared_notes(lines: list[str]) -> list[str]:
+    window_note = labels.OVER_TIME_WINDOW_NOTE.format(
+        pv_year_min=WINDOW[0], pv_year_max=WINDOW[1]
+    )
+    known = (
+        MOD["ELECTORS_UNAVAILABLE_NOTE"],
+        MOD["TOTALS_UNAVAILABLE_NOTE"],
+        labels.C4_BASIS,
+        labels.C5_BASIS,
+        window_note,
+    )
+    return [line for line in lines if line in known]
+
+
 def assert_column_unavailable(
     tree: Any, plain: Any, field: str, note: str
 ) -> None:
@@ -2103,16 +2119,24 @@ def assert_column_unavailable(
     assert set(column(tree, field)) == {""}
     at = {"state_electoral_votes": 1, "state_popular_total": 3}[field]
     assert {row[at] for row in shared_cells(tree)} == {labels.UNAVAILABLE_CELL}
-    lines = csv.lines
-    assert lines.index(note) < lines.index(labels.C4_BASIS) < lines.index(
-        labels.C5_BASIS
+    # The exact notes (D117(d); #629's review, cr.2): the degraded column's note first,
+    # never the other column's, both bases, and the window only when C10's half was
+    # built, in the file and under the table alike.
+    window = (
+        []
+        if field == "state_popular_total"
+        else [
+            labels.OVER_TIME_WINDOW_NOTE.format(
+                pv_year_min=WINDOW[0], pv_year_max=WINDOW[1]
+            )
+        ]
     )
+    expected = [note, labels.C4_BASIS, labels.C5_BASIS, *window]
+    assert shared_notes(csv.lines) == expected
     (card,) = [k for k in cards(tree) if find(k, ELECTORS) is not None]
     held = list(card.children)
     (at_table,) = [i for i, k in enumerate(held) if find(k, ELECTORS) is not None]
-    shown = texts(held[at_table + 1 :])
-    assert note in shown
-    assert shown.index(note) < shown.index(labels.C4_BASIS)
+    assert shared_notes(texts(held[at_table + 1 :])) == expected
 
 
 class TestC7Degraded:
@@ -2126,7 +2150,6 @@ class TestC7Degraded:
     filters and the page's success marker stay either way."""
 
     def assert_degraded(self, body: dict[str, Any], *, both: bool) -> None:
-        plain = render()
         tree = render(body=body)
         assert getattr(tree, "id", None) == PAGE_ID
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
@@ -2148,6 +2171,7 @@ class TestC7Degraded:
             assert find(tree, ELECTORS) is None
             assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is not None
         else:
+            plain = render()
             assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is None
             assert_column_unavailable(
                 tree,
@@ -2304,7 +2328,7 @@ def popular_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class TestC10:
-    def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
+    def test_it_is_registered_on_the_history_page_with_the_shared_table(self) -> None:
         assert charts.CHARTS["C10"] == charts.Chart(
             "/state/<usps>", TOTALS, short_value_ticks=True
         )
@@ -2792,6 +2816,58 @@ class TestC10Degraded:
         coverage["pv_year_min"], coverage["pv_year_max"] = window
         with pytest.raises(TypeError):
             render(body=body)
+
+    @pytest.mark.parametrize("bound", ["pv_year_min", "pv_year_max"])
+    @pytest.mark.parametrize(
+        "query", ["", "year_from=1824&year_to=1824&pv_status=popular_vote"]
+    )
+    def test_a_missing_window_bound_degrades_the_page_in_every_view(
+        self, bound: str, query: str
+    ) -> None:
+        """#629's review, cr.1 (D117 as amended): ``render`` reads both bounds before
+        either half, so a missing one is the page's in every view, T4's empty result
+        included, where the shared table's download preamble would read it anyway."""
+        body = ga_body()
+        del body["meta"]["provenance"]["coverage"][bound]
+        if query:
+            # The view leaves T4 empty (no table, no download), so only the shared
+            # table's preamble would read the window: the case main kept the page in.
+            assert find(render(query), TABLE) is None
+        with pytest.raises(KeyError):
+            render(query, body=body)
+
+    @pytest.mark.parametrize("bound", ["pv_year_min", "pv_year_max"])
+    def test_a_missing_bound_degrades_the_page_where_nothing_else_reads_it(
+        self, bound: str
+    ) -> None:
+        """The mechanism, not only the outcome: with both halves failed (two statuses in
+        1900) there is no shared table, and T4's view is empty, so no download
+        preamble reads the window; only ``render``'s own read makes a missing bound the
+        page's (D117 as amended)."""
+        query = "year_from=1824&year_to=1824&pv_status=popular_vote"
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["pv_status"] = "legislature_chosen"
+        kept = render(query, body=copy.deepcopy(body))
+        assert getattr(kept, "id", None) == PAGE_ID
+        assert find(kept, ELECTORS) is None and find(kept, TABLE) is None
+        del body["meta"]["provenance"]["coverage"][bound]
+        with pytest.raises(KeyError):
+            render(query, body=body)
+
+    def test_a_malformed_window_with_t4_empty_degrades_c10_alone(self) -> None:
+        """#629's review, cr.1: a bound that is present and malformed stays C10's half's
+        to refuse, so the page, C7 and the shared table stay in a view T4 shows
+        nothing in."""
+        body = ga_body()
+        coverage = body["meta"]["provenance"]["coverage"]
+        coverage["pv_year_min"], coverage["pv_year_max"] = (2000, 1990)
+        tree = render("year_from=1824&year_to=1824&pv_status=popular_vote", body=body)
+        assert getattr(tree, "id", None) == PAGE_ID
+        assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
+        assert c7_figure(tree) is not None
+        assert find(tree, ELECTORS) is not None
+        assert set(column(tree, "state_popular_total")) == {""}
 
     def test_a_row_without_the_total(self) -> None:
         body = ga_body()

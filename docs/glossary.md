@@ -1493,13 +1493,21 @@ articles and announcements). Every rule binds all three unless the rule states a
   hold one, and trying again in a minute may show it. Different from *Not in this dataset*.
 - **Precise:** One string, `labels.UNAVAILABLE_CELL` (moved from `T1_N1_UNAVAILABLE_CELL`,
   `pages/elections.py`, unchanged), in every cell of a column whose source could not be read or
-  checked in this render: T1's N1 columns on `/elections` (#563, D116(e)), and on
-  `/state/<usps>` the electors column or the total popular vote column of the table C7 and C10
-  share (#618, D117). Each use comes with a table note naming the column, which also says that in
-  the download its cells are empty because they were not read, not because the dataset has no
-  value.
-- **Shown as:** `labels.UNAVAILABLE_CELL`; the notes `T1_N1_UNAVAILABLE_NOTE` (`pages/elections.py`),
-  `ELECTORS_UNAVAILABLE_NOTE` and `TOTALS_UNAVAILABLE_NOTE` (`pages/state.py`).
+  checked in this render. Its uses, each with the note it comes with or none: on `/elections`
+  (#563, D116(e)), in tier 1 (N1 cannot be read or fails its checks), all five of T1's N1
+  columns, with `T1_N1_UNAVAILABLE_NOTE` first among T1's notes, which names the five columns and
+  says that in the download the four of them it carries have empty cells because they were not
+  read right now, not because the dataset holds no value there; on `/elections`, in tier 2 (a
+  recipient row fails its check, or a year's rows do not match its `candidate_count`), T1's
+  Recipients column only, with no note, since Recipients is shown on the page only and has no
+  download column; and on `/state/<usps>` (#618, D117), the electors column or the total popular
+  vote column of the table C7 and C10 share, each with its own note first among the table's
+  (`ELECTORS_UNAVAILABLE_NOTE`, `TOTALS_UNAVAILABLE_NOTE`), which names the column and says that
+  in the download its cells are empty because they were not read, not because the dataset has
+  no value.
+- **Shown as:** `labels.UNAVAILABLE_CELL`; the notes `T1_N1_UNAVAILABLE_NOTE` (`pages/elections.py`,
+  tier 1 only; tier 2 has no note), `ELECTORS_UNAVAILABLE_NOTE` and `TOTALS_UNAVAILABLE_NOTE`
+  (`pages/state.py`).
 - **Source:** #563 (owner decision at its plan gate, 2026-11-22); #618 (owner's ruling,
   2026-11-23); reader wording: `ba` spec for #618, approved by the owner at its plan gate
   (2026-11-23).
@@ -2124,8 +2132,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   no electors (its allotment was 0) is marked that way too. A table below it and the total popular vote chart holds its numbers beside the state's total popular vote, with one download for both. The page's year, candidate and popular-vote filters narrow only the table
   of each candidate's electoral votes, never this chart or its table.
 - **Precise:** `CHARTS["C7"]` on `/state/<usps>`, id `c7`, companion table `state-electors`, shared with C10 since #618 (fields `year`, `state_electoral_votes`, `pv_status`, `state_popular_total`; CSV extra `state_usps`). One point per served year,
-  collapsed from `/v1/states/{usps}` rows (one per candidate per year); rows of one year that
-  disagree on the allotment or status make the section unavailable. Its values equal C4's one-state
+  collapsed from `/v1/states/{usps}` rows (one per candidate per year); the rows of one year must agree on the allotment and on the status, and what a disagreement removes is set out below. Its values equal C4's one-state
   series for the same state. Bars, markers, symbols, the key and the year axis are C4's (D100,
   D104). Never filtered and no selection trace (D093(a)). If the series cannot be built because of a fault only C7 reads (a year's allotments disagree), the chart and the headline figures give way to `C7_UNAVAILABLE` after the heading, and the table's electors column reads *Not available right now* with `ELECTORS_UNAVAILABLE_NOTE` first among its notes, while C10, its column, T4, the filters and the success marker stay. A fault C10 also reads (a year's `pv_status`, a year missing after the state's first, the state's name with no text) shows `C7_UNAVAILABLE` and `C10_UNAVAILABLE` and, under the table heading, `ELECTORS_TOTALS_TABLE_UNAVAILABLE`, with no table (D117, amending D113(a), (c)).
   Bars `--chart-ec`; the key above the plot (#593).
@@ -2138,7 +2145,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   and `EcPvRow.pv_status` on `/v1/states/{usps}`; reader wording: `ba` spec for #560, approved by
   the owner at its plan gate (2026-11-18); #618 (one table, owner's ruling 2026-11-23; D117); reader wording: `ba` spec for #618, approved by the owner at its plan gate (2026-11-23).
 - **Not:** electoral votes cast or counted; anything the page's filters narrow; the *Degraded state*
-  (a failed C7 is its section's own sentence, and the page stays); a second definition of C4's
+  (a C7 that cannot be built shows its own sentence in its place and the page stays; only a fault T4 also reads, such as a missing allotment, degrades the page); a second definition of C4's
   series (same values, another page).
 - **Status:** settled
 

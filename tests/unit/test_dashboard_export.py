@@ -2892,7 +2892,8 @@ SERVED_ROWS: dict[str, list[Served]] = {
 #: What a chart's section shows when its own read fails, where it has one: C2's (#434),
 #: C4 and C5's (#436), and C7's and C10's sentence in the chart's place, when T4's rows
 #: cannot be read as one allotment (#560) or one total popular vote (#582) per election
-#: (their shared table stays, with that chart's column unavailable, #618).
+#: (their shared table stays, with that chart's column unavailable, unless both fail,
+#: when the table gives way to its own sentence, #618).
 SECTION_UNAVAILABLE = {
     "C2": "elections-leader-unavailable",
     "C4": "elections-over-time-unavailable",
