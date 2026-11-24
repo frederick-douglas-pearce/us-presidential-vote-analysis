@@ -203,7 +203,6 @@ def test_its_ids_are_its_own_and_t4_s_old_ids_are_retired() -> None:
     assert PC_MOD["YEARS_ID"] != MOD["YEARS_ID"]
     for tree in (render(), state_tests.render()):
         assert not set(RETIRED_IDS) & component_ids(tree)
-        assert not {f"{i}-glossary" for i in RETIRED_IDS} & component_ids(tree)
 
 
 # --- the Georgia acceptance criterion ------------------------------------------------

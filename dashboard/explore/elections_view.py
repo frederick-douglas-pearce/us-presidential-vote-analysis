@@ -49,8 +49,9 @@ def section_nav(current: str, search: str) -> html.Nav:
     """The links between the three elections pages (#562), in page order, on D092's
     pattern: the page being read is text carrying ``aria-current="page"`` (a
     ``dcc.Link`` renders no ``aria-*``), the other two client-side links carrying
-    ``search``, the filters the render applied (#596, D110, as a state's two pages
-    carry the year range, D105), from :func:`applied_search`, never the request.
+    ``search``, the filters the render applied (#596, D110, as a state's results and
+    per-capita pages carry the year range, D105, D118), from :func:`applied_search`,
+    never the request.
     Rendered on success only."""
     aria_current: dict[str, Any] = {"aria-current": "page"}
     entries = [

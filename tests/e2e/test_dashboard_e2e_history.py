@@ -291,8 +291,13 @@ def test_a_state_s_three_pages_are_one_client_side_chain(page: Page) -> None:
 def test_an_old_filtered_history_link_lands_on_the_results_page(page: Page) -> None:
     """#619 (D092's ``moved=``, D118): a document load of a history link naming T4's
     candidate filter is answered 302 to the results page, the year range riding
-    along, and T4 shows the filtered rows."""
-    page.goto(f"{STATE_PATH}?year_from=1860&candidate=horatio-seymour")
+    along, and T4 shows the filtered rows. The move fires only once the roster is
+    cached (D118(d)), so the test warms it first rather than relying on an earlier
+    test's visit."""
+    page.goto("/states")  # the picker reads the roster, as the index judges by
+    page.locator("#states").wait_for()
+    response = page.goto(f"{STATE_PATH}?year_from=1860&candidate=horatio-seymour")
+    assert response is not None and response.request.redirected_from is not None
     assert_state_page(
         page,
         state_view.RESULTS,

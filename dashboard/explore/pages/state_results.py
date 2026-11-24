@@ -74,9 +74,12 @@ EXTRA = (
 )
 
 #: The query keys this page reads besides the shared year range: the API's filter name
-#: for a candidate, and the field name of the closed popular-vote vocabulary. They are
-#: :data:`explore.state_view.MOVED_KEYS`, which the history page moves here (D118).
-CANDIDATE, PV_STATUS = state_view.MOVED_KEYS
+#: for a candidate, and the field name of the closed popular-vote vocabulary. Named
+#: here, not read from :data:`explore.state_view.MOVED_KEYS` (the history page's
+#: redirect list, D118), so a change to that list never swaps this page's parser;
+#: ``test_the_page_is_registered_as_planned`` pins that the two agree.
+CANDIDATE = "candidate"
+PV_STATUS = "pv_status"
 
 #: The not-found state (#325), shared by the three state pages (#559, #619).
 NOT_FOUND = api.NotFound(

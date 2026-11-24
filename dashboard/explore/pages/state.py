@@ -51,7 +51,7 @@ PAGE_ID = "state"
 #: The wrapper of the not-found state: a code the dataset does not serve, or a section
 #: the site does not have (``/state/GA/x``).
 NOT_FOUND_ID = "state-not-found"
-#: T4's ids here (``state-history``, its download and column-name list, and the
+#: T4's ids here (``state-history``, its download's ``state-history-csv``, and the
 #: filters' ``state-url``, ``state-years``, ``state-candidate`` and
 #: ``state-pv-status``) are retired with T4's move, never reused (D097(g), D118).
 

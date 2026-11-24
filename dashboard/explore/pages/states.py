@@ -5,8 +5,8 @@ The roster comes from the latest election's rows, ``/v1/elections/{year_max}``
 no second copy of it (D006). ``year_max`` is read from the prefetched ``/v1/elections``
 and checked to be the latest year it serves (:func:`explore.api.coverage_vars`), never
 from the request. The roster is filled on a miss and shared with every
-``/state/<usps>`` page and its ``/per-capita`` page, which validate the code against
-it.
+``/state/<usps>`` page and its ``/elections`` and ``/per-capita`` pages, which validate
+the code against it.
 """
 
 from __future__ import annotations

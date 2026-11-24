@@ -2726,7 +2726,8 @@ class TestSectionLinks:
     @pytest.mark.parametrize("path", list(ELECTIONS_PAGES))
     def test_each_page_s_links_carry_the_filters_it_applied(self, path: str) -> None:
         """#596 (D110): the section links carry the filters the render applied, in
-        their normal form, as a state's two pages carry the year range (D105); an
+        their normal form, as a state's results and per-capita pages carry the year
+        range (D105, D118); an
         out-of-span bound falls back and is not carried."""
         page = dash.page_registry[ELECTIONS_PAGES[path]]
         own = page["layout"].__globals__
