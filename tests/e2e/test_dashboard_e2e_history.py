@@ -1,11 +1,14 @@
-"""Browser tests of the state history's, the state's people per electoral vote page's
-(#559) and the candidate page's wide layout (#545, D102): from 76rem a year control
-keeps a row of its own at the 42rem measure (``.filter-own-row``) and the dropdown
-filters share the row below it (``.filter-row``); below 76rem each page is the one
-column it always was. And a state's two pages as one client-side chain (#559, D105):
-the section links move between them carrying the year range, with the URL, tab and
-marks following, and back and forward; an unserved state or an unknown section reads
-as not found. And charts C7 (#560, D106) and C10 (#582, D113) on the state history:
+"""Browser tests of the state pages' and the candidate page's wide layout (#545, D102):
+on a state's results by election (T4, its own page since #619), its people per
+electoral vote (#559) and the candidate page, from 76rem a year control keeps a row of
+its own at the 42rem measure (``.filter-own-row``) and the dropdown filters share the
+row below it (``.filter-row``); below 76rem each page is the one column it always was;
+the state history has no filter since #619 (D118). And a state's three pages as one
+client-side chain (#559, #619; D105, D118): the section links move between them, the
+subpages' carrying the year range applied and the history's none, with the URL, tab
+and marks following, and back and forward; an old filtered history link lands on the
+results page with its filters; an unserved state or an unknown section reads as not
+found. And charts C7 (#560, D106) and C10 (#582, D113) on the state history:
 readable at phone width with the year along the bottom, their plots aligned at every
 width, redrawn on a theme switch with no request, and their titles, captions and
 tables left when plotly.js cannot load.
@@ -33,6 +36,7 @@ from tests.e2e.dashboard_pages import (
     PHONE_WIDTHS,
     RESOURCE_ERROR,
     STATE_PER_CAPITA_SUCCESS,
+    STATE_RESULTS_SUCCESS,
     STATE_SUCCESS,
     UNAVAILABLE,
     WIDE_WIDTHS,
@@ -52,29 +56,29 @@ from tests.e2e.test_dashboard_e2e_elections_over_time import assert_band_label_i
 pytestmark = pytest.mark.e2e
 
 STATE_PATH = "/state/GA"
+RESULTS_PATH = "/state/GA/elections"
 PER_CAPITA_PATH = "/state/GA/per-capita"
 CANDIDATE_PATH = "/candidate/andrew-jackson"
 #: Each page's success marker and its tables, which must be on it before their scroll
-#: is checked, the table its filters narrow first: T4 on the state history, then C7's
-#: and C10's one companion table above its filters (#560, #582, #618); T7 on its
-#: per-capita page (#559); T5 on the candidate page.
+#: is checked, the table its filters narrow first: C7's and C10's one companion table
+#: on the state history, which has no filter (#560, #582, #618, #619); T4 on its
+#: results page (#619); T7 on its per-capita page (#559); T5 on the candidate page.
 PAGES = {
-    STATE_PATH: (
-        STATE_SUCCESS,
-        ("#state-history", "#state-electors"),
-    ),
+    STATE_PATH: (STATE_SUCCESS, ("#state-electors",)),
+    RESULTS_PATH: (STATE_RESULTS_SUCCESS, ("#state-results",)),
     PER_CAPITA_PATH: (STATE_PER_CAPITA_SUCCESS, ("#state-per-capita",)),
     CANDIDATE_PATH: (CANDIDATE_SUCCESS, ("#candidate-history",)),
 }
-#: Each page's year control itself: the slider by its id, the pills' radio group.
+#: Each filtered page's year control itself: the slider by its id, the pills' radio
+#: group.
 CONTROLS = {
-    STATE_PATH: "#state-years",
+    RESULTS_PATH: "#state-results-years",
     PER_CAPITA_PATH: "#state-per-capita-years",
     CANDIDATE_PATH: "#candidate-year",
 }
-#: Each page's dropdown filters, in source order: none on the per-capita page.
+#: Each filtered page's dropdown filters, in source order: none on the per-capita page.
 DROPDOWNS = {
-    STATE_PATH: ("#state-candidate", "#state-pv-status"),
+    RESULTS_PATH: ("#state-results-candidate", "#state-results-pv-status"),
     PER_CAPITA_PATH: (),
     CANDIDATE_PATH: ("#candidate-state",),
 }
@@ -111,7 +115,7 @@ def dropdown_filters(page: Page, path: str) -> list[dict[str, float]]:
 
 
 @pytest.mark.parametrize("width", WIDE_WIDTHS)
-@pytest.mark.parametrize("path", [STATE_PATH, CANDIDATE_PATH])
+@pytest.mark.parametrize("path", [RESULTS_PATH, CANDIDATE_PATH])
 def test_wide_the_year_control_has_its_own_row_and_the_dropdowns_follow(
     page: Page, path: str, width: int
 ) -> None:
@@ -160,7 +164,7 @@ def test_wide_the_per_capita_page_s_year_control_has_its_own_row_above_t7(
 
 
 @pytest.mark.parametrize("width", [390, NARROW_DESKTOP])
-@pytest.mark.parametrize("path", [STATE_PATH, PER_CAPITA_PATH, CANDIDATE_PATH])
+@pytest.mark.parametrize("path", [RESULTS_PATH, PER_CAPITA_PATH, CANDIDATE_PATH])
 def test_narrow_the_filters_stack_as_before(
     page: Page, path: str, width: int
 ) -> None:
@@ -177,7 +181,9 @@ def test_narrow_the_filters_stack_as_before(
 
 
 @pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, *PHONE_WIDTHS])
-@pytest.mark.parametrize("path", [STATE_PATH, PER_CAPITA_PATH, CANDIDATE_PATH])
+@pytest.mark.parametrize(
+    "path", [STATE_PATH, RESULTS_PATH, PER_CAPITA_PATH, CANDIDATE_PATH]
+)
 def test_every_width_keeps_order_measure_and_tables(
     page: Page, path: str, width: int
 ) -> None:
@@ -188,19 +194,33 @@ def test_every_width_keeps_order_measure_and_tables(
     assert_layout_holds(page, success, PAGES[path][1], width)
 
 
-# --- a state's two pages as one chain (#559, D105) -------------------------------------
+@pytest.mark.plotlyjs_fetches(1)
+def test_the_state_history_shows_no_filter_and_no_t4(page: Page) -> None:
+    """T4 and its filters left the history for the results page (#619, D118)."""
+    open_at(page, STATE_PATH, 390)
+    for gone in (".filters", "#state-results", "#state-history", "#state-years"):
+        expect(page.locator(gone)).to_have_count(0)
+    expect(page.locator(PAGES[STATE_PATH][1][0])).to_be_visible()
+
+
+# --- a state's three pages as one chain (#559, #619; D105, D118) -----------------------
 
 #: Each state page's path suffix, success marker and tab title before the site title.
 STATE_PAGES = {
     state_view.HISTORY: (STATE_SUCCESS, "GA — state history"),
+    state_view.RESULTS: (STATE_RESULTS_SUCCESS, "GA — results by election"),
     state_view.PER_CAPITA: (STATE_PER_CAPITA_SUCCESS, "GA — people per electoral vote"),
 }
 
 
-def assert_state_page(page: Page, section: str, search: str) -> None:
+def assert_state_page(
+    page: Page, section: str, search: str, carried: str | None = None
+) -> None:
     """GA's page ``section`` with exactly ``search``: its URL, success marker, tab,
-    the section mark on it and the link to the other carrying ``search``, and the
-    site navigation marking States (#448)."""
+    the section mark on it and the links to the other two, in page order, each
+    carrying the year range the page applied (``carried``, by default ``search`` on a
+    subpage and nothing on the history, which applies none, D118), and the site
+    navigation marking States (#448)."""
     success, title = STATE_PAGES[section]
     expect(page).to_have_url(
         re.compile(re.escape(f"{state_view.path('GA', section)}{search}") + "$")
@@ -213,46 +233,82 @@ def assert_state_page(page: Page, section: str, search: str) -> None:
     expect(nav.locator('[aria-current="page"]')).to_have_text(
         state_view.SECTION_TEXT[section]
     )
-    (other,) = [s for s in state_view.SECTIONS if s != section]
-    link = nav.get_by_role("link")
-    expect(link).to_have_count(1)
-    expect(link).to_have_text(state_view.SECTION_TEXT[other])
-    expect(link).to_have_attribute("href", f"{state_view.path('GA', other)}{search}")
+    others = [s for s in state_view.SECTIONS if s != section]
+    if carried is None:
+        carried = "" if section == state_view.HISTORY else search
+    links = nav.get_by_role("link")
+    expect(links).to_have_count(len(others))
+    expect(links).to_have_text([state_view.SECTION_TEXT[o] for o in others])
+    for i, other in enumerate(others):
+        expect(links.nth(i)).to_have_attribute(
+            "href", f"{state_view.path('GA', other)}{carried}"
+        )
     expect(page.locator(f"#{components.SITE_NAV_ID} [aria-current=true]")).to_have_text(
         labels.NAV_STATES
     )
 
 
-def test_a_state_s_two_pages_are_one_client_side_chain_keeping_the_year_range(
-    page: Page,
-) -> None:
-    """#559: from a filtered history, the section link opens the per-capita page with
-    the year range only (the candidate filter dropped, D105), showing T7 and not T4;
-    the link back carries the range; back and forward follow, with no document load
-    in between."""
-    page.goto(f"{STATE_PATH}?year_from=1860&year_to=1900&candidate=horatio-seymour")
-    page.locator(STATE_SUCCESS).wait_for()
+def test_a_state_s_three_pages_are_one_client_side_chain(page: Page) -> None:
+    """#559, #619: from a filtered results page, the section link opens the
+    per-capita page with the year range only (the candidate filter dropped, D105),
+    showing T7 and not T4; its history link carries the range, and the history's
+    links carry none (it applies none, D118); back and forward follow, with no
+    document load in between."""
+    filtered = "?candidate=horatio-seymour&year_from=1860&year_to=1900"
+    ranged = "?year_from=1860&year_to=1900"
+    page.goto(f"{RESULTS_PATH}{filtered}")
+    assert_state_page(page, state_view.RESULTS, filtered, ranged)
+    # T4 narrowed to the candidate's rows in the range: 1868 alone.
+    expect(page.locator("#state-results tbody tr")).to_have_count(1)
     expect(page.locator("#state-per-capita")).to_have_count(0)
     page.evaluate("window.__e2e_mark = 1")
     nav = page.get_by_role("navigation", name=labels.STATE_SECTIONS_LABEL)
     nav.get_by_role("link", name=labels.SECTION_PER_CAPITA).click()
-    ranged = "?year_from=1860&year_to=1900"
     assert_state_page(page, state_view.PER_CAPITA, ranged)
-    expect(page.locator("#state-history")).to_have_count(0)
+    expect(page.locator("#state-results")).to_have_count(0)
     # T7 narrowed to the range: 1860 to 1900 is eleven elections.
     expect(page.locator("#state-per-capita tbody tr")).to_have_count(11)
     nav.get_by_role("link", name=labels.SECTION_STATE_HISTORY).click()
+    assert_state_page(page, state_view.HISTORY, ranged)
+    expect(page.locator("#state-results")).to_have_count(0)
+    expect(page.locator("#state-per-capita")).to_have_count(0)
+    nav.get_by_role("link", name=labels.SECTION_RESULTS_BY_ELECTION).click()
+    assert_state_page(page, state_view.RESULTS, "")
+    # Unfiltered: every recorded row of Georgia's, more than one per election.
+    expect(page.locator("#state-results tbody tr").first).to_be_visible()
+    assert page.locator("#state-results tbody tr").count() > len(served_years())
+    page.go_back()
     assert_state_page(page, state_view.HISTORY, ranged)
     page.go_back()
     assert_state_page(page, state_view.PER_CAPITA, ranged)
     page.go_forward()
     assert_state_page(page, state_view.HISTORY, ranged)
+    page.go_forward()
+    assert_state_page(page, state_view.RESULTS, "")
     assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
+
+
+def test_an_old_filtered_history_link_lands_on_the_results_page(page: Page) -> None:
+    """#619 (D092's ``moved=``, D118): a document load of a history link naming T4's
+    candidate filter is answered 302 to the results page, the year range riding
+    along, and T4 shows the filtered rows."""
+    page.goto(f"{STATE_PATH}?year_from=1860&candidate=horatio-seymour")
+    assert_state_page(
+        page,
+        state_view.RESULTS,
+        "?candidate=horatio-seymour&year_from=1860",
+        "?year_from=1860",
+    )
+    rows = page.locator("#state-results tbody tr")
+    expect(rows).to_have_count(1)
+    expect(rows.first).to_contain_text("Horatio Seymour")
+    expect(page.locator(STATE_SUCCESS)).to_have_count(0)
 
 
 @pytest.mark.parametrize(
     ("path", "not_found"),
     [
+        ("/state/ZZ/elections", "#state-results-not-found"),
         ("/state/ZZ/per-capita", "#state-per-capita-not-found"),
         ("/state/GA/x", "#state-not-found"),
     ],
@@ -274,7 +330,7 @@ def test_an_unserved_state_or_an_unknown_section_reads_as_not_found(
     expect(page.get_by_role("heading", level=1)).to_have_text(
         labels.STATE_NOT_FOUND_HEADING
     )
-    for marker in (STATE_SUCCESS, STATE_PER_CAPITA_SUCCESS):
+    for marker in (STATE_SUCCESS, STATE_RESULTS_SUCCESS, STATE_PER_CAPITA_SUCCESS):
         expect(page.locator(marker)).to_have_count(0)
     expect(
         page.get_by_role("navigation", name=labels.STATE_SECTIONS_LABEL)
@@ -398,9 +454,12 @@ def test_c7_and_c10_plots_stay_aligned_when_wide(page: Page, width: int) -> None
 
 
 @pytest.mark.plotlyjs_fetches(1)
-def test_c7_and_c10_ignore_the_filters(page: Page) -> None:
-    """D093(a): the page's filters narrow T4, never C7, C10 or their tables."""
-    open_charts(page, "?year_from=1900&candidate=jimmy-carter")
+def test_c7_and_c10_ignore_the_query(page: Page) -> None:
+    """D093(a), D118: the page reads no filter since T4 left it (#619), so a year
+    range in its URL (the one key not moved) changes neither C7, C10 nor their
+    table."""
+    open_charts(page, "?year_from=1900&year_to=1960")
+    expect(page).to_have_url(re.compile(re.escape(STATE_PATH) + r"\?year_from=1900"))
     for chart, (_, _, _, table, _) in STATE_CHARTS.items():
         ticks = [b["text"] for b in boxes(page, f"{chart} .xtick text")]
         assert ticks == year_ticks(), chart
@@ -448,14 +507,15 @@ def test_with_plotlyjs_blocked_c7_and_c10_s_titles_captions_and_tables_render(
     memo = f"window.{charts.PLOTLYJS_MEMO}"
     page.wait_for_function(f"{memo} !== undefined")
     assert page.evaluate(f"async () => await {memo}") is False
+    bases = {C7: labels.C4_BASIS, C10: labels.C5_BASIS}
     for chart, (title, _, _, table, _) in STATE_CHARTS.items():
         expect(page.locator(f"{chart} .chart-title")).to_have_text(title)
-        expect(page.locator(f"{chart} figcaption")).to_contain_text(
-            labels.C7_FILTERS_NOTE
-        )
+        expect(page.locator(f"{chart} figcaption")).to_contain_text(bases[chart])
+        # No filter sentence since #619 (D118): the page has no filter to name.
+        expect(page.locator(f"{chart} figcaption")).not_to_contain_text("filter")
         expect(page.locator(f"{chart} figcaption a")).to_have_attribute("href", table)
         expect(page.locator(f"{table} tbody tr")).to_have_count(len(served_years()))
-    expect(page.locator("#state-history")).to_be_visible()
+    expect(page.locator("#state-results")).to_have_count(0)
 
 
 # --- the per-capita page's headline figures (#600, D112(d)) ---------------------------

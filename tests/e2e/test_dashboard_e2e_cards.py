@@ -30,6 +30,7 @@ from tests.e2e.dashboard_pages import (
     PER_CAPITA_SUCCESS,
     PHONE_WIDTHS,
     STATE_PER_CAPITA_SUCCESS,
+    STATE_RESULTS_SUCCESS,
     STATE_SUCCESS,
     STATES_SUCCESS,
     WIDE_WIDTHS,
@@ -50,7 +51,9 @@ CARD_PAGES: dict[str, tuple[str, int]] = {
     "/election/2016": (ELECTION_SUCCESS, 1),
     "/election/2016/states": (STATES_SUCCESS, 1),
     "/election/2016/per-capita": (PER_CAPITA_SUCCESS, 1),
-    "/state/GA": (STATE_SUCCESS, 2),  # C7 and C10 with their one table (#618), T4
+    "/state/GA": (STATE_SUCCESS, 1),  # C7 and C10 with their one table (#618)
+    # T4, on its own page since #619.
+    "/state/GA/elections": (STATE_RESULTS_SUCCESS, 1),
     "/state/GA/per-capita": (STATE_PER_CAPITA_SUCCESS, 1),
     "/candidate/andrew-jackson": (CANDIDATE_SUCCESS, 1),
 }
@@ -169,10 +172,10 @@ def test_every_width_keeps_order_measure_and_tables(
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_forced_colors_keep_each_card_s_rules(page: Page, scheme: str) -> None:
-    """In both forced palettes (Chromium's emulation), each of the state history's two
-    cards (C7 and C10 with their one table since #618, and T4's) keeps a solid top and
-    bottom rule at least 1 px wide, at 3:1 against the page's backdrop: the edge stays
-    visible rather than being lost."""
+    """In both forced palettes (Chromium's emulation), the state history's one card
+    (C7 and C10 with their one table since #618; T4's left with #619) keeps a solid top
+    and bottom rule at least 1 px wide, at 3:1 against the page's backdrop: the edge
+    stays visible rather than being lost."""
     page.emulate_media(color_scheme=scheme, forced_colors="active")  # type: ignore[arg-type]
     open_page(page, "/state/GA", 390)
     painted = page.evaluate(
@@ -189,7 +192,7 @@ def test_forced_colors_keep_each_card_s_rules(page: Page, scheme: str) -> None:
             backdrop: getComputedStyle(document.body).backgroundColor,
         })"""
     )
-    assert len(painted["cards"]) == 2, painted
+    assert len(painted["cards"]) == 1, painted
     for card in painted["cards"]:
         for width, style, color in (card["top"], card["bottom"]):
             assert width >= 1 and style == "solid", painted

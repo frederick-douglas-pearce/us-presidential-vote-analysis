@@ -823,7 +823,9 @@ and check 3 on the roster as well as the state.
 Since #559 (D105) T7 is a page of its own, `/state/<usps>/per-capita`: the history page fills
 the roster and `/v1/states/{usps}` only, and the per-capita page the roster and
 `/v1/states/{usps}/per-capita`, so a state link now makes at most two fills, and one once the
-roster is cached. The measurement below was taken before that split and is kept as measured.
+roster is cached. Since #619 (D118) T4 is a page of its own too, `/state/<usps>/elections`,
+which fills the same two paths as the history page, so a visit to either after the other makes
+no fill. The measurement below was taken before both splits and is kept as measured.
 
 The method is [cold year links](#cold-year-links-310)' with state paths in place of year
 paths: check 3 on `api fetch /v1/states/<USPS>`, the edge-cold pre-check on

@@ -1,8 +1,10 @@
-"""The state pages' shared pieces (#559).
+"""The state pages' shared pieces (#559, #619).
 
-Each state has two pages: its history at ``/state/<usps>`` (``pages/state.py``, T4)
-and its people per electoral vote at ``/state/<usps>/per-capita``
-(``pages/state_per_capita.py``, T7), split as the election pages were (D092, #465). A
+Each state has three pages: its history at ``/state/<usps>`` (``pages/state.py``, C7
+and C10), its results by election at ``/state/<usps>/elections``
+(``pages/state_results.py``, T4) and its people per electoral vote at
+``/state/<usps>/per-capita`` (``pages/state_per_capita.py``, T7), split as the
+election pages were (D092, #465; D105, D118). A
 page module cannot import another (Dash executes it before it is in ``sys.modules``),
 so what they share lives here, as :mod:`explore.election_view` holds the election
 pages' pieces: the section suffixes, the roster reading and the judge built on it,
@@ -25,18 +27,26 @@ from dash import dcc, html
 
 from explore import labels, query
 
-#: The state pages' path suffixes, in page order (#559): the history and the people
-#: per electoral vote. The single source for each page's path template, the section
-#: links and each download's view URL.
+#: The state pages' path suffixes, in page order (#559, #619): the history, the
+#: results by election and the people per electoral vote. The single source for each
+#: page's path template, the section links and each download's view URL.
 HISTORY = ""
+RESULTS = "/elections"
 PER_CAPITA = "/per-capita"
-SECTIONS = (HISTORY, PER_CAPITA)
+SECTIONS = (HISTORY, RESULTS, PER_CAPITA)
 
 #: Each section's link text, by suffix.
 SECTION_TEXT = {
     HISTORY: labels.SECTION_STATE_HISTORY,
+    RESULTS: labels.SECTION_RESULTS_BY_ELECTION,
     PER_CAPITA: labels.SECTION_PER_CAPITA,
 }
+
+#: The history page's query keys that T4 took with it to the results page (#619,
+#: D118): an old ``/state/<usps>?candidate=…`` or ``?pv_status=…`` link answers 302 to
+#: :data:`RESULTS` (D092's ``moved=``). The year range is not moved: the section links
+#: write it on every state page's URL, and the history page is to read it (#620).
+MOVED_KEYS = ("candidate", "pv_status")
 
 
 def template(section: str) -> str:
@@ -162,12 +172,12 @@ def year_search(year_from: int, year_to: int, span: tuple[int, int]) -> str:
 
 
 def section_nav(usps: str, current: str, search: str) -> html.Nav:
-    """The links between the state's two pages (#559), in page order: the page being
-    read is text carrying ``aria-current="page"`` (a ``dcc.Link`` renders no
-    ``aria-*``, and a link to itself would be no link), the other a client-side link
+    """The links between the state's three pages (#559, #619), in page order: the page
+    being read is text carrying ``aria-current="page"`` (a ``dcc.Link`` renders no
+    ``aria-*``, and a link to itself would be no link), the others client-side links
     carrying ``search``, the year range the render applied and nothing else (the
-    election pages' section links carry no filter; both state pages read the year
-    range, D105)."""
+    election pages' section links carry no filter; D105). The history page applies no
+    year range until #620, so its ``search`` is ``""`` (D118)."""
     aria_current: dict[str, Any] = {"aria-current": "page"}
     entries = [
         html.Span(SECTION_TEXT[section], **aria_current)
@@ -182,7 +192,7 @@ def section_nav(usps: str, current: str, search: str) -> html.Nav:
 def not_found(content_id: str) -> html.Div:
     """A link that names no page of a state the dataset serves: said plainly, with the
     way back, under :data:`explore.labels.STATE_NOT_FOUND_HEADING` and no lede (#325),
-    the same on both state pages; ``content_id`` is the page's own not-found id."""
+    the same on every state page; ``content_id`` is the page's own not-found id."""
     return html.Div(
         [
             html.P(labels.STATE_NOT_FOUND_SENTENCE),

@@ -50,8 +50,8 @@ first, so its render makes the success run's first fills on a miss,
 election pages (#307, #465) make the next ones, :data:`ELECTION_MISSES`, rendered at
 1824: the overview, ``/election/<year>``, reads :data:`MISS_PATH` on a miss, the
 per-capita page its table (#280) and the states page nothing more, each render's own
-slice checked (:data:`ELECTION_PAGE_MISSES`, and the two state pages' likewise,
-:data:`STATE_PAGE_MISSES`, #559), through the render-scoped view pages use;
+slice checked (:data:`ELECTION_PAGE_MISSES`, and the three state pages' likewise,
+:data:`STATE_PAGE_MISSES`, #559, #619), through the render-scoped view pages use;
 the elections index then fills N1 for its averages, which C2's and C4 and C5's pages
 find cached, :data:`ELECTIONS_MISSES` (#434, #437, #562); the run checks every named miss, in some registered page's ``on_miss`` and in
 the snapshot. It validates the year from the
@@ -147,10 +147,9 @@ DOWNLOAD_IDS_BY_PAGE = {
     "/election/<year>": ("election-nation-csv",),
     "/election/<year>/states": ("election-states-csv",),
     "/election/<year>/per-capita": ("election-per-capita-csv",),
-    "/state/<usps>": (
-        "state-electors-csv",
-        "state-history-csv",
-    ),
+    "/state/<usps>": ("state-electors-csv",),
+    # T4's download, on its own page since #619 (``state-history-csv`` is retired).
+    "/state/<usps>/elections": ("state-results-csv",),
     "/state/<usps>/per-capita": ("state-per-capita-csv",),
     "/candidate/<slug>": ("candidate-history-csv",),
 }
@@ -211,10 +210,12 @@ STATE_MISSES = ["/v1/elections/2024", "/v1/states/GA", "/v1/states/GA/per-capita
 #: The same fills by page (#559), each render's own slice of ``SERVED`` as
 #: :data:`ELECTION_PAGE_MISSES` is: the history page the roster and its rows and never
 #: T7's path, which the flat order above cannot show, since ``/state/GA`` sorts before
-#: ``/state/GA/per-capita`` either way; the per-capita page T7's rows alone, the roster
-#: already filled.
+#: ``/state/GA/per-capita`` either way; the results page (#619), which sorts between
+#: them, nothing, since it reads the history's rows, already filled; the per-capita
+#: page T7's rows alone, the roster already filled.
 STATE_PAGE_MISSES = {
     "/state/<usps>": ["/v1/elections/2024", "/v1/states/GA"],
+    "/state/<usps>/elections": [],
     "/state/<usps>/per-capita": ["/v1/states/GA/per-capita"],
 }
 
@@ -648,6 +649,7 @@ for section, marker, not_found in (
 # (the history page's greedy <usps>) fails here.
 for section, marker, not_found in (
     ("", "state", "state-not-found"),
+    ("/elections", "state-results-page", "state-results-not-found"),
     ("/per-capita", "state-per-capita-page", "state-per-capita-not-found"),
 ):
     text = route(client, "/state/ZZ" + section)

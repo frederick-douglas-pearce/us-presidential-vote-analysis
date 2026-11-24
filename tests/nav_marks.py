@@ -62,6 +62,9 @@ MARKS: dict[str, tuple[str, str] | None] = {
     # does not have, which reaches the history page.
     "/state/GA/per-capita": ("states", "true"),
     "/state/ZZ/per-capita": ("states", "true"),
+    # A state's results by election (#619), served or not.
+    "/state/GA/elections": ("states", "true"),
+    "/state/ZZ/elections": ("states", "true"),
     "/state/GA/x": ("states", "true"),
     "/candidate/andrew-jackson": None,
     "/not-found-404": None,

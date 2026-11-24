@@ -46,7 +46,9 @@ TABLES = {
     "election-states": "/election/<year>/states",
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
-    "state-history": "/state/<usps>",
+    # T4, on a page of its own since #619 (D118); its id there is new, and
+    # ``state-history`` is retired (D097(g)).
+    "state-results": "/state/<usps>/elections",
     # Charts C7's and C10's one companion table (#560, #582, #618).
     "state-electors": "/state/<usps>",
     # T7 has a page of its own since #559.
@@ -90,6 +92,13 @@ READS_BEFORE = {
         "/v1/elections",
         "/v1/states/GA/per-capita",
     ],
+    # #619 moved T4 to a page of its own, which reads what the history page reads.
+    "/state/<usps>/elections": [
+        "/v1/elections",
+        "/v1/elections/2024",
+        "/v1/elections",
+        "/v1/states/GA",
+    ],
     "/states": ["/v1/elections", "/v1/elections/2024"],
     "/candidate/<slug>": [
         "/v1/candidates",
@@ -117,7 +126,8 @@ FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 
 #: Every callback output once Dash has registered them all, before and after #309: the
 #: Pages router's two, each filtered page's URL (the election per-capita page's since
-#: #465, the state per-capita page's since #559), the theme callback's store and its
+#: #465, the state per-capita page's since #559, T4's results page's in place of the
+#: state history's since #619), the theme callback's store and its
 #: three buttons' pressed states (#359, #447), the site navigation's marker (#448), and
 #: every chart's figure and visibility (#432, one MATCH callback). A download adds none.
 CALLBACK_OUTPUTS = {
@@ -132,7 +142,7 @@ CALLBACK_OUTPUTS = {
     "elections-url.search",
     "election-url.search",
     "election-per-capita-url.search",
-    "state-url.search",
+    "state-results-url.search",
     "state-per-capita-url.search",
     "candidate-url.search",
 }
@@ -499,17 +509,12 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({}, "year_to=1972", "filtered"),
         ({}, "year_from=1700", "absent"),
     ],
-    # #560, D106: the state page's filters narrow T4 only, never C7, C10 (#582) or
-    # their companion tables. Georgia from 1824, with 1864's zero allotment.
+    # #560, D106; #619, D118: the state history reads no filter since T4 left it, so
+    # as the overview's, its entry checks a client-side route carrying one of T4's
+    # moved keys and the year range: C7, C10 (#582) and their one table (#618) are
+    # the unfiltered render's.
     "/state/<usps>": [
-        ({"usps": "GA"}, "year_from=1900", "filtered"),
-        ({"usps": "GA"}, "year_to=1900", "filtered"),
-        ({"usps": "GA"}, "candidate=andrew-jackson", "filtered"),
-        ({"usps": "GA"}, "pv_status=not_participating", "filtered"),
-        ({"usps": "GA"}, "year_from=1900&candidate=jimmy-carter", "filtered"),
-        # A slug Georgia's rows do not hold falls back to every candidate.
-        ({"usps": "GA"}, "candidate=no-such-candidate", "absent"),
-        ({"usps": "GA"}, "year_from=1700", "absent"),
+        ({"usps": "GA"}, "candidate=andrew-jackson&year_from=1900", "filtered"),
     ],
 }
 
@@ -533,11 +538,9 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/elections/over-time": {
         "elections-over-time-table": ("year_from", "year_to", "pv"),
     },
-    # #560: T4 alone; C7's and C10's (#582) companion tables are unlisted, so each
-    # equals the unfiltered render under every query.
-    "/state/<usps>": {
-        "state-history": ("year_from", "year_to", "candidate", "pv_status"),
-    },
+    # The state history (#560, #582) is not listed since #619 (D118): it reads no
+    # filter, so C7's and C10's one companion table equals the unfiltered render
+    # under every query.
 }
 
 #: The query keys that choose a chart's series, by the chart's DOM id (#436, D100): a
@@ -791,6 +794,14 @@ class TestEveryChart:
             shown = table_row_count(tree, row.table)
             assert shown > 0, (key, query, row.table)
             assert shown == table_row_count(plain, row.table), (key, query, row.table)
+            if parser is None:
+                # A page that reads no filter (the overview, the state history since
+                # #619): the whole file, view URL included, is the unfiltered one.
+                assert table_csv(tree, row.table) == table_csv(plain, row.table), (
+                    key,
+                    query,
+                    row.table,
+                )
 
     def test_every_chart_page_with_a_filter_lists_its_queries(self) -> None:
         """#435, D093(c): every live chart page whose page reads filters (a ``query=``
@@ -1312,8 +1323,8 @@ class TestExactlyTheView:
     def test_the_file_follows_the_rows_the_table_shows(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        tree, _ = render("/state/<usps>", monkeypatch, "year_from=1976&year_to=1980")
-        history = download(tree, "state-history")
+        tree, _ = render("/state/<usps>/elections", monkeypatch, "year_from=1976&year_to=1980")
+        history = download(tree, "state-results")
         expected = sorted(
             (r for r in RECORDED["/v1/states/GA"]["data"] if 1976 <= r["year"] <= 1980),
             key=lambda r: (r["year"], str(r["candidate"])),
@@ -1321,7 +1332,7 @@ class TestExactlyTheView:
         assert [(r["year"], r["candidate_slug"]) for r in history.rows] == [
             (str(r["year"]), r["candidate_slug"]) for r in expected
         ]
-        assert len(history.rows) == len(body_rows(tree, "state-history"))
+        assert len(history.rows) == len(body_rows(tree, "state-results"))
         tree, _ = render(
             "/state/<usps>/per-capita", monkeypatch, "year_from=1976&year_to=1980"
         )
@@ -1377,10 +1388,10 @@ class TestExactlyTheView:
             ),
             # A candidate the state never had falls back to "all".
             (
-                "/state/<usps>",
+                "/state/<usps>/elections",
                 "year_from=1976&candidate=no-such-slug",
-                "state-history",
-                "/state/GA?year_from=1976",
+                "state-results",
+                "/state/GA/elections?year_from=1976",
             ),
             # The per-capita page reads the year range only (#559): the history
             # page's keys are dropped, and a bound at the span's end is the default.
@@ -1504,8 +1515,8 @@ class TestExactlyTheView:
                 ("state", *labels.PER_CAPITA_FIELDS, "state_usps", "year"),
             ),
             (
-                "/state/<usps>",
-                "state-history",
+                "/state/<usps>/elections",
+                "state-results",
                 (
                     "year",
                     "candidate",
@@ -1590,7 +1601,7 @@ class TestExactlyTheView:
             "election-states-csv": "election-1824-by-state.csv",
             "election-nation-csv": "election-1824-national.csv",
             "election-per-capita-csv": "election-1824-per-capita.csv",
-            "state-history-csv": "state-GA-history.csv",
+            "state-results-csv": "state-GA-by-election.csv",
             "state-electors-csv": "state-GA-electors-and-total-popular-vote.csv",
             "state-per-capita-csv": "state-GA-per-capita.csv",
             "candidate-history-csv": "candidate-andrew-jackson-history.csv",
@@ -1663,8 +1674,8 @@ class TestNulls:
         the party's per-row source and note travel with it."""
         from usvote.party import NOMINATING_PARTIES, PARTY_SOURCES
 
-        tree, _ = render("/state/<usps>", monkeypatch)
-        history = download(tree, "state-history")
+        tree, _ = render("/state/<usps>/elections", monkeypatch)
+        history = download(tree, "state-results")
         codes = {r["nominating_party"] for r in history.rows} - {""}
         assert codes and codes <= set(NOMINATING_PARTIES)
         assert {r["nominating_party_source"] for r in history.rows} - {""} <= set(
@@ -1687,8 +1698,8 @@ class TestNulls:
                 nominating_party_note=None,
             )
         monkeypatch.setitem(RECORDED, "/v1/states/GA", body)
-        tree, _ = render("/state/<usps>", monkeypatch)
-        history = download(tree, "state-history")
+        tree, _ = render("/state/<usps>/elections", monkeypatch)
+        history = download(tree, "state-results")
         rows = [r for r in history.rows if r["year"] == "1900"]
         assert rows and {r["nominating_party"] for r in rows} == {""}
         for note in (labels.PARTY_NOTE, labels.PARTY_NULL_NOTE):
@@ -1715,7 +1726,11 @@ class TestNulls:
         assert not [line for line in lines if "candidate" in line or "popular-vote" in line]
         # Each per-capita page has one filter, its own (#465, #559), so no note says
         # which apply.
-        for key in ("/state/<usps>/per-capita", "/state/<usps>"):
+        for key in (
+            "/state/<usps>/per-capita",
+            "/state/<usps>",
+            "/state/<usps>/elections",
+        ):
             assert "PER_CAPITA_FILTER_NOTE" not in page_of(key)["layout"].__globals__
         tree, _ = render("/election/<year>/per-capita", monkeypatch)
         lines = download(tree, "election-per-capita").lines
@@ -1899,7 +1914,10 @@ class TestAttribution:
             ("election-states", True, False, True),
             ("election-nation", True, False, True),
             ("election-per-capita", False, True, False),
-            ("state-history", True, False, True),
+            ("state-results", True, False, True),
+            # The table C7 and C10 share (#618): electors and the total popular vote,
+            # with no party.
+            ("state-electors", True, False, False),
             ("state-per-capita", False, True, False),
             ("candidate-history", True, False, True),
         ],
@@ -1945,7 +1963,7 @@ class TestAttribution:
                 "/state/<usps>/per-capita",
                 "/v1/states/GA/per-capita",
                 "state-per-capita",
-                "state-history",
+                "state-results",
             ),
         ],
     )
@@ -2471,7 +2489,9 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {"year": "2016"},
         {"/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
+    # One doctored body, read by the history page and T4's results page (#619).
     "/state/<usps>": ({"usps": "GA"}, {"/v1/states/GA": _state_history}),
+    "/state/<usps>/elections": ({"usps": "GA"}, {"/v1/states/GA": _state_history}),
     "/state/<usps>/per-capita": (
         {"usps": "GA"},
         {"/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
@@ -2526,15 +2546,18 @@ UNRECOGNIZED_CELLS = {
     "/election/<year>/per-capita": {
         "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
-    # T4's other rows of the doctored election carry its allotment and status too
-    # (#560), each with the popular-vote cell the status words, and the companion
-    # table C7 and C10 share (#618) words the allotment, the status once and the
-    # total, which the status words.
+    # The companion table C7 and C10 share (#618) words the allotment, the status
+    # once and the total, which the status words.
     "/state/<usps>": {
-        "state-history": len(STATE_ROW_FIELDS) + 1 + 3 * (GA_FIRST_ROWS - 1),
         "state-electors": 3,
         # The doctored allotment makes both headline figures read it (#601, D115).
         "state-history-metrics": 2,
+    },
+    # T4, on its own page since #619: its other rows of the doctored election carry
+    # its allotment and status too (#560), each with the popular-vote cell the status
+    # words.
+    "/state/<usps>/elections": {
+        "state-results": len(STATE_ROW_FIELDS) + 1 + 3 * (GA_FIRST_ROWS - 1),
     },
     # The doctored ratio makes both figures read it (#600, D114: one selection).
     "/state/<usps>/per-capita": {
@@ -3016,7 +3039,7 @@ NAME_DROPDOWNS = {
     "election-state",  # T2's state filter
     "election-candidate",  # T2's candidate filter
     "election-per-capita-state",  # T6's state filter
-    "state-candidate",  # T4's candidate filter
+    "state-results-candidate",  # T4's candidate filter, on its own page since #619
     "candidate-state",  # T5's state filter
 }
 
