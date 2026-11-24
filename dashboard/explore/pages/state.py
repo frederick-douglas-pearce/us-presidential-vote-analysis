@@ -21,10 +21,11 @@ is cached (#279, D074).
 
 The page's one filter is the year range (``year_from`` / ``year_to``, #620, D119), read
 by its one ``query=`` parser and judged against the state's own span, from its first
-election (:func:`first_election`) to the latest served year: the default view starts at
-that election, and a bound outside the span falls back to that end of it. The range
-narrows C7, C10 and their table together, after each collapse (both collapses read the
-state's whole history, which the headline figures summarize unfiltered). T4's
+election (:func:`explore.state_view.first_election`) to the latest served year: the
+default view starts at that election, and a bound outside the span falls back to that
+end of it. The range narrows C7, C10 and their table together, after each collapse
+(both collapses read the state's whole history, which the headline figures summarize
+unfiltered). T4's
 ``candidate`` and ``pv_status`` keys are moved to the results page (``moved=``, D092,
 D118), so an old filtered link answers 302 there; the parser drops both. A filter change
 is written to a page-local ``dcc.Location`` and re-rendered from the cache. The
@@ -88,6 +89,10 @@ METRICS_ALL_YEARS_ID = "state-history-metrics-all-years"
 METRICS_ID = "state-history-metrics"
 METRIC_IDS = {
     "state_elections_count": "state-elections-count",
+    # #621 (D120), in the display order the owner approved, ids appended to the set.
+    "state_first_election": "state-first-election",
+    "state_pv_elections_count": "state-pv-elections-count",
+    "state_electors_change": "state-electors-change",
     "state_took_office_count": "state-took-office-count",
 }
 #: The note under the figures naming the years with no electors appointed.
@@ -296,20 +301,6 @@ def popular_totals(
     return over_time.state_series(by_year, served, source, usps)
 
 
-def first_election(records: list[dict[str, Any]]) -> int | None:
-    """The state's first election (#620, D119): the first year of C7's collapse
-    (:func:`electors`, ``records``) whose allotment is an ``int`` (never a ``bool``)
-    above 0, the rule the election count uses (D115(c), :func:`_allotment`); ``None``
-    if no year has one, which served data never has. Pure; #621's figure is to read
-    it (D119, Action required)."""
-    years = [
-        r["year"]
-        for r in records
-        if type(r["state_electoral_votes"]) is int and r["state_electoral_votes"] > 0
-    ]
-    return min(years) if years else None
-
-
 Collapse = Callable[[list[dict[str, Any]], set[int], str, str], list[dict[str, Any]]]
 
 
@@ -334,7 +325,7 @@ class Range(NamedTuple):
     """The year range a render applies (#620, D119), within the state's span: ``span``
     runs from the state's first election (or, where C7's collapse cannot be read, its
     first served row) to the latest served year, and ``start_known`` says whether its
-    start is the first election :func:`first_election` found."""
+    start is the first election :func:`explore.state_view.first_election` found."""
 
     year_from: int
     year_to: int
@@ -359,7 +350,11 @@ def state_range(
     The span's start reads data only, never whether a chart could be drawn: C7's
     collapse's first election, else the state's first served row, where both
     collapses start."""
-    first = None if electors_records is None else first_election(electors_records)
+    first = (
+        None
+        if electors_records is None
+        else state_view.first_election(electors_records)
+    )
     start = first if first is not None else min(r["year"] for r in rows)
     span = (start, year_max)
     year_from, year_to = query.year_range(pairs, *span)
@@ -370,13 +365,6 @@ def narrow(records: list[dict[str, Any]], chosen: Range) -> list[dict[str, Any]]
     """The records in the range: one predicate for both charts' collapses, so the two
     halves keep the same years and :func:`merge`'s join holds. Pure."""
     return [r for r in records if chosen.year_from <= r["year"] <= chosen.year_to]
-
-
-def _allotment(value: object) -> int | None:
-    """An allotment the figures can read: an ``int`` (never a ``bool``) at or above 0,
-    else ``None`` (#601, D115). C7 draws a null or a malformed allotment as a marker;
-    the figures cannot count such a year either way, so both read unrecognized."""
-    return value if type(value) is int and value >= 0 else None
 
 
 def _took_office_flags(
@@ -421,52 +409,62 @@ def _took_office_flags(
 def _figures(
     records: list[dict[str, Any]], rows: list[dict[str, Any]], narrowed: bool
 ) -> html.Div:
-    """The state's two headline figures (#601, D112(e), (g), D115), as a ``dl``: the
-    elections in which it appointed electors (an allotment above 0, from C7's
-    collapse, ``records``) and in how many of them its electors cast a vote for the
-    candidate who took office. Unfiltered: ``records`` is C7's whole collapse, so the
-    Years filter never reaches them (D112(g), D115(g), D119), and while it applies a
-    narrower range (``narrowed``) a note says so.
+    """The state's headline figures (#601, #621; D112(e), (g), D115, D120), as a
+    ``dl``: the elections in which it appointed electors (an allotment above 0, from
+    C7's collapse, ``records``), its first election, in how many of them it held a
+    popular vote to choose its electors, the change in its electors from its first
+    election to its latest (all four computed by :func:`explore.state_view.
+    history_figures`, the computation the ``/states`` map shares), and in how many its
+    electors cast a vote for the candidate who took office (this page's alone: it needs
+    the candidate rows). Unfiltered: ``records`` is C7's whole collapse, so the Years
+    filter never reaches them (D112(g), D115(g), D119), and while it applies a narrower
+    range (``narrowed``) a note says so.
 
-    An allotment no figure can read makes both unrecognized; a took-office fault, the
-    second alone (:func:`_took_office_flags`). Either way C7 and the page stay. A
-    note names the years with no electors appointed while the count shows a number."""
-    allotments = [(r["year"], _allotment(r["state_electoral_votes"])) for r in records]
-    bad = any(value is None for _, value in allotments)
-    years = sorted(year for year, value in allotments if value)
-    zeros = sorted(year for year, value in allotments if value == 0)
+    An allotment no figure can read makes every figure unrecognized (D120); a
+    ``pv_status`` fault, the popular-vote count alone; a took-office fault, the
+    took-office count alone (:func:`_took_office_flags`). Either way C7 and the page
+    stay. A note names the years with no electors appointed while the count shows a
+    number."""
+    figures = state_view.history_figures(records)
+    years = list(figures.years)
     entries: list[Any] = []
     for key, ident in METRIC_IDS.items():
-        metric = metrics.METRICS[key]
+        # A plain count words its own case (D115(i)); every other figure's, keyed.
+        no_figure = (
+            labels.METRIC_NO_FIGURE[key]
+            if years and key != "state_elections_count"
+            else labels.METRIC_NO_FIGURE_NO_ELECTORS
+        )
+        value: str
         rest: str | None
-        if bad:
+        if figures.unrecognized:
             value, rest = labels.UNRECOGNIZED, None
-        elif metric.kind == "count":
-            value, rest = labels.metric_elections(
-                metrics.count(set(years)), years, labels.METRIC_NO_FIGURE_NO_ELECTORS
-            )
-        elif metric.kind == "flag_count" and metric.counted is not None:
+        elif key == "state_elections_count":
+            value, rest = labels.metric_elections(figures.elections, years, no_figure)
+        elif key == "state_first_election":
+            value, rest = labels.metric_first_election(figures.first, no_figure)
+        elif key == "state_pv_elections_count":
+            value, rest = labels.metric_count(figures.popular_vote, years, no_figure)
+        elif key == "state_electors_change":
+            value, rest = labels.metric_change(figures.change, no_figure)
+        elif key == "state_took_office_count":
             flags = _took_office_flags(rows, years)
+            counted = metrics.METRICS[key].counted
             result = (
                 metrics.UNRECOGNIZED_COUNT
-                if flags is None
-                else metrics.flag_count(flags, metric.counted)
-            )
-            no_figure = (
-                labels.METRIC_NO_FIGURE[key]
-                if years
-                else labels.METRIC_NO_FIGURE_NO_ELECTORS
+                if flags is None or counted is None
+                else metrics.flag_count(flags, counted)
             )
             value, rest = labels.metric_count(result, years, no_figure)
         else:
-            raise TypeError(f"{key} is no count or flag count")
+            raise TypeError(f"{key} is no figure this page computes")
         entries += components.metric_entry(key, ident, value, rest)
     block: list[Any] = [html.Dl(entries, className="metrics")]
-    if not bad and years and zeros:
+    if not figures.unrecognized and years and figures.zeros:
         block.append(
             html.P(
                 labels.METRIC_ZERO_ALLOTMENT_NOTE.format(
-                    years=labels.metric_years(zeros)
+                    years=labels.metric_years(figures.zeros)
                 ),
                 id=METRICS_NOTE_ID,
                 className="note",

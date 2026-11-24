@@ -760,6 +760,21 @@ METRIC_LABELS: dict[str, str] = {
     "candidate_ev_counted_total": (
         "Total electoral votes Congress counted for this candidate in all states"
     ),
+    # The further figures on /state/<usps> (#621, D120; ba spec, approved by the owner
+    # at #621's plan gate, 2026-11-24). "In this dataset": the dataset starts in 1824,
+    # and most states voted earlier, so an unscoped "first" would be a false historical
+    # claim. "To choose its electors": the count is of how electors were chosen, never
+    # of the years C10 has popular-vote totals for.
+    "state_first_election": (
+        "First election in this dataset in which this state appointed electors"
+    ),
+    "state_pv_elections_count": (
+        "Elections in which this state held a popular vote to choose its electors"
+    ),
+    "state_electors_change": (
+        "Change in electors appointed, from this state's first election in this "
+        "dataset to its latest"
+    ),
 }
 #: An average or a total over two or more elections; ``{value}`` is :func:`margin`'s
 #: cell for an average (:func:`metric_mean`) and :func:`number`'s for a total
@@ -809,6 +824,12 @@ METRIC_PV_WINDOW_NOTE = (
 METRIC_NO_FIGURE_PV_YEARS = (
     "No figure: this dataset's popular-vote figures cover {first}–{last}, "
     "not the years shown"
+)
+#: Every state history figure when no year's allotment is above 0 (#601, #621). It never
+#: says "elections shown", since the history page's figures are unfiltered (D112(g),
+#: D115(g), D119), and never "0", which would read as a measurement.
+METRIC_NO_FIGURE_NO_ELECTORS = (
+    "No figure: this dataset has no election in which this state appointed electors"
 )
 #: Each count's and select's wording when every value among the elections shown is
 #: null, by metric key (#569, #600, D114); a mean words its own in
@@ -862,7 +883,33 @@ METRIC_NO_FIGURE: dict[str, str] = {
         "No figure: this dataset has no number of electoral votes counted for this "
         "candidate in one or more of the elections shown"
     ),
+    # A state's further figures (#621, D120; ba). The first election's is the no-
+    # electors wording itself, by reference, so the two cannot drift apart; neither
+    # case is reachable on the page once an unreadable allotment reads unrecognized.
+    "state_first_election": METRIC_NO_FIGURE_NO_ELECTORS,
+    # Electors appointed in some year, but every pv_status among them null. Names no
+    # cause; no served year reaches it.
+    "state_pv_elections_count": (
+        "No figure: this dataset does not say how this state chose its electors in "
+        "any election in which it appointed electors"
+    ),
+    # Exactly one year with electors appointed; never "0", which would claim no change.
+    "state_electors_change": (
+        "No figure: this dataset has only one election in which this state appointed "
+        "electors"
+    ),
 }
+#: The first election figure on a state's history (#621, D120; ba): the year is the
+#: value, the electors appointed that year follow, as C7's table writes them. No N:
+#: the elections count beside it states N and its years.
+METRIC_FIRST_ELECTION = "{year}, with {electors} electors appointed"
+#: The same with one elector: never "1 electors".
+METRIC_FIRST_ELECTION_ONE = "{year}, with 1 elector appointed"
+#: The change in a state's electors (#621, D120; ba): signed, naming both values and
+#: years, in words, never an arrow; never "grew" or "lost", which characterize it.
+METRIC_CHANGE = "{change}, from {first} in {first_year} to {latest} in {latest_year}"
+#: A negative change's sign: U+2212, read aloud as "minus", never a hyphen.
+MINUS_SIGN = "\u2212"
 #: A select with no figure because the years shown hold no election for the state (a
 #: state's per-capita page, whose year range spans the dataset; #600). On the elections
 #: pages no year shown shows *No elections match* and no figure instead.
@@ -875,12 +922,6 @@ METRIC_NO_FIGURE_NO_ELECTIONS = (
 METRIC_COUNT_ELECTIONS = "{n} elections ({first}–{last})"
 #: A count of one election: the one year, never "1828–1828".
 METRIC_COUNT_ELECTIONS_ONE = "1 election ({year})"
-#: Both state history figures when no year's allotment is above 0 (#601). It never
-#: says "elections shown", since the history page's figures are unfiltered (D112(g),
-#: D115(g), D119), and never "0", which would read as a measurement.
-METRIC_NO_FIGURE_NO_ELECTORS = (
-    "No figure: this dataset has no election in which this state appointed electors"
-)
 #: A candidate's election count at 0 (#601): unreachable on a successful render, kept
 #: so the count never reads "0 elections".
 METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS = (
@@ -1865,3 +1906,57 @@ NO_ELECTIONS_MATCH = "No elections match these filters."
 #: the Years slider, leaves no election (#620, D119; ba spec, approved at #620's plan
 #: gate).
 STATE_NO_ELECTIONS_IN_RANGE = "No election for this state falls in the years chosen."
+
+
+def metric_first_election(result: Any, no_figure: str) -> tuple[str, str | None]:
+    """A state's first election (#621, D120), as ``(value, rest)``: the year, then
+    the electors appointed that year as C7's table writes them. ``result`` is an
+    ``explore.metrics.Selection`` over the years with electors appointed (this module
+    imports no ``metrics``). Checked in order: unrecognized (:data:`UNRECOGNIZED`, no
+    rest); no value (``no_figure``); else :data:`METRIC_FIRST_ELECTION`, or
+    :data:`METRIC_FIRST_ELECTION_ONE` for an allotment of 1."""
+    if result.unrecognized:
+        return UNRECOGNIZED, None
+    if result.n == 0:
+        return no_figure, None
+    year, electors = result.first
+    text = str(year)
+    if electors == number(1):
+        whole = METRIC_FIRST_ELECTION_ONE.format(year=text)
+    else:
+        whole = METRIC_FIRST_ELECTION.format(year=text, electors=electors)
+    return text, whole.removeprefix(text)
+
+
+def signed(value: int) -> str:
+    """A signed whole number (#621, D120): "+7", U+2212 then the number for a
+    negative ("\u221211"), and an unsigned "0"; through :func:`number`, so thousands
+    separators match the tables'."""
+    if value > 0:
+        return f"+{number(value)}"
+    if value < 0:
+        return f"{MINUS_SIGN}{number(-value)}"
+    return number(0)
+
+
+def metric_change(result: Any, no_figure: str) -> tuple[str, str | None]:
+    """A change between two elections (#621, D120), as ``(value, rest)``: the signed
+    change (:func:`signed`), then both values and both years
+    (:data:`METRIC_CHANGE`), the values the companion table's cells. ``result`` is an
+    ``explore.metrics.Change`` (this module imports no ``metrics``). Checked in order:
+    unrecognized (:data:`UNRECOGNIZED`, no rest); no figure (``no_figure``); else the
+    change."""
+    if result.unrecognized:
+        return UNRECOGNIZED, None
+    if result.value is None:
+        return no_figure, None
+    text = signed(result.value)
+    (first_year, first), (latest_year, latest) = result.first, result.latest
+    whole = METRIC_CHANGE.format(
+        change=text,
+        first=first,
+        first_year=first_year,
+        latest=latest,
+        latest_year=latest_year,
+    )
+    return text, whole.removeprefix(text)

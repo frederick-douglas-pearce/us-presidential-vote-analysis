@@ -7,7 +7,8 @@ fields and never a recomputed served figure; a mean excludes nulls and shows its
 sum with any null reads no figure; a null flag is never counted as false; and wherever
 a served figure exists, the metric reconciles to it. D112 (#569) amends it for the
 pages #569 adds figures to; the counts of a served flag here are its first, the
-select (#600, D114) its second, and the sum (#601, D115) its third.
+select (#600, D114) its second, the sum (#601, D115) its third, and the change (#621,
+D120) its fourth.
 
 Numbers only: the wording is :mod:`explore.labels`' (``METRIC_LABELS``,
 ``metric_mean``), except that a select carries each value's companion-table cell, so
@@ -50,8 +51,8 @@ class Metric(NamedTuple):
 
 #: The metric kinds, a closed set, each computed by the function of the same name here
 #: (``count``, ``mean``, ``flag_count``; #569, D112; ``select``, #600, D112(d), D114;
-#: ``sum``, #601, D115).
-KINDS = ("count", "mean", "flag_count", "select", "sum")
+#: ``sum``, #601, D115; ``change``, #621, D120).
+KINDS = ("count", "mean", "flag_count", "select", "sum", "change")
 #: What a ``select`` picks: the earliest or latest year with a value, or the lowest or
 #: highest value (#600, D112(d)).
 PICKS = ("first", "latest", "lowest", "highest")
@@ -127,6 +128,24 @@ METRICS: dict[str, Metric] = {
     ),
     "candidate_ev_counted_total": Metric(
         "sum", Source("EcPvRow", "national_electoral_votes_counted")
+    ),
+    # The further figures on /state/<usps> (#621, D120), read by
+    # ``state_view.history_figures`` over the years the state appointed electors in:
+    # its first election, picked from the allotment; in how many of those elections
+    # it held a popular vote to choose its electors (a flag derived from the closed
+    # ``pv_status``, as D115(b) derives took-office's); and the signed change in its
+    # electors from its first election to its latest.
+    "state_first_election": Metric(
+        "select", Source("EcPvRow", "state_electoral_votes"), pick="first"
+    ),
+    # ``reads_pv_window`` stays False on purpose: ``pv_status`` is served for every
+    # year, and this counts how electors were chosen, never the popular-vote totals
+    # the window bounds (#621's plan gate, Q2(i); D120).
+    "state_pv_elections_count": Metric(
+        "flag_count", Source("EcPvRow", "pv_status"), counted=True
+    ),
+    "state_electors_change": Metric(
+        "change", Source("EcPvRow", "state_electoral_votes")
     ),
 }
 
@@ -338,6 +357,27 @@ UNRECOGNIZED_SELECTION = Selection(0, None, None, None, None, unrecognized=True)
 NO_SELECTION = Selection(0, None, None, None, None)
 
 
+def _kept(
+    triples: Iterable[tuple[int, object, str]],
+) -> list[tuple[int, object, float, str]] | None:
+    """The rule :func:`select` and :func:`change` share for which years have a value
+    (#621, D120): each ``(year, value, cell)`` triple with a value, as ``(year, value,
+    number, cell)`` in year order, ``number`` being :func:`explore.labels.finite`'s
+    reading of ``value``. A null or a blank is left out, whatever its cell says; any
+    other value ``finite`` refuses, or a value whose own cell reads
+    :data:`explore.labels.UNRECOGNIZED`, refuses the whole input (``None``)."""
+    kept: list[tuple[int, object, float, str]] = []
+    for year, value, cell in triples:
+        if labels.is_blank(value):
+            continue
+        number = labels.finite(value)
+        if number is None or cell == labels.UNRECOGNIZED:
+            return None
+        kept.append((year, value, number, cell))
+    kept.sort(key=lambda row: row[0])
+    return kept
+
+
 def select(triples: Iterable[tuple[int, object, str]]) -> Selection:
     """The earliest, latest, lowest and highest of the values in ``(year, value,
     cell)`` triples, already joined on the year, ``cell`` being the companion table's
@@ -356,17 +396,12 @@ def select(triples: Iterable[tuple[int, object, str]]) -> Selection:
     year once (the per-capita page refuses a body that names a year twice, D114(g)), and
     a repeated year tied at an extreme makes :class:`Selection` raise ``ValueError``.
     """
-    kept: list[tuple[int, float, str]] = []
-    for year, value, cell in triples:
-        if labels.is_blank(value):
-            continue
-        number = labels.finite(value)
-        if number is None or cell == labels.UNRECOGNIZED:
-            return UNRECOGNIZED_SELECTION
-        kept.append((year, number, cell))
-    if not kept:
+    rows = _kept(triples)
+    if rows is None:
+        return UNRECOGNIZED_SELECTION
+    if not rows:
         return NO_SELECTION
-    kept.sort(key=lambda row: row[0])
+    kept = [(year, number, cell) for year, _, number, cell in rows]
 
     def every_year(chosen: tuple[int, float, str]) -> tuple[str, tuple[int, ...]]:
         return chosen[2], tuple(year for year, _, cell in kept if cell == chosen[2])
@@ -447,3 +482,71 @@ def sum(pairs: Iterable[tuple[int, object]]) -> Total:
     if null or not years:
         return NO_TOTAL
     return Total(total, len(years), min(years), max(years))
+
+
+@dataclass(frozen=True)
+class Change:
+    """The signed change in one served integer field from the earliest year with a
+    value to the latest, each named as ``(year, cell)`` with the companion table's own
+    cell (#621, D120). It has no N: it names its two years.
+
+    Three states, and no other can be built: a change (``value`` an ``int``, zero
+    allowed; ``first`` and ``latest`` set, the first year earlier than the latest); no
+    figure (fewer than two years with a value: no value, no years); and unrecognized
+    (no value, no years).
+    """
+
+    value: int | None
+    first: tuple[int, str] | None
+    latest: tuple[int, str] | None
+    unrecognized: bool = False
+
+    def __post_init__(self) -> None:
+        if self.unrecognized or self.value is None:
+            ok = self.value is None and self.first is None and self.latest is None
+        else:
+            ok = (
+                type(self.value) is int
+                and _year_cell(self.first)
+                and _year_cell(self.latest)
+            )
+            if ok:
+                assert self.first is not None and self.latest is not None
+                ok = self.first[0] < self.latest[0]
+        if not ok:
+            raise ValueError(f"not a change: {self!r}")
+
+
+#: The change over inputs that hold a value no change can be taken of.
+UNRECOGNIZED_CHANGE = Change(None, None, None, unrecognized=True)
+#: The change with fewer than two years with a value.
+NO_CHANGE = Change(None, None, None)
+
+
+def change(triples: Iterable[tuple[int, object, str]]) -> Change:
+    """The latest value minus the earliest, over the ``(year, value, cell)`` triples
+    that hold a value, already joined on the year, ``cell`` being the companion
+    table's own string (#621, D120): a signed difference of two served values, never a
+    ratio or a percentage change.
+
+    Which years have a value is :func:`select`'s rule, shared through one helper, so
+    the two never disagree. It is stricter on type, as :func:`sum` is: a value that is
+    not an ``int`` (a ``bool``, a float) makes the whole change
+    :data:`UNRECOGNIZED_CHANGE`, so the value is exact. Fewer than two years with a
+    value is :data:`NO_CHANGE`. Each triple is one election; the caller passes each
+    year once, and a repeated year at either end makes :class:`Change` raise
+    ``ValueError``.
+    """
+    rows = _kept(triples)
+    if rows is None:
+        return UNRECOGNIZED_CHANGE
+    if any(type(value) is not int for _, value, _, _ in rows):
+        return UNRECOGNIZED_CHANGE
+    if len(rows) < 2:
+        return NO_CHANGE
+    (first_year, first, _, first_cell), (last_year, last, _, last_cell) = (
+        rows[0],
+        rows[-1],
+    )
+    assert type(first) is int and type(last) is int
+    return Change(last - first, (first_year, first_cell), (last_year, last_cell))

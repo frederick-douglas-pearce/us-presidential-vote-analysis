@@ -2573,8 +2573,9 @@ UNRECOGNIZED_CELLS = {
     # once and the total, which the status words.
     "/state/<usps>": {
         "state-electors": 3,
-        # The doctored allotment makes both headline figures read it (#601, D115).
-        "state-history-metrics": 2,
+        # The doctored allotment makes every headline figure read it (#601, D115;
+        # five since #621, D120).
+        "state-history-metrics": 5,
     },
     # T4, on its own page since #619: its other rows of the doctored election carry
     # its allotment and status too (#560), each with the popular-vote cell the status
