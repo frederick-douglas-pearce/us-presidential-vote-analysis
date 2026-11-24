@@ -539,8 +539,9 @@ def change(triples: Iterable[tuple[int, object, str]]) -> Change:
     :data:`UNRECOGNIZED_CHANGE`, so the value is exact. Fewer than two years with a
     value is :data:`NO_CHANGE`. Each triple is one election; the caller passes each
     year once. A repeated year is **not** detected: the stable year sort keeps the
-    first of two rows at either end (``state_view.history_figures`` refuses it before
-    calling), and only rows all in one year make :class:`Change` raise ``ValueError``.
+    first of two rows at the earliest year and the last at the latest
+    (``state_view.history_figures`` refuses it before calling), and only rows all in
+    one year make :class:`Change` raise ``ValueError``.
     """
     rows = _kept(triples)
     if rows is None:

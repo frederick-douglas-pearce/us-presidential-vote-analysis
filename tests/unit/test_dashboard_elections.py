@@ -3118,9 +3118,13 @@ class TestChange:
 
     def test_a_repeated_year_at_an_end_is_not_detected(self) -> None:
         # #635's review (cr.1): the stable sort keeps the first row of a repeated
-        # first year; ``state_view.history_figures`` refuses such input before calling.
+        # earliest year and the last of a repeated latest year;
+        # ``state_view.history_figures`` refuses such input before calling.
         triples = self.triples((1824, 9), (1824, 10), (2024, 16))
         assert metrics.change(triples) == metrics.Change(7, (1824, "9"), (2024, "16"))
+        # And at the latest year, the last row (round 2, r2.recheck.1).
+        triples = self.triples((1824, 9), (2024, 16), (2024, 15))
+        assert metrics.change(triples) == metrics.Change(6, (1824, "9"), (2024, "15"))
 
     def test_select_and_change_share_one_rule_of_which_years_have_a_value(
         self, monkeypatch: pytest.MonkeyPatch
