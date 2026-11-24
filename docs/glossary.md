@@ -695,7 +695,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** #465 (owner decisions, 2026-11-09: the split, the per-capita state filter, the earlier
   and later links keeping the page, the 302); D092; reader wording: `ba` spec for #465, approved by
   the owner at its plan gate (2026-11-10).
-- **Not:** *Site navigation*. *State pages*, whose section links carry the year range. The earlier
+- **Not:** *Site navigation*. *State pages*, whose results by election and people per electoral vote pages' section links carry the year range (D105, D118). The earlier
   and later links (*Election year*). The API's `summary`.
   A filter: the section links change the page, not the rows. The API route `/v1/elections/states`,
   which has one item per state per election and no candidate rows; Results by state shows
