@@ -3797,6 +3797,13 @@ class TestYearsFilter:
         )
         assert (sentence in c7_caption(tree)) is shown
         assert (sentence in c10_caption(tree)) is shown
+        # Where none is due, no start sentence at all, for any year: a chart narrowed
+        # to start at 1900 must not call 1900 the state's first election (#620's
+        # mutation pass found this unpinned).
+        if not shown:
+            prefix = labels.FIRST_ELECTION_START_NOTE.split("{year}")[0]
+            assert prefix not in c7_caption(tree)
+            assert prefix not in c10_caption(tree)
         assert labels.FIRST_ELECTION_START_NOTE == (
             "This chart starts at {year}, the first election in this dataset in which "
             "{state} appointed electors."
