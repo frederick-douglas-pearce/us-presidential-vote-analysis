@@ -2109,7 +2109,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   and the provenance footer; the year range `year_from`/`year_to` only, its own `query=` parser,
   judged against the state's span from its first election to the latest served year, so a bound
   outside it falls back to that end, defaulting to that whole span (D119); when neither chart's
-  half can be built, the slider and `FILTER_SENTENCE` do not render and the table's place shows
+  collapse can be read, or the served state name has no text, the slider and `FILTER_SENTENCE` do not render and the table's place shows
   `ELECTORS_TOTALS_TABLE_UNAVAILABLE`); `/state/<usps>/elections`, results
   by election (T4, its three filters `year_from`/`year_to`, `candidate` and `pv_status`, T4's party
   notes, and the footer), both filled from `/v1/states/{usps}`; and `/state/<usps>/per-capita` (T7
