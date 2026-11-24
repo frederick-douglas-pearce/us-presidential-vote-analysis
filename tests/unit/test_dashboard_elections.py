@@ -977,8 +977,9 @@ class TestSharedPieces:
             "labels",
             "query",
         }
-        # And the state pages' (#559), which therefore own the roster reading.
-        assert graph["state_view"] == {"labels", "query"}
+        # And the state pages' (#559), which therefore own the roster reading, and since
+        # #621 (D120) the state history's figures, which the /states map shares.
+        assert graph["state_view"] == {"labels", "metrics", "query"}
         # The summaries share the cells' rule of what is a figure (#437, D097(f)).
         assert graph["metrics"] == {"labels"}
         assert in_cycles(graph) == []
@@ -2246,15 +2247,16 @@ class TestMetricLabels:
             "pv_total_latest",
         }
 
-    def test_no_figure_wording_is_keyed_by_exactly_the_counts_selects_and_sums(
+    def test_no_figure_wording_is_keyed_by_exactly_the_counts_selects_sums_and_changes(
         self,
     ) -> None:
         # A mean words its own in ``metric_mean`` (#600, architect S2), and a plain
-        # count its own constant (#601, D115, amending D114(d) for the sums).
+        # count its own constant (#601, D115, amending D114(d) for the sums); the
+        # changes are keyed too (#621, D120).
         assert set(labels.METRIC_NO_FIGURE) == {
             k
             for k, m in metrics.METRICS.items()
-            if m.kind in ("flag_count", "select", "sum")
+            if m.kind in ("flag_count", "select", "sum", "change")
         }
 
     def test_no_page_keeps_the_retired_per_key_tables(self) -> None:
@@ -2265,6 +2267,37 @@ class TestMetricLabels:
         for names in (MOD, *(page_globals(p) for p in METRIC_PAGES)):
             assert "METRIC_NO_FIGURE" not in names and "PV_METRIC" not in names
 
+    def test_the_state_history_rows_are_pinned(self) -> None:
+        # Owner, #635's review (ge.2, cr.4): these rows are descriptive
+        # (``state_view.history_figures`` reads none of their fields), so their every
+        # field is pinned here, and flipping one fails.
+        assert {
+            key: metrics.METRICS[key]
+            for key in (
+                "state_first_election",
+                "state_pv_elections_count",
+                "state_electors_change",
+            )
+        } == {
+            "state_first_election": metrics.Metric(
+                "select",
+                metrics.Source("EcPvRow", "state_electoral_votes"),
+                None,
+                "first",
+                False,
+            ),
+            "state_pv_elections_count": metrics.Metric(
+                "flag_count", metrics.Source("EcPvRow", "pv_status"), True, None, False
+            ),
+            "state_electors_change": metrics.Metric(
+                "change",
+                metrics.Source("EcPvRow", "state_electoral_votes"),
+                None,
+                None,
+                False,
+            ),
+        }
+
     #: The kinds each page computes (#609's review, r1.cr.8): a page's ``METRIC_IDS``
     #: names only metrics of those kinds, so its kind check can never fire in shipped
     #: code (#610 moves that check off the degraded state).
@@ -2273,7 +2306,7 @@ class TestMetricLabels:
         "pages.elections_majority": {"flag_count"},
         "pages.elections_over_time": {"select"},
         "pages.state_per_capita": {"select"},
-        "pages.state": {"count", "flag_count"},
+        "pages.state": {"count", "flag_count", "select", "change"},  # #621
         "pages.candidate": {"count", "sum"},
     }
 
@@ -3044,6 +3077,137 @@ class TestSelect:
         result = metrics.select([(1980, 9.0, "9"), (1984, 10.0, "10"), (1988, 999.0, "999")])
         assert result.lowest == ("9", (1980,))
         assert result.highest == ("999", (1988,))
+
+
+class TestChange:
+    """``metrics.change`` (#621, D120): the latest value minus the earliest, over the
+    years ``select`` reads as having a value, exact and signed."""
+
+    @staticmethod
+    def triples(*pairs: tuple[int, Any]) -> list[tuple[int, Any, str]]:
+        return [(y, v, labels.number(v)) for y, v in pairs]
+
+    def test_the_signed_difference_with_both_ends(self) -> None:
+        result = metrics.change(self.triples((2024, 16), (1824, 9), (1900, 13)))
+        assert result == metrics.Change(7, (1824, "9"), (2024, "16"))
+        assert metrics.change(self.triples((1824, 24), (2024, 13))).value == -11
+        assert metrics.change(self.triples((1824, 3), (2024, 3))).value == 0
+
+    def test_a_null_is_left_out_as_select_leaves_it(self) -> None:
+        triples = [*self.triples((1828, 9), (2024, 16)), (2028, None, labels.UNRECOGNIZED)]
+        assert metrics.change(triples) == metrics.Change(7, (1828, "9"), (2024, "16"))
+        assert metrics.select(triples).latest == (2024, "16")
+
+    @pytest.mark.parametrize("pairs", [(), ((1824, 9),), ((1824, None), (1828, 3))])
+    def test_fewer_than_two_values_is_no_change(self, pairs: Any) -> None:
+        assert metrics.change(self.triples(*pairs)) == metrics.NO_CHANGE
+
+    @pytest.mark.parametrize("value", [9.0, True, "9", float("nan")], ids=repr)
+    def test_a_value_that_is_no_int_is_unrecognized(self, value: Any) -> None:
+        triples = [(1824, value, "9"), (2024, 16, "16")]
+        assert metrics.change(triples) == metrics.UNRECOGNIZED_CHANGE
+
+    def test_a_value_whose_cell_is_unrecognized_is_unrecognized(self) -> None:
+        triples = [(1824, 9, labels.UNRECOGNIZED), (2024, 16, "16")]
+        assert metrics.change(triples) == metrics.UNRECOGNIZED_CHANGE
+        assert metrics.select(triples) == metrics.UNRECOGNIZED_SELECTION
+
+    def test_rows_all_in_one_year_raise(self) -> None:
+        with pytest.raises(ValueError, match="not a change"):
+            metrics.change(self.triples((2024, 9), (2024, 16)))
+
+    def test_a_repeated_year_at_an_end_is_not_detected(self) -> None:
+        # #635's review (cr.1): the stable sort keeps the first row of a repeated
+        # earliest year and the last of a repeated latest year;
+        # ``state_view.history_figures`` refuses such input before calling.
+        triples = self.triples((1824, 9), (1824, 10), (2024, 16))
+        assert metrics.change(triples) == metrics.Change(7, (1824, "9"), (2024, "16"))
+        # And at the latest year, the last row (round 2, r2.recheck.1).
+        triples = self.triples((1824, 9), (2024, 16), (2024, 15))
+        assert metrics.change(triples) == metrics.Change(6, (1824, "9"), (2024, "15"))
+
+    def test_select_and_change_share_one_rule_of_which_years_have_a_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #635's review (ge.1; D120(a)): both call ``metrics._kept``.
+        calls: list[str] = []
+        real = metrics._kept
+
+        def spy(triples: Any) -> Any:
+            calls.append("kept")
+            return real(triples)
+
+        monkeypatch.setattr(metrics, "_kept", spy)
+        triples = self.triples((1824, 9), (2024, 16))
+        metrics.select(triples)
+        assert calls == ["kept"]
+        metrics.change(triples)
+        assert calls == ["kept", "kept"]
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            (7, None, (2024, "16")),
+            (7, (2024, "9"), (1824, "16")),
+            (True, (1824, "9"), (2024, "16")),
+            (None, (1824, "9"), None),
+        ],
+    )
+    def test_no_other_state_can_be_built(self, args: Any) -> None:
+        with pytest.raises(ValueError, match="not a change"):
+            metrics.Change(*args)
+
+
+class TestChangeAndFirstElectionWording:
+    """``labels.metric_change``, ``labels.signed`` and ``labels.metric_first_election``
+    (#621, D120; ba spec approved at #621's plan gate)."""
+
+    def test_the_signs(self) -> None:
+        assert labels.signed(7) == "+7"
+        assert labels.signed(-11) == "−11"
+        assert labels.signed(0) == "0"
+        assert labels.signed(1200) == "+1,200"
+
+    def test_a_change_names_both_ends(self) -> None:
+        result = metrics.Change(-11, (1824, "24"), (2024, "13"))
+        assert labels.metric_change(result, "none") == (
+            "−11",
+            ", from 24 in 1824 to 13 in 2024",
+        )
+
+    def test_no_change_and_unrecognized(self) -> None:
+        assert labels.metric_change(metrics.NO_CHANGE, "none") == ("none", None)
+        assert labels.metric_change(metrics.UNRECOGNIZED_CHANGE, "none") == (
+            labels.UNRECOGNIZED,
+            None,
+        )
+
+    def test_the_first_election(self) -> None:
+        def first(value: int) -> Any:
+            return metrics.select([(1824, value, labels.number(value))])
+
+        assert labels.metric_first_election(first(9), "none") == (
+            "1824",
+            ", with 9 electors appointed",
+        )
+        assert labels.metric_first_election(first(1), "none") == (
+            "1824",
+            ", with 1 elector appointed",
+        )
+        assert labels.metric_first_election(metrics.NO_SELECTION, "none") == (
+            "none",
+            None,
+        )
+        assert labels.metric_first_election(
+            metrics.UNRECOGNIZED_SELECTION, "none"
+        ) == (labels.UNRECOGNIZED, None)
+
+    def test_the_first_election_s_no_figure_is_the_no_electors_wording(self) -> None:
+        # ba: a reference, so the two cannot drift apart.
+        assert (
+            labels.METRIC_NO_FIGURE["state_first_election"]
+            is labels.METRIC_NO_FIGURE_NO_ELECTORS
+        )
 
 
 class TestMetricSelectWording:

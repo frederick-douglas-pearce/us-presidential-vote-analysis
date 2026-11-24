@@ -733,13 +733,18 @@ CANDIDATE_FIGURES = "#candidate-metrics"
 
 @pytest.mark.parametrize("width", PHONE_WIDTHS)
 def test_the_state_figures_read_inside_phone_width(page: Page, width: int) -> None:
-    """AC 360 px (#601): both figures and the note naming 1864 sit inside the width
-    with no sideways scroll in Light, Dark and System, above C7's chart."""
+    """AC 360 px (#601, #621): the five figures (#621 added three, D120) and the note
+    naming 1864 sit inside the width with no sideways scroll in Light, Dark and System,
+    above C7's chart: five labels, five values and the note."""
     open_at(page, STATE_PATH, width)
     expect(page.locator("#state-took-office-count")).to_have_text(
         "27 of 50 elections (1824–2024)"
     )
-    assert_figures_inside(page, STATE_FIGURES, width, 5)
+    # The longest of #621's values, signed with "+" (D120).
+    expect(page.locator("#state-electors-change")).to_have_text(
+        "+7, from 9 in 1824 to 16 in 2024"
+    )
+    assert_figures_inside(page, STATE_FIGURES, width, 11)
     figures, chart = rect(page, STATE_FIGURES), rect(page, "#c7")
     assert figures["bottom"] <= chart["top"], (figures, chart)
 

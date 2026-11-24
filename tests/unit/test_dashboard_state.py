@@ -247,15 +247,16 @@ def test_the_history_parser_keeps_only_the_year_range(params: Any, pairs: Any) -
 
 
 class TestFirstElection:
-    """The state's first election (#620, D119): the first year of C7's collapse whose
-    allotment is an ``int`` above 0, never a ``bool``; ``None`` where none is."""
+    """The state's first election (#620, D119; in ``state_view`` since #621, D120): the
+    first year of C7's collapse whose allotment is an ``int`` above 0, never a
+    ``bool``; ``None`` where none is."""
 
     @staticmethod
     def records(*pairs: tuple[int, Any]) -> list[dict[str, Any]]:
         return [{"year": y, "state_electoral_votes": v} for y, v in pairs]
 
     def test_the_first_year_with_an_int_above_0(self) -> None:
-        first = MOD["first_election"]
+        first = state_view.first_election
         assert first(self.records((1824, 0), (1828, 0), (1832, 5))) == 1832
         assert first(self.records((1832, 5), (1828, 3))) == 1828
 
@@ -263,13 +264,13 @@ class TestFirstElection:
         "value", [True, False, 0, -1, None, 1.0, "5", float("nan")], ids=repr
     )
     def test_nothing_but_an_int_above_0_counts(self, value: Any) -> None:
-        first = MOD["first_election"]
+        first = state_view.first_election
         assert first(self.records((1824, value), (1828, 7))) == 1828
         assert first(self.records((1824, value))) is None
 
     def test_none_where_there_is_none(self) -> None:
-        assert MOD["first_election"]([]) is None
-        assert MOD["first_election"](self.records((1864, 0), (1868, 0))) is None
+        assert state_view.first_election([]) is None
+        assert state_view.first_election(self.records((1864, 0), (1868, 0))) is None
 
     @pytest.mark.parametrize("usps", ["GA", "TX"])
     def test_on_each_recorded_state(self, usps: str) -> None:
@@ -281,7 +282,7 @@ class TestFirstElection:
             usps,
             path,
         )
-        assert MOD["first_election"](records) == {"GA": 1824, "TX": 1848}[usps]
+        assert state_view.first_election(records) == {"GA": 1824, "TX": 1848}[usps]
 
 
 def test_the_per_capita_page_is_registered_as_planned() -> None:
@@ -3319,6 +3320,16 @@ class TestStateFigures:
         assert st_figure(tree, TOOK_OFFICE) == labels.UNRECOGNIZED
         assert find(tree, ST_FIGURE_IDS[TOOK_OFFICE]).title == labels.UNRECOGNIZED_NOTE
         assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+        # #621's three figures stay too (#635's review, cr.7).
+        assert st_figure(tree, "state_first_election") == (
+            "1824, with 9 electors appointed"
+        )
+        assert st_figure(tree, "state_pv_elections_count") == (
+            "49 of 50 elections (1824–2024)"
+        )
+        assert st_figure(tree, "state_electors_change") == (
+            "+7, from 9 in 1824 to 16 in 2024"
+        )
         assert c7_figure(tree) is not None
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is None
         assert tree.id == PAGE_ID and find(tree, ELECTORS) is not None
@@ -3363,7 +3374,7 @@ class TestStateFigures:
         assert st_figure(render(body=body), TOOK_OFFICE) == before
 
     @pytest.mark.parametrize("value", [9.0, None, -1, "x", True])
-    def test_an_allotment_no_count_can_read_makes_both_unrecognized_and_keeps_c7(
+    def test_an_allotment_no_count_can_read_makes_every_figure_unrecognized_and_keeps_c7(
         self, value: Any
     ) -> None:
         # Architect I4 (D115): set on every row of 1828, so C7's collapse holds one
@@ -3393,7 +3404,7 @@ class TestStateFigures:
         assert find(tree, ELECTORS) is not None
         assert set(column(tree, "state_electoral_votes")) == {""}
 
-    def test_no_year_with_electors_says_so_for_both(self) -> None:
+    def test_no_year_with_electors_says_so_for_every_figure(self) -> None:
         body = ga_body()
         for row in body["data"]:
             row["state_electoral_votes"] = 0
@@ -3471,6 +3482,297 @@ def zeroed(body: dict[str, Any], *years: int) -> dict[str, Any]:
     for year in years:
         with_year(body, year, state_electoral_votes=0)
     return body
+
+
+FIRST = "state_first_election"
+PV_COUNT = "state_pv_elections_count"
+CHANGE = "state_electors_change"
+
+
+def set_year(body: dict[str, Any], year: int, field: str, value: Any) -> None:
+    """Set ``field`` to ``value`` on every row of ``year``, so a collapse holds one
+    value for it."""
+    rows = [r for r in body["data"] if r["year"] == year]
+    assert rows, year
+    for row in rows:
+        row[field] = value
+
+
+def collapse(usps: str, body: Any = None) -> list[dict[str, Any]]:
+    """C7's collapse of ``usps``'s recorded history (or ``body``), as the page runs it."""
+    path = f"/v1/states/{usps}"
+    served = set(state_view.served_years(INDEX))
+    source = copy.deepcopy(RECORDED[path] if body is None else body)
+    records: list[dict[str, Any]] = MOD["electors"](
+        state_view.rows(source, usps, served, path), served, usps, path
+    )
+    return records
+
+
+class TestFurtherStateFigures:
+    """The state history's first election, its elections with a popular vote held and
+    the change in its electors (#621, D120), computed by
+    ``state_view.history_figures`` and worded by ``labels``."""
+
+    @pytest.mark.parametrize(
+        ("usps", "expected"),
+        [
+            # Plan-time hand reads of the recordings (#621's plan): GA rows 1824–2024,
+            # 1864's allotment 0 (not participating), 1824's electors chosen by the
+            # legislature; TX rows 1848–2024, 1864 and 1868 at 0.
+            (
+                "GA",
+                {
+                    FIRST: "1824, with 9 electors appointed",
+                    PV_COUNT: "49 of 50 elections (1824–2024)",
+                    CHANGE: "+7, from 9 in 1824 to 16 in 2024",
+                },
+            ),
+            (
+                "TX",
+                {
+                    FIRST: "1848, with 4 electors appointed",
+                    PV_COUNT: "43 of 43 elections (1848–2024)",
+                    CHANGE: "+36, from 4 in 1848 to 40 in 2024",
+                },
+            ),
+        ],
+    )
+    def test_the_hand_values(self, usps: str, expected: dict[str, str]) -> None:
+        tree = render(usps=usps)
+        for key, text in expected.items():
+            assert st_figure(tree, key) == text, key
+
+    def test_the_figures_show_in_the_approved_order(self) -> None:
+        # ba's order, approved at #621's plan gate: elections, first election, popular
+        # vote, change, took office.
+        assert list(ST_FIGURE_IDS) == [
+            ELECTIONS_COUNT,
+            FIRST,
+            PV_COUNT,
+            CHANGE,
+            TOOK_OFFICE,
+        ]
+        tree = render()
+        dds = [
+            dd.id for dd in of_type(find(tree, ST_FIGURES), "Dd") if dd.id is not None
+        ]
+        assert dds == list(ST_FIGURE_IDS.values())
+
+    def test_the_popular_vote_count_reconciles_to_the_table(self) -> None:
+        # Architect M-4 (D097(a)): no served figure exists, so the table's cells are
+        # the target: rows with electors appointed whose status cell reads "Popular
+        # vote held", of the rows with electors appointed.
+        tree = render()
+        appointed = [
+            (int(year), status)
+            for year, electors, status in body_cells(tree)
+            if electors != "0"
+        ]
+        held = [y for y, status in appointed if status == labels.PV_STATUS["popular_vote"]]
+        assert st_figure(tree, PV_COUNT) == (
+            f"{len(held)} of {len(appointed)} elections "
+            f"({appointed[0][0]}–{appointed[-1][0]})"
+        )
+
+    @pytest.mark.parametrize("zero_first", [False, True])
+    def test_the_first_election_is_the_span_s_start(self, zero_first: bool) -> None:
+        # Architect I-5 (D119(a), D120 as amended): one rule, ``state_view.allotment``,
+        # for the Years filter's start and the figure, computed twice (the figure is a
+        # select) and checked here to agree; the figure refuses what
+        # ``first_election`` skips.
+        body = ga_body()
+        if zero_first:
+            set_year(body, 1824, "state_electoral_votes", 0)
+        first = state_view.first_election(collapse("GA", body))
+        assert first == (1828 if zero_first else 1824)
+        assert st_figure(render(body=body), FIRST).startswith(f"{first}, with ")
+
+    @pytest.mark.parametrize("status", ["sentinel_code", 7, "not_participating"])
+    def test_a_status_fault_makes_the_popular_vote_count_alone_unrecognized(
+        self, status: Any
+    ) -> None:
+        # D120 (architect M-1, M-2): only pv_status is doctored, so the allotment
+        # figures cannot mask it; "not_participating" with electors appointed
+        # contradicts itself. C7, the table and the page stay.
+        body = ga_body()
+        set_year(body, 1828, "pv_status", status)
+        tree = render(body=body)
+        assert st_figure(tree, PV_COUNT) == labels.UNRECOGNIZED
+        assert find(tree, ST_FIGURE_IDS[PV_COUNT]).title == labels.UNRECOGNIZED_NOTE
+        assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+        assert st_figure(tree, FIRST) == "1824, with 9 electors appointed"
+        assert st_figure(tree, CHANGE) == "+7, from 9 in 1824 to 16 in 2024"
+        assert c7_figure(tree) is not None
+        assert c10_figure(tree) is not None  # #635's review, cr.7
+        assert tree.id == PAGE_ID and find(tree, ELECTORS) is not None
+        assert "sentinel_code" not in " ".join(texts(find(tree, ST_FIGURES)))
+
+    def test_an_unknown_status_in_a_year_with_no_electors_is_not_read(self) -> None:
+        # Owner, #635's review (ge.5; D120 amended): the figures are over the years
+        # with electors appointed, so GA 1864 (an allotment of 0) is outside them; its
+        # table cell words the unknown code.
+        body = ga_body()
+        set_year(body, 1864, "pv_status", "sentinel_code")
+        tree = render(body=body)
+        assert st_figure(tree, PV_COUNT) == "49 of 50 elections (1824–2024)"
+
+    @pytest.mark.parametrize("status", [None, "", " "])
+    def test_a_null_status_is_left_out_of_n(self, status: Any) -> None:
+        # D112(a) as amended: a null is never read as "no"; N drops. GA 1828 held a
+        # popular vote, so both counts drop by one.
+        body = ga_body()
+        set_year(body, 1828, "pv_status", status)
+        tree = render(body=body)
+        assert st_figure(tree, PV_COUNT) == "48 of 49 elections (1824–2024)"
+
+    def test_every_status_null_names_no_cause(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            row["pv_status"] = None
+        tree = render(body=body)
+        assert st_figure(tree, PV_COUNT) == labels.METRIC_NO_FIGURE[PV_COUNT]
+
+    @pytest.mark.parametrize(
+        ("latest", "text"),
+        [
+            (5, "−4, from 9 in 1824 to 5 in 2024"),
+            (9, "0, from 9 in 1824 to 9 in 2024"),
+        ],
+    )
+    def test_a_change_is_signed_and_zero_is_a_value(
+        self, latest: int, text: str
+    ) -> None:
+        body = ga_body()
+        set_year(body, 2024, "state_electoral_votes", latest)
+        assert st_figure(render(body=body), CHANGE) == text
+
+    def test_one_year_with_electors(self) -> None:
+        body = ga_body()
+        for row in body["data"]:
+            if row["year"] != 1828:
+                row["state_electoral_votes"] = 0
+        tree = render(body=body)
+        assert st_figure(tree, FIRST) == "1828, with 9 electors appointed"
+        assert st_figure(tree, PV_COUNT) == "1 of 1 election (1828)"
+        assert st_figure(tree, CHANGE) == labels.METRIC_NO_FIGURE[CHANGE]
+
+    def test_one_elector_is_singular(self) -> None:
+        body = ga_body()
+        set_year(body, 1824, "state_electoral_votes", 1)
+        assert st_figure(render(body=body), FIRST) == "1824, with 1 elector appointed"
+
+    def test_the_page_and_the_shared_function_agree(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Architect I-1: the page words what ``history_figures`` computed, once, over
+        # C7's whole collapse.
+        seen: list[Any] = []
+        real = state_view.history_figures
+
+        def spy(records: Any) -> Any:
+            seen.append([r["year"] for r in records])
+            return real(records)
+
+        monkeypatch.setattr(state_view, "history_figures", spy)
+        render("year_from=1900&year_to=1960")
+        assert seen == [[r["year"] for r in collapse("GA")]]
+
+
+def n2_records() -> dict[str, list[dict[str, Any]]]:
+    """N2's rows, one state's at a time, through the per-year check the map (#623) is
+    to apply before ``history_figures`` (architect I-2): one row per state-year, no gap
+    after the state's first election."""
+    served = set(state_view.served_years(INDEX))
+    by_state: dict[str, dict[int, dict[str, Any]]] = {}
+    for row in N2["data"]:
+        years = by_state.setdefault(row["state_usps"], {})
+        assert row["year"] not in years, (row["state_usps"], row["year"])
+        years[row["year"]] = row
+    return {
+        usps: over_time.state_series(rows, served, "/v1/elections/states", usps)
+        for usps, rows in by_state.items()
+    }
+
+
+class TestHistoryFiguresOnN2:
+    """``state_view.history_figures`` is the one computation the ``/states`` map
+    shares (#621, D120; #623): N2 serves one row per state-year with the fields it
+    reads, so the map's values equal each state page's."""
+
+    def test_it_is_total_over_every_state_and_spreads_as_planned(self) -> None:
+        # The plan's falsifier, on the recording: 13 states lost electors from their
+        # first election to their latest, 8 kept the same number, 30 gained.
+        records = n2_records()
+        assert len(records) == 51
+        figures = {usps: state_view.history_figures(r) for usps, r in records.items()}
+        assert not any(f.unrecognized for f in figures.values())
+        signs = [f.change.value for f in figures.values()]
+        assert all(type(v) is int for v in signs)
+        counts = (
+            sum(v < 0 for v in signs),  # type: ignore[operator]
+            sum(v == 0 for v in signs),
+            sum(v > 0 for v in signs),  # type: ignore[operator]
+        )
+        assert counts == (13, 8, 30)
+        ga = figures["GA"].popular_vote
+        assert (ga.count, ga.n, ga.first, ga.last) == (49, 50, 1824, 2024)
+
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_n2_gives_each_page_s_figures(self, usps: str) -> None:
+        assert state_view.history_figures(
+            n2_records()[usps]
+        ) == state_view.history_figures(collapse(usps))
+
+
+class TestHistoryFiguresRefusals:
+    """``state_view.history_figures``' own refusals (#635's review; D120 amended):
+    what the ``/states`` map's input can carry that C7's collapse never passes."""
+
+    @staticmethod
+    def records(*rows: tuple[Any, Any]) -> list[dict[str, Any]]:
+        return [
+            {"year": y, "state_electoral_votes": v, "pv_status": "popular_vote"}
+            for y, v in rows
+        ]
+
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            ((1824, 9), (1824, 10), (2024, 16)),  # cr.1: at the first year
+            ((1824, 9), (2024, 16), (2024, 15)),  # at the latest
+            ((1824, 9), (1900, 5), (1900, 5), (2024, 16)),  # inside, same value
+        ],
+    )
+    def test_a_year_named_twice_makes_every_figure_unrecognized(
+        self, rows: Any
+    ) -> None:
+        assert (
+            state_view.history_figures(self.records(*rows))
+            == state_view.UNRECOGNIZED_HISTORY
+        )
+
+    @pytest.mark.parametrize("year", ["1824", 1824.0, None, True], ids=repr)
+    def test_a_year_that_is_no_int_makes_every_figure_unrecognized(
+        self, year: Any
+    ) -> None:
+        # ge.4: unreachable from C7's collapse, a rule of the shared function.
+        assert (
+            state_view.history_figures(self.records((year, 9), (2024, 16)))
+            == state_view.UNRECOGNIZED_HISTORY
+        )
+
+    def test_an_allotment_too_large_for_a_float_is_unrecognized_for_all(self) -> None:
+        # cr.5: one rule for every figure, since a select and a change refuse it.
+        assert (
+            state_view.history_figures(self.records((1824, 10**400), (2024, 16)))
+            == state_view.UNRECOGNIZED_HISTORY
+        )
+
+    def test_one_record_per_year_is_read(self) -> None:
+        figures = state_view.history_figures(self.records((2024, 16), (1824, 9)))
+        assert not figures.unrecognized
+        assert figures.change.value == 7 and figures.first.first == (1824, "9")
 
 
 class TestYearsFilter:

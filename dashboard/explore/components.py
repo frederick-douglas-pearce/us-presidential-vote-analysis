@@ -504,7 +504,8 @@ def metric_entry(key: str, ident: str, value: str, rest: str | None) -> list[Any
     """One headline figure's ``dt`` and ``dd`` (#437, #569, #600; one builder, cr.7 of
     #602's review): the label :data:`explore.labels.METRIC_LABELS` gives ``key``, and
     the value, as written by ``labels.metric_mean``, ``metric_count``,
-    ``metric_select``, ``metric_elections`` or ``metric_total`` (#601). Where ``rest``
+    ``metric_select``, ``metric_elections`` or ``metric_total`` (#601), or
+    ``metric_first_election`` or ``metric_change`` (#621). Where ``rest``
     is text the value sits in a ``metric-value`` span and ``rest`` follows it;
     ``labels.cell`` builds the ``dd``, so an *Unrecognized value* carries its help text.
     ``ident`` is the figure's stable DOM id (D097(g))."""

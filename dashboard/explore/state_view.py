@@ -12,20 +12,25 @@ the checks of a state's rows, the section links and the not-found state. The sta
 picker (``pages/states.py``) reads the roster through the same :func:`roster`, so a
 body one refuses both refuse.
 
+It also holds the state history's headline figures over one state's per-year records,
+:func:`history_figures` (#621, D120), so the ``/states`` map (#623) computes exactly
+what each state's page shows: the rule of an election with electors appointed and the
+popular-vote flag live here, the arithmetic in :mod:`explore.metrics`.
+
 A shared module, like ``components`` and ``labels``: pure functions of what a page
-already read, importing nothing from ``explore`` but ``labels`` and ``query``, never
-``api`` or ``config`` (``TestSharedPieces``). Each page builds its own ``VALIDATE``
-from :func:`on_roster` and ``api.ROSTER_PATH``. Its reader-facing words are in
-:mod:`explore.labels`; this module is structure only.
+already read, importing nothing from ``explore`` but ``labels``, ``metrics`` and
+``query``, never ``api`` or ``config`` (``TestSharedPieces``). Each page builds its own
+``VALIDATE`` from :func:`on_roster` and ``api.ROSTER_PATH``. Its reader-facing words
+are in :mod:`explore.labels`; this module words nothing.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from dash import dcc, html
 
-from explore import labels, query
+from explore import labels, metrics, query
 
 #: The state pages' path suffixes, in page order (#559, #619): the history, the
 #: results by election and the people per electoral vote. The single source for each
@@ -199,4 +204,144 @@ def not_found(content_id: str) -> html.Div:
             dcc.Link(labels.STATE_NOT_FOUND_LINK, href="/states"),
         ],
         id=content_id,
+    )
+
+
+def allotment(value: object) -> int | None:
+    """An allotment the figures can read: an ``int`` (never a ``bool``) at or above 0
+    that :func:`explore.labels.finite` accepts (so not too large for a float, which a
+    select and a change refuse), else ``None`` (#601, D115; moved here and the finite
+    check added by #621, D120). C7 draws a null or a malformed allotment as a marker;
+    the figures cannot count such a year either way, so all of them read
+    unrecognized. The one rule of an election with electors appointed: an allotment
+    this reads as above 0 (:func:`first_election`, :func:`history_figures`)."""
+    if type(value) is int and value >= 0 and labels.finite(value) is not None:
+        return value
+    return None
+
+
+def first_election(records: list[dict[str, Any]]) -> int | None:
+    """The state's first election (#620, D119; moved here by #621, D120): the first
+    year of its per-year ``records`` (C7's collapse) whose :func:`allotment` is above
+    0, the one rule the election count and :func:`history_figures` use (D115(c));
+    ``None`` if no year has one, which served data never has. Pure. The history page's
+    year span starts here; :func:`history_figures`' first-election figure is a select
+    over the same rule, so the two agree on readable data, and where an allotment no
+    figure can read is present this skips it while the figures read unrecognized."""
+    years = [r["year"] for r in records if allotment(r["state_electoral_votes"])]
+    return min(years) if years else None
+
+
+#: The ``pv_status`` code a year's flag counts (#621, D120): the state held a popular
+#: vote to choose its electors.
+POPULAR_VOTE = "popular_vote"
+#: The code that contradicts a year with electors appointed (#621, architect M-1).
+NOT_PARTICIPATING = "not_participating"
+
+
+def popular_vote_flags(
+    records: list[dict[str, Any]], years: list[int]
+) -> list[tuple[int, object]] | None:
+    """One ``(year, flag)`` pair per year in ``years`` (the years the state appointed
+    electors), for :func:`explore.metrics.flag_count` (#621, D120): true where the
+    year's ``pv_status`` is :data:`POPULAR_VOTE`, false for any other code of
+    :data:`explore.labels.PV_STATUS` but :data:`NOT_PARTICIPATING`. A null or a blank
+    is passed as is, so it is left out of N (D112(a)).
+
+    ``None`` (the figure reads unrecognized) for a code outside the closed set, or
+    :data:`NOT_PARTICIPATING` in a year with electors appointed, which contradicts
+    itself. A status in a year outside ``years`` (an allotment of 0) is never read, so
+    an unknown code there leaves the count as it is; that year's table cell words it
+    (owner, #635's review, ge.5; D120). Raises nothing on the records
+    :func:`history_figures` has accepted (mappings with an ``int`` year, one per
+    year); a missing ``pv_status`` reads as null there, where C7's collapse refuses
+    it, which the shared collapse #623 is to move here settles (D120)."""
+    by_year = {r.get("year"): r.get("pv_status") for r in records}
+    pairs: list[tuple[int, object]] = []
+    for year in years:
+        status = by_year.get(year)
+        if labels.is_blank(status):
+            pairs.append((year, status))
+            continue
+        if not isinstance(status, str) or status not in labels.PV_STATUS:
+            return None
+        if status == NOT_PARTICIPATING:
+            return None
+        pairs.append((year, status == POPULAR_VOTE))
+    return pairs
+
+
+class HistoryFigures(NamedTuple):
+    """A state's history figures over its per-year records (#621, D120), each as
+    :mod:`explore.metrics` computed it: the years it appointed electors in and their
+    count, the years with an allotment of 0, its first election (a select over the
+    allotment), its elections with a popular vote held (a flag count) and the change
+    in its electors. ``unrecognized`` where an allotment no figure can read makes
+    every figure unrecognized (D115(c), widened by D120)."""
+
+    unrecognized: bool
+    elections: int
+    years: tuple[int, ...]
+    zeros: tuple[int, ...]
+    first: metrics.Selection
+    popular_vote: metrics.FlagCount
+    change: metrics.Change
+
+
+#: Every figure unrecognized: an allotment no figure can read.
+UNRECOGNIZED_HISTORY = HistoryFigures(
+    True,
+    0,
+    (),
+    (),
+    metrics.UNRECOGNIZED_SELECTION,
+    metrics.UNRECOGNIZED_COUNT,
+    metrics.UNRECOGNIZED_CHANGE,
+)
+
+
+def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
+    """The state history's figures over one state's per-year ``records`` (``year``,
+    ``state_electoral_votes``, ``pv_status``), the one computation the history page
+    (#621) and the ``/states`` map (#623) share, so the two cannot disagree (D120).
+
+    **One record per year.** The page passes C7's collapse (``pages/state.py``
+    ``electors``), which guarantees it and refuses a year whose rows disagree. This
+    function refuses a year named twice itself: every figure then reads unrecognized
+    (:data:`UNRECOGNIZED_HISTORY`), since :mod:`explore.metrics`' select and change do
+    not detect a repeated year. That is the backstop; the ``/states`` map (#623) is to
+    share the page's collapse, moved here, so the two refuse the same rows (D120).
+
+    An allotment :func:`allotment` cannot read, a year that is not an ``int``, or a
+    year named twice makes every figure unrecognized (:data:`UNRECOGNIZED_HISTORY`).
+    Total on a list of mappings. The figures
+    are over the years with an allotment above 0 (D115(c)); a ``pv_status`` fault makes
+    the popular-vote count alone unrecognized (:func:`popular_vote_flags`). Each value's
+    cell is :func:`explore.labels.number`'s, the function C7's table cell uses."""
+    allotments: list[tuple[int, int]] = []
+    for r in records:
+        year, value = r.get("year"), allotment(r.get("state_electoral_votes"))
+        if type(year) is not int or value is None:
+            return UNRECOGNIZED_HISTORY
+        allotments.append((year, value))
+    if len({year for year, _ in allotments}) != len(allotments):
+        return UNRECOGNIZED_HISTORY
+    years = sorted(year for year, value in allotments if value)
+    zeros = sorted(year for year, value in allotments if value == 0)
+    triples: list[tuple[int, object, str]] = [
+        (year, value, labels.number(value))
+        for year, value in sorted(allotments)
+        if value
+    ]
+    flags = popular_vote_flags(records, years)
+    return HistoryFigures(
+        False,
+        metrics.count(set(years)),
+        tuple(years),
+        tuple(zeros),
+        metrics.select(triples),
+        metrics.UNRECOGNIZED_COUNT
+        if flags is None
+        else metrics.flag_count(flags, True),
+        metrics.change(triples),
     )
