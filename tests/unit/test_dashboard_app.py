@@ -5268,10 +5268,29 @@ class TestMovedStateFilters:
         self, monkeypatch: pytest.MonkeyPatch, query: str
     ) -> None:
         """The year range is not moved (D118): the section links write it on every
-        state page's URL, and the history page is to read it (#620)."""
+        state page's URL, and the history page reads it (#620, D119), so its og:url
+        names the range and nothing else."""
         calls, _ = self.warm(monkeypatch)
         assert _location(f"/state/GA?{query}") == (200, None)
         assert calls == []
+        status, head, _ = get(f"/state/GA?{query}")
+        assert status == 200
+        kept = "&".join(
+            p for p in query.split("&") if p.startswith(("year_from=", "year_to="))
+        )
+        assert head.og_url == url(f"/state/GA{'?' + kept if kept else ''}")
+
+    def test_a_moved_key_beside_the_range_still_redirects_with_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The history reads the year range now (#620), yet a moved key beside it
+        still answers 302: its parser drops the moved key (``page_move`` checks it at
+        import), so the move is the only page that applies it."""
+        self.warm(monkeypatch)
+        assert _location("/state/GA?year_from=1900&pv_status=popular_vote") == (
+            302,
+            "/state/GA/elections?pv_status=popular_vote&year_from=1900",
+        )
 
     @pytest.mark.parametrize(
         "path", ["/state/ZZ", "/state/ga", "/state/G1", "/state/GA/x"]
@@ -5287,7 +5306,7 @@ class TestMovedStateFilters:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Only a code the snapshot in memory accepted builds a Location; an unchecked
-        one is served as the history, which reads no filter."""
+        one is served as the history, whose parser drops the moved keys."""
 
         def no_fetch(path: str, timeout: float = 0) -> api.Response:
             raise AssertionError(f"the index fetched {path}")
@@ -5311,6 +5330,9 @@ class TestMovedStateFilters:
         assert status == 200
         assert head.canonical == url("/state/GA")
         assert head.og_url == url("/state/GA")
+        # The year range beside it is the history's own filter since #620 (D119).
+        status, head, _ = get("/state/GA?candidate=andrew-jackson&year_to=1900")
+        assert (status, head.og_url) == (200, url("/state/GA?year_to=1900"))
         assert (calls, bucket.waits) == ([], [])
         ids = routed_ids(route("/state/GA", "?candidate=andrew-jackson"))
         assert "state" in ids and "state-results" not in ids
@@ -5325,6 +5347,19 @@ class TestMovedStateFilters:
         assert "state" in ids
         assert "state-results-page" not in ids and "state-results" not in ids
 
+    def test_a_client_side_route_applies_only_the_range(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#620 (D119): a routing request never reaches the index, so a moved key
+        beside the range is ignored there and the history applies the range alone."""
+        self.warm(monkeypatch)
+        response = route("/state/GA", "?candidate=andrew-jackson&year_from=1900")
+        ids = routed_ids(response)
+        assert "state" in ids and "state-history-years" in ids
+        assert "state-results" not in ids
+        body = response.get_data(as_text=True)
+        assert '"value":[1900,2024]' in body.replace(" ", "")
+
 
 class TestMoveContract:
     """``moved=`` is checked as the registry is read (:func:`explore.app.page_move`), so
@@ -5332,12 +5367,29 @@ class TestMoveContract:
 
     VALIDATE = ("/v1/elections", lambda path_vars, body: True)
 
+    @staticmethod
+    def keeping(*keys: str, witnesses: tuple[str, ...] | None = None) -> Any:
+        """A parser keeping each of ``keys`` whose value is one of ``witnesses`` (any
+        string when ``None``), sorted, as a page's ``query=`` parser returns pairs."""
+
+        def parse(params: Any) -> list[tuple[str, str]]:
+            return sorted(
+                (k, v)
+                for k, v in params.items()
+                if k in keys
+                and isinstance(v, str)
+                and (witnesses is None or v in witnesses)
+            )
+
+        return parse
+
     def registry(self, **target: Any) -> dict[str, Any]:
         return {
             "t": {
                 "module": "t",
                 "path_template": "/x/<year>/y",
-                "query": lambda params: [],
+                # The target keeps the moved key, so the move has a witness (#620).
+                "query": self.keeping("a"),
                 "validate": self.VALIDATE,
                 **target,
             }
@@ -5359,6 +5411,108 @@ class TestMoveContract:
         registry = self.registry()
         move = appmod.page_move(self.page(), registry)
         assert move == appmod.Move(("a",), "/x/<year>/y", registry["t"]["query"])
+        # A source page with a parser of its own that drops the moved key is valid too.
+        page = self.page(query=self.keeping("year_from"))
+        assert appmod.page_move(page, registry) == move
+
+    @pytest.mark.parametrize(
+        "witnesses",
+        [
+            None,
+            # A key the target keeps only as a slug, or as a closed value: a probe
+            # with "GA" alone would never see the source keep it (#620, D119).
+            ("andrew-jackson",),
+            ("popular_vote",),
+            (appmod.MOVE_WITNESSES[-1],),
+        ],
+        ids=repr,
+    )
+    def test_a_source_page_that_still_reads_a_moved_key_fails_the_import(
+        self, witnesses: tuple[str, ...] | None
+    ) -> None:
+        """D118's action (#620, D119): a page whose own ``query=`` keeps a key it moves
+        would apply it and redirect on it at once, so ``page_move`` refuses it, probed
+        with each witness the target keeps, never "GA" alone."""
+        assert "GA" not in (witnesses or ())
+        registry = self.registry(query=self.keeping("a", witnesses=witnesses))
+        page = self.page(query=self.keeping("a", witnesses=witnesses))
+        with pytest.raises(RuntimeError, match="still reads 'a'"):
+            appmod.page_move(page, registry)
+        # The control: the same source dropping the key passes.
+        assert appmod.page_move(self.page(query=self.keeping("b")), registry)
+
+    def test_every_witness_the_target_keeps_is_probed_not_only_the_first(
+        self,
+    ) -> None:
+        """#620's review (ge.2): the target keeps the key under every witness, the
+        source only under a late one, ``popular_vote``; a probe of the first kept
+        witness alone ("GA") would pass it."""
+        registry = self.registry(query=self.keeping("a"))
+        page = self.page(query=self.keeping("a", witnesses=("popular_vote",)))
+        assert appmod.MOVE_WITNESSES.index("popular_vote") > 0
+        with pytest.raises(RuntimeError, match="still reads 'a'"):
+            appmod.page_move(page, registry)
+
+    def test_a_source_keeping_the_key_under_another_value_fails_the_import(
+        self,
+    ) -> None:
+        """#620's review (ge.2): the check is on the key, never the exact pair, so a
+        source that keeps a moved key under a normalized value is refused too."""
+
+        def renaming(params: Any) -> list[tuple[str, str]]:
+            value = params.get("a")
+            return [("a", f"{value}-x")] if isinstance(value, str) else []
+
+        registry = self.registry(query=self.keeping("a"))
+        with pytest.raises(RuntimeError, match="still reads 'a'"):
+            appmod.page_move(self.page(query=renaming), registry)
+
+    def test_the_witnesses_cover_every_closed_value_a_moved_key_may_take(self) -> None:
+        assert appmod.MOVE_WITNESSES[:2] == ("GA", "andrew-jackson")
+        assert set(labels.PV_STATUS) <= set(appmod.MOVE_WITNESSES)
+        assert set(labels.COUNT_STATUS) <= set(appmod.MOVE_WITNESSES)
+
+    @pytest.mark.parametrize(
+        "target_query",
+        [
+            lambda params: [],
+            # Kept only under a value no witness is: never probed, so refused.
+            lambda params: [("a", "x")] if params.get("a") == "x" else [],
+            # Kept, but under another key.
+            lambda params: [("b", v) for k, v in params.items() if k == "a"],
+        ],
+    )
+    def test_a_target_that_keeps_no_witness_of_a_key_fails_the_import(
+        self, target_query: Any
+    ) -> None:
+        """The check is never vacuous: a moved key the target keeps under no
+        witness cannot be probed, so the import fails rather than passing."""
+        with pytest.raises(RuntimeError, match="keeps no witness of 'a'"):
+            appmod.page_move(self.page(), self.registry(query=target_query))
+        with pytest.raises(RuntimeError, match="keeps no witness of 'a'"):
+            appmod.page_move(
+                self.page(query=self.keeping("b")), self.registry(query=target_query)
+            )
+
+    def test_the_registered_moves_pass_the_check_on_their_own_parsers(self) -> None:
+        """The two real moves, rechecked: each source page's parser drops every key
+        it moves under each witness its target keeps (the state history reads the
+        year range since #620 and drops ``candidate`` and ``pv_status``)."""
+        for name, move in appmod.MOVES.items():
+            source = dash.page_registry[name]
+            for key in move.keys:
+                kept = [
+                    w for w in appmod.MOVE_WITNESSES if (key, w) in move.parser({key: w})
+                ]
+                assert kept, (name, key)
+                parser = source.get("query")
+                if parser is not None:
+                    for w in kept:
+                        assert not [k for k, _ in parser({key: w}) if k == key], (
+                            name,
+                            key,
+                            w,
+                        )
 
     @pytest.mark.parametrize(
         ("page", "target", "message"),

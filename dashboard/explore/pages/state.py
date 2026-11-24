@@ -19,19 +19,25 @@ serve never fills a path built from it: the most it costs is a fill of the share
 roster, once per render until one succeeds, and it 404s at the index once the roster
 is cached (#279, D074).
 
-The page reads no filter and declares no ``query=`` (D118): T4's ``candidate`` and
-``pv_status`` keys are moved to the results page (``moved=``, D092), so an old filtered
-link answers 302 there; the year range is not moved, and lands here unread until the
-page gains its own year control (#620). The provenance footer comes from the
-response's own ``meta.provenance``.
+The page's one filter is the year range (``year_from`` / ``year_to``, #620, D119), read
+by its one ``query=`` parser and judged against the state's own span, from its first
+election (:func:`first_election`) to the latest served year: the default view starts at
+that election, and a bound outside the span falls back to that end of it. The range
+narrows C7, C10 and their table together, after each collapse (both collapses read the
+state's whole history, which the headline figures summarize unfiltered). T4's
+``candidate`` and ``pv_status`` keys are moved to the results page (``moved=``, D092,
+D118), so an old filtered link answers 302 there; the parser drops both. A filter change
+is written to a page-local ``dcc.Location`` and re-rendered from the cache. The
+provenance footer comes from the response's own ``meta.provenance``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 import dash
-from dash import dcc, html
+from dash import Input, Output, State, callback, dcc, html, no_update
 
 from explore import (
     api,
@@ -56,7 +62,7 @@ NOT_FOUND_ID = "state-not-found"
 #: ``state-pv-status``) are retired with T4's move, never reused (D097(g), D118).
 
 #: Chart C7 (#560, D106): the state's electors appointed in each election. Its
-#: companion table, which no filter reaches (D093(a)), is the one C10
+#: companion table, narrowed with it by the Years filter (#620, D119), is the one C10
 #: shares since #618 (D117): it kept C7's id and C10's, ``state-popular-total``, is
 #: retired, never reused (D097(g)).
 C7_ID = "C7"
@@ -67,6 +73,15 @@ ELECTORS_GLOSSARY_ID = "state-electors-glossary"
 C7_UNAVAILABLE_ID = "state-electors-unavailable"
 #: The sentence in the shared table's place when neither chart can be built (D117).
 ELECTORS_TABLE_UNAVAILABLE_ID = "state-electors-table-unavailable"
+#: The Years filter (#620, D119): its slider, the page-local Location a change is
+#: written to, and the note in place of C7, C10 and their table when the range holds
+#: no election. New ids: D118(b)'s ``state-years`` and ``state-url`` stay retired.
+YEARS_ID = "state-history-years"
+URL_ID = "state-history-url"
+NO_MATCH_ID = "state-history-no-match"
+#: The note under the figures while a narrower range than the state's span applies.
+METRICS_ALL_YEARS_ID = "state-history-metrics-all-years"
+
 #: The headline figures (#601, D112(e), (g), D115): the block and each figure's value,
 #: by metric key, in display order, the page's one per-key table (D114(d)); DOM ids are
 #: stable and never renamed (D097(g)). In C7's card, after its heading.
@@ -103,13 +118,15 @@ NOT_FOUND = api.NotFound(
 )
 
 #: The lede, on a successful render and on the degraded state, the not-found state none
-#: (#325). The page has no filters, so no filter sentence (#619). People per electoral
-#: vote left it with T7 (#559), and each candidate's electoral votes with T4 (#619; ba
-#: spec, approved at its plan gate, 2026-11-23).
+#: (#325). People per electoral vote left it with T7 (#559), and each candidate's
+#: electoral votes with T4 (#619; ba spec, approved at its plan gate, 2026-11-23). The
+#: filter sentence follows it only where the Years slider renders (#620, D119; ba spec,
+#: approved at #620's plan gate, 2026-11-23).
 LEDE = (
     "This state's electors appointed in every election this dataset holds for it, and "
     "its total popular vote where the dataset has it."
 )
+FILTER_SENTENCE = "Narrow the charts and table to a range of years."
 #: The page's headings (#560, #582, #618; ba specs, approved at their plan gates,
 #: 2026-11-18, 2026-11-21 and 2026-11-23): C7, C10, then their one table.
 C7_HEADING = "Electors appointed over time"
@@ -156,6 +173,18 @@ def title(usps: Any = None, **_vars: Any) -> str:
     return f"State history — {SITE_TITLE}"
 
 
+def parse_filters(params: Any) -> list[tuple[str, str]]:
+    """This page's one filter from a parsed query string, as sorted ``(key, value)``
+    pairs: the year range, as :func:`explore.query.parse_year_range` keeps it (#620,
+    D119). Syntactic and total, and it reads no API: Dash's index runs it to build
+    ``og:url``. Every other key is dropped, the two moved to the results page included
+    (D118), and so is ``usps``, the path variable. Whether a year is in the state's span
+    is :func:`render`'s question."""
+    if not isinstance(params, dict):
+        return []
+    return sorted(query.parse_year_range(params).items())
+
+
 dash.register_page(
     __name__,
     path_template=state_view.template(state_view.HISTORY),
@@ -170,8 +199,9 @@ dash.register_page(
     success=PAGE_ID,
     validate=VALIDATE,
     not_found=NOT_FOUND,
-    # No ``query=``: the page reads no filter (D118). T4's two keys moved with it to
-    # the results page, so an old link naming either answers 302 there (D092).
+    query=parse_filters,
+    # T4's two keys moved with it to the results page, so an old link naming either
+    # answers 302 there (D092, D118); the parser drops both (app.page_move checks it).
     moved=(state_view.MOVED_KEYS, state_view.template(state_view.RESULTS)),
     # The site navigation link this page marks (#448):
     # a state's history marks its index, States.
@@ -266,6 +296,82 @@ def popular_totals(
     return over_time.state_series(by_year, served, source, usps)
 
 
+def first_election(records: list[dict[str, Any]]) -> int | None:
+    """The state's first election (#620, D119): the first year of C7's collapse
+    (:func:`electors`, ``records``) whose allotment is an ``int`` (never a ``bool``)
+    above 0, the rule the election count uses (D115(c), :func:`_allotment`); ``None``
+    if no year has one, which served data never has. Pure; #621's figure is to read
+    it (D119, Action required)."""
+    years = [
+        r["year"]
+        for r in records
+        if type(r["state_electoral_votes"]) is int and r["state_electoral_votes"] > 0
+    ]
+    return min(years) if years else None
+
+
+Collapse = Callable[[list[dict[str, Any]], set[int], str, str], list[dict[str, Any]]]
+
+
+def collapsed(
+    collapse: Collapse,
+    rows: list[dict[str, Any]],
+    served: set[int],
+    usps: str,
+    source: str,
+) -> list[dict[str, Any]] | None:
+    """One chart's collapse over the state's whole history (:func:`electors` or
+    :func:`popular_totals`), or ``None`` where its rows cannot be read: run once per
+    render (#620, D119), so the span, the figures and the chart's half read one
+    result, and a fault here takes only that chart."""
+    try:
+        return collapse(rows, served, usps, source)
+    except (KeyError, TypeError):
+        return None
+
+
+class Range(NamedTuple):
+    """The year range a render applies (#620, D119), within the state's span: ``span``
+    runs from the state's first election (or, where C7's collapse cannot be read, its
+    first served row) to the latest served year, and ``start_known`` says whether its
+    start is the first election :func:`first_election` found."""
+
+    year_from: int
+    year_to: int
+    span: tuple[int, int]
+    start_known: bool
+
+    @property
+    def narrowed(self) -> bool:
+        """Whether the range is narrower than the state's span."""
+        return (self.year_from, self.year_to) != self.span
+
+
+def state_range(
+    pairs: list[tuple[str, str]],
+    electors_records: list[dict[str, Any]] | None,
+    rows: list[dict[str, Any]],
+    year_max: int,
+) -> Range:
+    """The range to apply (#620, D119): ``pairs`` judged against the state's own span,
+    per bound, as the shared year range is, so a bound outside it falls back to that
+    end (a range wholly before the state's first election opens its whole history).
+    The span's start reads data only, never whether a chart could be drawn: C7's
+    collapse's first election, else the state's first served row, where both
+    collapses start."""
+    first = None if electors_records is None else first_election(electors_records)
+    start = first if first is not None else min(r["year"] for r in rows)
+    span = (start, year_max)
+    year_from, year_to = query.year_range(pairs, *span)
+    return Range(year_from, year_to, span, first is not None)
+
+
+def narrow(records: list[dict[str, Any]], chosen: Range) -> list[dict[str, Any]]:
+    """The records in the range: one predicate for both charts' collapses, so the two
+    halves keep the same years and :func:`merge`'s join holds. Pure."""
+    return [r for r in records if chosen.year_from <= r["year"] <= chosen.year_to]
+
+
 def _allotment(value: object) -> int | None:
     """An allotment the figures can read: an ``int`` (never a ``bool``) at or above 0,
     else ``None`` (#601, D115). C7 draws a null or a malformed allotment as a marker;
@@ -312,11 +418,15 @@ def _took_office_flags(
     return pairs
 
 
-def _figures(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> html.Div:
+def _figures(
+    records: list[dict[str, Any]], rows: list[dict[str, Any]], narrowed: bool
+) -> html.Div:
     """The state's two headline figures (#601, D112(e), (g), D115), as a ``dl``: the
     elections in which it appointed electors (an allotment above 0, from C7's
     collapse, ``records``) and in how many of them its electors cast a vote for the
-    candidate who took office. Unfiltered, so they reconcile to C7's table.
+    candidate who took office. Unfiltered: ``records`` is C7's whole collapse, so the
+    Years filter never reaches them (D112(g), D115(g), D119), and while it applies a
+    narrower range (``narrowed``) a note says so.
 
     An allotment no figure can read makes both unrecognized; a took-office fault, the
     second alone (:func:`_took_office_flags`). Either way C7 and the page stay. A
@@ -362,6 +472,12 @@ def _figures(records: list[dict[str, Any]], rows: list[dict[str, Any]]) -> html.
                 className="note",
             )
         )
+    if narrowed:
+        block.append(
+            html.P(
+                labels.METRIC_ALL_YEARS_NOTE, id=METRICS_ALL_YEARS_ID, className="note"
+            )
+        )
     return html.Div(block, id=METRICS_ID)
 
 
@@ -389,16 +505,20 @@ class Merged(NamedTuple):
 
 
 def _electors_part(
-    rows: list[dict[str, Any]], served: set[int], usps: str, source: str
+    records: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    usps: str,
+    source: str,
+    start: int | None,
 ) -> Part | None:
-    """C7's half (#560, D106): ``None`` when the state's rows cannot be read as one
-    allotment per election, or a served name has nothing in it (the rule D101 set for
-    N2's rows, which D106 keeps for C7's). ``components.chart`` is never called here
-    (D095(f))."""
+    """C7's half (#560, D106) over ``records``, its collapse already narrowed to the
+    range (#620, D119): ``None`` when its points cannot be built or a served name has
+    nothing in it (the rule D101 set for N2's rows, which D106 keeps for C7's). The
+    axis is the years shown (D104). ``start`` is the first election its caption names,
+    or ``None``. ``components.chart`` is never called here (D095(f))."""
     try:
-        records = electors(rows, served, usps, source)
         points = over_time.appointed_points(records)
-        years = sorted(served)
+        years = [p.year for p in points]
         name = rows[0]["state"]
         # A name a hover would write as "None", a number or nothing names no state.
         if not labels.has_text(name):
@@ -412,31 +532,30 @@ def _electors_part(
         c7 = over_time.c4_figure(points, years, title, charts.escaped(str(name)))
         # Stacked above C10, the two plots line up on one year axis (#582, D113).
         over_time.align(c7.figure, over_time.STATE_MARGIN)
-        first = points[0].year if points[0].year > years[0] else None
-        caption = _electors_caption(c7, plain, first)
+        caption = _electors_caption(c7, plain, start)
     except (KeyError, TypeError):
         return None
     return Part(records, points, c7.figure, caption, None)
 
 
 def _totals_part(
+    records: list[dict[str, Any]],
     rows: list[dict[str, Any]],
-    served: set[int],
     usps: str,
     body: dict[str, Any],
     source: str,
+    start: int | None,
 ) -> Part | None:
-    """C10's half (#582, D113): ``None`` when the state's rows cannot be read as one
-    total per election, the popular-vote window is present and malformed, or a served
-    name has nothing in it. ``components.chart`` is never called here
-    (D095(f))."""
+    """C10's half (#582, D113) over ``records``, its collapse already narrowed to the
+    range (#620, D119): ``None`` when its points cannot be built, the popular-vote
+    window is present and malformed, or a served name has nothing in it.
+    ``components.chart`` is never called here (D095(f))."""
     try:
         coverage = body["meta"]["provenance"]["coverage"]
         # Checked as C2 and C5 check theirs: a malformed window fails C10's half alone.
         window = query.year_span(coverage["pv_year_min"], coverage["pv_year_max"])
-        records = popular_totals(rows, served, usps, source)
         points = over_time.total_points(records, coverage)
-        years = sorted(served)
+        years = [p.year for p in points]
         name = rows[0]["state"]
         # A name a hover would write as "None", a number or nothing names no state.
         if not labels.has_text(name):
@@ -451,8 +570,7 @@ def _totals_part(
             points, years, title, window, charts.escaped(str(name)), C10_CHART
         )
         over_time.align(c10.figure, over_time.STATE_MARGIN)
-        first = points[0].year if points[0].year > years[0] else None
-        caption = _totals_caption(c10, window, plain, first)
+        caption = _totals_caption(c10, window, plain, start)
     except (KeyError, TypeError):
         return None
     return Part(records, points, c10.figure, caption, window)
@@ -546,7 +664,8 @@ def _electors_caption(
     c7: over_time.OverTime, plain: str | None, first: int | None
 ) -> str:
     """C7's caption: what electors appointed is, what each marker means where one is
-    drawn, and the state's first election where it comes after the dataset's first;
+    drawn, and where the chart starts at the state's first election, that election
+    (``first``, set only after the dataset's first year; #620, D119);
     ``components.chart`` adds the table pointer. Names the state only in plain text
     (``plain``, else "this state")."""
     parts = [labels.C4_BASIS]
@@ -554,13 +673,18 @@ def _electors_caption(
         parts.append(labels.C4_ZERO_NOTE)
     if c7.missing:
         parts.append(labels.C4_NO_FIGURE_NOTE)
-    if first is not None:
-        parts.append(
-            labels.FIRST_ELECTION_NOTE_THIS_STATE.format(year=first)
-            if plain is None
-            else labels.FIRST_ELECTION_NOTE.format(state=plain, year=first)
-        )
+    parts += _start_note(plain, first)
     return " ".join(parts)
+
+
+def _start_note(plain: str | None, first: int | None) -> list[str]:
+    """The sentence naming the chart's start at the state's first election, which C7's
+    and C10's captions share (#620, D119), or none."""
+    if first is None:
+        return []
+    if plain is None:
+        return [labels.FIRST_ELECTION_START_NOTE_THIS_STATE.format(year=first)]
+    return [labels.FIRST_ELECTION_START_NOTE.format(state=plain, year=first)]
 
 
 def _totals_caption(
@@ -570,9 +694,9 @@ def _totals_caption(
     first: int | None,
 ) -> str:
     """C10's caption (#582; ba spec): what the total counts, its short value ticks
-    where a bar is drawn, what the bands and markers mean where drawn, the state's
-    first election where it comes after the dataset's first; ``components.chart`` adds
-    the table pointer.
+    where a bar is drawn, what the bands and markers mean where drawn, and the state's
+    first election where the chart starts there (:func:`_start_note`);
+    ``components.chart`` adds the table pointer.
     Names the state only in plain text (``plain``, else "this state")."""
     parts = [labels.C5_BASIS]
     if c10.bars:
@@ -583,51 +707,121 @@ def _totals_caption(
         parts.append(labels.C5_AFTER_NOTE.format(pv_year_max=window[1]))
     if c10.missing:
         parts.append(labels.C5_MARKER_NOTE)
-    if first is not None:
-        parts.append(
-            labels.C10_FIRST_ELECTION_NOTE_THIS_STATE.format(year=first)
-            if plain is None
-            else labels.C10_FIRST_ELECTION_NOTE.format(state=plain, year=first)
-        )
+    parts += _start_note(plain, first)
     return " ".join(parts)
+
+
+def _controls(chosen: Range) -> html.Div:
+    """The Years slider (#620, D119), over the state's span, so its value is the
+    selection and the callback never writes back a bound the reader did not move. It
+    keeps a row of its own, at the measure, from 76rem (#545)."""
+    first, last = chosen.span
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Label(
+                        labels.YEARS_FILTER, htmlFor=YEARS_ID, className="label"
+                    ),
+                    components.year_slider(
+                        YEARS_ID, first, last, (chosen.year_from, chosen.year_to)
+                    ),
+                ],
+                className="filter filter-own-row",
+            ),
+        ],
+        # The filters box, whose margin gives the card its space under its top rule
+        # (#567, D111), as on the state's per-capita page.
+        className="filters filter-row",
+    )
 
 
 def _charts_section(
     rows: list[dict[str, Any]],
-    served: set[int],
     usps: str,
     body: dict[str, Any],
     source: str,
-) -> list[Any]:
-    """C7 and C10's one section (#560, #582, #618; D106, D113, D117): C7's heading, the
-    headline figures (#601, D115), C7, C10's heading, C10, then the table the two share
-    and its column-name list, for the state's rows from the API path ``source``.
+    full: tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None],
+    chosen: Range,
+    year_min: int,
+) -> tuple[list[Any], bool]:
+    """C7 and C10's one section (#560, #582, #618, #620; D106, D113, D117, D119): the
+    Years slider, C7's heading, the headline figures (#601, D115), C7, C10's heading,
+    C10, then the table the two share and its column-name list, for the state's rows
+    from the API path ``source``.
 
-    Each chart is built in a ``try`` of its own (:func:`_electors_part`,
-    :func:`_totals_part`); one that cannot be built shows its sentence in its place
-    (D096(d)'s rule) and its column of the table reads
-    :data:`explore.labels.UNAVAILABLE_CELL`, with a note first among the table's, while
-    the other chart, its column and the page stay. The figures are built from C7's
-    collapse, so they go with C7. With neither half built, the table's heading shows
-    :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE` in its place. ``components.chart`` and
-    the table are built after both ``try`` blocks (D095(f)), from records the halves
-    already checked and the response's provenance, whose popular-vote bounds
-    :func:`render` reads first."""
-    c7 = _electors_part(rows, served, usps, source)
-    c10 = _totals_part(rows, served, usps, body, source)
-    content: list[Any] = [html.H2(C7_HEADING)]
+    ``full`` is each chart's whole collapse (:func:`collapsed`), ``None`` where it
+    cannot be read. With neither, there is nothing to narrow: no slider, and the
+    table's heading shows :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE` in its place. Each
+    chart draws its collapse narrowed to ``chosen`` (:func:`narrow`), in a ``try`` of
+    its own; one that cannot be built shows its sentence in its place (D096(d)'s rule)
+    and its column of the table reads :data:`explore.labels.UNAVAILABLE_CELL`, with a
+    note first among the table's, while the other chart, its column and the page stay.
+    What shows outside each chart's place follows the collapses, never whether a chart
+    was drawn (a drawing reads the narrowed records, so it could depend on the range;
+    D119(c), (d)): the slider, and the figures, which read C7's whole collapse and show
+    under C7's heading wherever it was read, whether or not C7 was drawn. Where the
+    range holds no election, :data:`explore.labels.STATE_NO_ELECTIONS_IN_RANGE` stands
+    in place of both charts and the table. ``components.chart`` and the table are built
+    after both ``try`` blocks (D095(f)). Returns the content and whether the slider
+    rendered, the one source :func:`render` passes on for the filter sentence."""
+    electors_full, totals_full = full
+    if electors_full is None and totals_full is None:
+        return [
+            html.H2(C7_HEADING),
+            html.P(C7_UNAVAILABLE, id=C7_UNAVAILABLE_ID, className="note"),
+            html.H2(C10_HEADING),
+            html.P(C10_UNAVAILABLE, id=C10_UNAVAILABLE_ID, className="note"),
+            html.H2(ELECTORS_TOTALS_TABLE_HEADING),
+            html.P(
+                ELECTORS_TOTALS_TABLE_UNAVAILABLE,
+                id=ELECTORS_TABLE_UNAVAILABLE_ID,
+                className="note",
+            ),
+        ], False
+    # The caption names the first election only where the chart starts there and it
+    # is after the dataset's first year (ba spec for #620).
+    start = (
+        chosen.year_from
+        if chosen.start_known
+        and chosen.year_from == chosen.span[0]
+        and chosen.year_from > year_min
+        else None
+    )
+    shown = [
+        None if records is None else narrow(records, chosen)
+        for records in (electors_full, totals_full)
+    ]
+    content: list[Any] = [_controls(chosen), html.H2(C7_HEADING)]
+    if electors_full is not None:
+        content.append(_figures(electors_full, rows, chosen.narrowed))
+    if not any(shown):
+        content.append(
+            html.P(
+                labels.STATE_NO_ELECTIONS_IN_RANGE, id=NO_MATCH_ID, className="empty"
+            )
+        )
+        return content, True
+    electors_shown, totals_shown = shown
+    c7 = (
+        None
+        if electors_shown is None
+        else _electors_part(electors_shown, rows, usps, source, start)
+    )
+    c10 = (
+        None
+        if totals_shown is None
+        else _totals_part(totals_shown, rows, usps, body, source, start)
+    )
     if c7 is None:
         content.append(html.P(C7_UNAVAILABLE, id=C7_UNAVAILABLE_ID, className="note"))
     else:
-        content += [
-            _figures(c7.records, rows),
-            components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, c7.caption),
-        ]
+        content.append(
+            components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, c7.caption)
+        )
     content.append(html.H2(C10_HEADING))
     if c10 is None:
-        content.append(
-            html.P(C10_UNAVAILABLE, id=C10_UNAVAILABLE_ID, className="note")
-        )
+        content.append(html.P(C10_UNAVAILABLE, id=C10_UNAVAILABLE_ID, className="note"))
     else:
         content.append(
             components.chart(C10_ID, c10.figure, ELECTORS_TABLE_ID, c10.caption)
@@ -641,7 +835,7 @@ def _charts_section(
                 className="note",
             )
         )
-        return content
+        return content, True
     merged = merge(c7, c10)
     by_row = {id(m.record): m for m in merged}
     content += [
@@ -657,9 +851,11 @@ def _charts_section(
                     "election"
                 ),
                 provenance=body["meta"]["provenance"],
-                # Unfiltered: no filter reaches this table (D093(a)).
+                # The range the render applied (#620, D119).
                 view_url=export.view_url(
-                    CANONICAL_HOST, state_view.path(usps, state_view.HISTORY), ""
+                    CANONICAL_HOST,
+                    state_view.path(usps, state_view.HISTORY),
+                    applied_search(chosen),
                 ),
             ),
             extra=ELECTORS_EXTRA,
@@ -667,20 +863,31 @@ def _charts_section(
         ),
         labels.glossary(ELECTORS_FIELDS, ident=ELECTORS_GLOSSARY_ID),
     ]
-    return content
+    return content, True
+
+
+def applied_search(chosen: Range) -> str:
+    """The range a render applied, as the query its section links and its download's
+    view URL carry, in the normal form ``og:url`` and the callback write (``""`` or
+    ``?…``): a bound at its end of the state's span is the default and is omitted."""
+    return state_view.year_search(chosen.year_from, chosen.year_to, chosen.span)
 
 
 def render(
-    body: dict[str, Any], index: dict[str, Any], usps: str
-) -> tuple[html.Div, Any]:
-    """The page body and the state's name as served (the layout checks it has text),
-    for one ``/v1/states/{usps}`` response and the ``/v1/elections`` index (read
-    through the same view): the section links, carrying no year range (the page
-    applies none until #620; D118), then C7 and C10's section with the table they share
-    (#582, #618; D113, D117), and the footer."""
+    body: dict[str, Any],
+    index: dict[str, Any],
+    usps: str,
+    pairs: list[tuple[str, str]] | None = None,
+) -> tuple[html.Div, Any, bool]:
+    """The page body, the state's name as served (the layout checks it has text) and
+    whether the Years slider rendered (the layout adds the filter sentence only then),
+    for one ``/v1/states/{usps}`` response, the ``/v1/elections`` index (read through
+    the same view) and this page's filter pairs: the section links, carrying the year
+    range applied (D105, D119), the page-local Location, then C7 and C10's section with
+    the table they share (#582, #618, #620; D113, D117, D119), and the footer."""
     provenance = body["meta"]["provenance"]
     coverage = provenance["coverage"]
-    query.year_span(coverage["year_min"], coverage["year_max"])
+    year_min, year_max = query.year_span(coverage["year_min"], coverage["year_max"])
     # Read before either chart's half (D117 as amended, D118), so a missing popular-vote
     # bound is the page's in every view: the shared table's download preamble reads
     # both bounds outside both halves. A bound that is present and malformed is C10's
@@ -689,22 +896,65 @@ def render(
     source = f"/v1/states/{usps}"
     served = state_view.served_years(index)
     rows = state_view.rows(body, usps, served, source)
+    # Each collapse once, over the whole history (#620, D119): the span, the figures
+    # and each chart's half read the same result.
+    # A served name with nothing in it names no state, and both charts would refuse it
+    # whatever the range, so it counts as neither collapse read: no slider, as before
+    # #620 (D119(d)).
+    full: tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None] = (
+        (
+            collapsed(electors, rows, served, usps, source),
+            collapsed(popular_totals, rows, served, usps, source),
+        )
+        if labels.has_text(rows[0]["state"])
+        else (None, None)
+    )
+    chosen = state_range(pairs or [], full[0], rows, year_max)
+    section, filtered = _charts_section(
+        rows, usps, body, source, full, chosen, year_min
+    )
     content = html.Div(
         [
-            state_view.section_nav(usps, state_view.HISTORY, ""),
+            state_view.section_nav(usps, state_view.HISTORY, applied_search(chosen)),
+            dcc.Location(id=URL_ID, refresh="callback-nav"),
             # The page's one section (#567, D111; #618, D117): C7 and C10 with the
-            # table they share.
-            components.card(_charts_section(rows, served, usps, body, source)),
+            # table they share, under the Years slider (#620, D119).
+            components.card(section),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,
     )
-    return content, rows[0]["state"]
+    return content, rows[0]["state"], filtered
 
 
-def layout(usps: Any = None, **_params: Any) -> html.Div:
+def search_for(years: Any, first: Any, last: Any) -> str:
+    """The query string for the slider's value, in the normal form ``og:url`` uses
+    (``""`` or ``?…``): a bound at its end of the slider's track, the state's span, is
+    omitted."""
+    params = query.year_range_search(years, first, last)
+    return query.encode_search(parse_filters(params))
+
+
+@callback(
+    Output(URL_ID, "search"),
+    Input(YEARS_ID, "value"),
+    State(YEARS_ID, "min"),
+    State(YEARS_ID, "max"),
+    State(URL_ID, "search"),
+    prevent_initial_call=True,
+)
+def on_filter_change(years: Any, first: Any, last: Any, current: Any) -> Any:
+    """A filter change becomes a URL change; the router re-renders from the cache.
+    Reads no API. An unchanged search is left alone (#620, D119)."""
+    search = search_for(years, first, last)
+    return no_update if search == (current or "") else search
+
+
+def layout(usps: Any = None, **params: Any) -> html.Div:
     heading = "State history"
-    # The not-found state shows no lede (#325); the page reads no query (D118).
+    # The filter sentence only above the slider: not on the not-found or degraded
+    # state, nor where neither chart could be read (#620). The not-found state shows
+    # no lede at all (#325).
     lede: str | None = LEDE
     try:
         with api.CLIENT.view() as view:
@@ -715,11 +965,15 @@ def layout(usps: Any = None, **_params: Any) -> html.Div:
             else:
                 index = view.get(api.ELECTIONS_PATH)
                 body = view.get(f"/v1/states/{usps}")
-                content, state = render(body, index, usps)
+                content, state, filtered = render(
+                    body, index, usps, parse_filters(params)
+                )
                 # A served name with nothing in it names no state (#532's rule), as on
                 # the per-capita page: the heading stays "State history".
                 if labels.has_text(state):
                     heading = state
+                if filtered:
+                    lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     lead = [] if lede is None else [html.P(lede, className="lede")]

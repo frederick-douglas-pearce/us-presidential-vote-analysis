@@ -45,7 +45,7 @@ SECTION_TEXT = {
 #: The history page's query keys that T4 took with it to the results page (#619,
 #: D118): an old ``/state/<usps>?candidate=…`` or ``?pv_status=…`` link answers 302 to
 #: :data:`RESULTS` (D092's ``moved=``). The year range is not moved: the section links
-#: write it on every state page's URL, and the history page is to read it (#620).
+#: write it on every state page's URL, and the history page reads it (#620, D119).
 MOVED_KEYS = ("candidate", "pv_status")
 
 
@@ -176,8 +176,8 @@ def section_nav(usps: str, current: str, search: str) -> html.Nav:
     being read is text carrying ``aria-current="page"`` (a ``dcc.Link`` renders no
     ``aria-*``, and a link to itself would be no link), the others client-side links
     carrying ``search``, the year range the render applied and nothing else (the
-    election pages' section links carry no filter; D105). The history page applies no
-    year range until #620, so its ``search`` is ``""`` (D118)."""
+    election pages' section links carry no filter; D105). The history page carries the
+    range it applied, judged against the state's own span (#620, D119)."""
     aria_current: dict[str, Any] = {"aria-current": "page"}
     entries = [
         html.Span(SECTION_TEXT[section], **aria_current)

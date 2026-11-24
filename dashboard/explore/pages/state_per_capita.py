@@ -10,9 +10,8 @@ filter is the shared year range (``year_from`` / ``year_to``), judged against th
 dataset's span as on the results by election page (``pages/state_results.py``); any
 other key is dropped, so the candidate and popular-vote keys of a results link never
 reach ``og:url`` here (D081). Its section links carry the year range applied, and so
-do the results page's; the history page applies none until #620, so its links carry
-none (D118(c)). The chart that will sit beside
-T7, C8, is #561; until then the page holds no chart slot (#545's rule).
+do the results page's and the history page's (#620, D119). The chart that will sit
+beside T7, C8, is #561; until then the page holds no chart slot (#545's rule).
 """
 
 from __future__ import annotations
@@ -146,8 +145,9 @@ def on_filter_change(years: Any, first: Any, last: Any, current: Any) -> Any:
 
 
 def _controls(chosen: tuple[int, int], span: tuple[int, int]) -> html.Div:
-    # The dataset's span, as on the history page: the slider's value is then the
-    # selection, so the callback never writes back a bound the reader did not move.
+    # The dataset's span, as on the results by election page: the slider's value is
+    # then the selection, so the callback never writes back a bound the reader did not
+    # move. (The history page's track is the state's own span, D119.)
     first, last = span
     return html.Div(
         [
