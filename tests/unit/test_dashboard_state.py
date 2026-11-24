@@ -62,7 +62,7 @@ from tests.unit.test_dashboard_elections import (
     of_type,
     parse,
 )
-from tests.unit.test_dashboard_export import body_rows, download
+from tests.unit.test_dashboard_export import SERVED_KINDS, body_rows, download
 
 PAGE: dict[str, Any] = dash.page_registry["pages.state"]
 #: The page module's namespace, reached through its layout (Dash loads it by path).
@@ -1633,17 +1633,17 @@ class TestWideLayout:
         # Only the slider's box keeps its own row.
         assert classed(tree, "filter-own-row") == [kids[0]]
 
-    def test_c7_s_and_c10_s_sections_come_after_the_section_links_and_before_t4_s(
+    def test_c7_and_c10_s_section_comes_after_the_section_links_and_before_t4_s(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # #560, D106: the lede is added by layout(), so the whole page is checked there:
-        # the heading, the lede and the page body, nothing between. In the body, the
-        # section links first (#559, D105); then C7's section (its heading, its
-        # headline figures (#601, D115), the chart,
-        # its table's heading, the table in its scroll box, its download, its notes and
-        # its column-name list); then C10's, laid out alike (#582, D113); then T4's,
-        # under its own heading, with the page's Location and the filters that narrow
-        # it. Two charts, C7 and C10.
+        # #560, D106; #618, D117: the lede is added by layout(), so the whole page is
+        # checked there: the heading, the lede and the page body, nothing between. In
+        # the body, the section links first (#559, D105); then one card holding C7's
+        # heading, its headline figures (#601, D115), C7, C10's heading, C10, the
+        # heading of the table the two share, the table in its scroll box, its
+        # download, its notes and its column-name list; then T4's, under its own
+        # heading, with the page's Location and the filters that narrow it. Two
+        # charts, C7 and C10.
         cached_client(monkeypatch)
         page = MOD["layout"](usps="GA")
         heading, lede, content = page.children
@@ -1652,36 +1652,37 @@ class TestWideLayout:
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
         assert kids[0].id == state_view.SECTIONS_ID
-        # Three cards, one per section (#567, D111): C7's, C10's, then T4's.
-        assert cards(content) == kids[1:4]
-        c7 = card_children(content, 1)
-        assert type(c7[0]).__name__ == "H2"
-        assert c7[0].children == MOD["C7_HEADING"]
-        assert c7[1].id == MOD["METRICS_ID"]
-        assert type(c7[2]).__name__ == "Figure"
-        assert c7[2].id == charts.dom_id(MOD["C7_ID"])
-        assert type(c7[3]).__name__ == "H2"
-        assert c7[3].children == MOD["C7_TABLE_HEADING"]
-        # C7's table and its column-name list are in C7's card, and T4 is not.
-        assert find(c7, MOD["ELECTORS_TABLE_ID"]) is not None
-        assert find(c7, MOD["ELECTORS_GLOSSARY_ID"]) is not None
-        assert find(c7, MOD["TABLE_ID"]) is None
-        c10 = card_children(content, 2)
-        assert [type(k).__name__ for k in c10[:3]] == ["H2", "Figure", "H2"]
-        assert c10[0].children == MOD["C10_HEADING"]
-        assert c10[1].id == charts.dom_id(MOD["C10_ID"])
-        assert c10[2].children == MOD["C10_TABLE_HEADING"]
-        assert find(c10, MOD["TOTALS_TABLE_ID"]) is not None
-        assert find(c10, MOD["TOTALS_GLOSSARY_ID"]) is not None
-        assert find(c10, MOD["TABLE_ID"]) is None
-        t4 = card_children(content, 3)
+        # Two cards (#567, D111; #618, D117): C7 and C10 with their table, then T4's.
+        assert cards(content) == kids[1:3]
+        charts_card = card_children(content, 1)
+        assert [type(k).__name__ for k in charts_card[:6]] == [
+            "H2",
+            "Div",
+            "Figure",
+            "H2",
+            "Figure",
+            "H2",
+        ]
+        assert charts_card[0].children == MOD["C7_HEADING"]
+        assert charts_card[1].id == MOD["METRICS_ID"]
+        assert charts_card[2].id == charts.dom_id(MOD["C7_ID"])
+        assert charts_card[3].children == MOD["C10_HEADING"]
+        assert charts_card[4].id == charts.dom_id(MOD["C10_ID"])
+        assert charts_card[5].children == MOD["ELECTORS_TOTALS_TABLE_HEADING"]
+        # The one table and its column-name list follow both charts, in their card.
+        assert find(charts_card, MOD["ELECTORS_TABLE_ID"]) is not None
+        assert find(charts_card, MOD["ELECTORS_GLOSSARY_ID"]) is not None
+        assert find(charts_card, MOD["TABLE_ID"]) is None
+        # The retired table and its list are gone (D097(g): never reused).
+        assert find(content, "state-popular-total") is None
+        assert find(content, "state-popular-total-glossary") is None
+        t4 = card_children(content, 2)
         assert type(t4[0]).__name__ == "H2"
         assert t4[0].children == MOD["HISTORY_TABLE_HEADING"]
         assert type(t4[1]).__name__ == "Location"
         assert t4[2].className.split()[:1] == ["filters"]
         assert find(t4, MOD["TABLE_ID"]) is not None
         assert find(t4, MOD["ELECTORS_TABLE_ID"]) is None
-        assert find(t4, MOD["TOTALS_TABLE_ID"]) is None
         assert [f.id for f in of_type(page, "Figure")] == [
             charts.dom_id("C7"),
             charts.dom_id("C10"),
@@ -1748,12 +1749,18 @@ HISTORIES = {
 }
 
 
-def body_cells(tree: Any) -> list[tuple[str, str, str]]:
-    """C7's companion table's body: each row's year, allotment and status texts."""
+def shared_cells(tree: Any) -> list[tuple[str, str, str, str]]:
+    """The table C7 and C10 share (#618): each row's year, allotment, status and total
+    texts."""
     return [
         tuple(" ".join(texts(cell)) for cell in tr.children)  # type: ignore[misc]
         for tr in body_rows(tree, ELECTORS)
     ]
+
+
+def body_cells(tree: Any) -> list[tuple[str, str, str]]:
+    """C7's columns of its companion table: each row's year, allotment and status."""
+    return [(year, appointed, status) for year, appointed, status, _ in shared_cells(tree)]
 
 
 def c7_figure(tree: Any) -> Any:
@@ -1819,17 +1826,19 @@ class TestC7:
         assert margin["t"] == over_time.TOP_PX
         assert figure["layout"]["yaxis"]["automargin"] is False
 
-    def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
+    def test_it_is_registered_on_the_history_page_with_the_shared_table(self) -> None:
         assert charts.CHARTS["C7"] == charts.Chart("/state/<usps>", ELECTORS)
         tree = render()
         figure, _ = of_type(tree, "Figure")
         assert figure.id == C7_DOM == "c7"
         assert find(tree, ELECTORS) is not None
         csv = download(tree, ELECTORS)
+        # Shared with C10 since #618 (D117): append-only from C7's own columns.
         assert csv.header == [
             "year",
             "state_electoral_votes",
             "pv_status",
+            "state_popular_total",
             "state_usps",
         ]
         assert {r["state_usps"] for r in csv.rows} == {"GA"}
@@ -1933,10 +1942,10 @@ class TestC7:
 
     @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
     def test_the_table_s_links_view_and_note(self, query: str) -> None:
-        # Its own table, never T4's: each year links to that election's page, its
-        # file names the history page with no filter whatever the render applied
-        # (D093(a)), and its note, the allotment's basis, is under the table and in
-        # the file's preamble (#560's acceptance gate, Class B).
+        # The table C7 shares with C10 (#618), never T4: each year links to that
+        # election's page, its file names the history page with no filter whatever the
+        # render applied (D093(a)), and the allotment's basis is among its notes, under
+        # the table and in the file's preamble (#560's acceptance gate, Class B).
         tree = render(query)
         rows = body_rows(tree, ELECTORS)
         assert rows
@@ -2076,13 +2085,69 @@ class TestC7:
         assert all(charts.escaped("<b>Georgia") in h for h in hovers)
 
 
+def column(tree: Any, field: str) -> list[str]:
+    """One column of the shared table's file, by field name."""
+    return [r[field] for r in download(tree, ELECTORS).rows]
+
+
+#: Every note the shared table can carry (#618, D117(d)), so a degrade test can pin the
+#: exact list it shows, not only an order among some of them.
+def shared_notes(lines: list[str]) -> list[str]:
+    window_note = labels.OVER_TIME_WINDOW_NOTE.format(
+        pv_year_min=WINDOW[0], pv_year_max=WINDOW[1]
+    )
+    known = (
+        MOD["ELECTORS_UNAVAILABLE_NOTE"],
+        MOD["TOTALS_UNAVAILABLE_NOTE"],
+        labels.C4_BASIS,
+        labels.C5_BASIS,
+        window_note,
+    )
+    return [line for line in lines if line in known]
+
+
+def assert_column_unavailable(
+    tree: Any, plain: Any, field: str, note: str
+) -> None:
+    """The shared table stays with ``field``'s column unavailable (#618, D117): the same
+    header and years as the undoctored render's file, every cell of the column empty
+    there and :data:`explore.labels.UNAVAILABLE_CELL` on the page, and ``note`` first
+    among the table's notes, under it and in the preamble."""
+    csv, before = download(tree, ELECTORS), download(plain, ELECTORS)
+    assert csv.header == before.header
+    assert column(tree, "year") == column(plain, "year")
+    assert set(column(tree, field)) == {""}
+    at = {"state_electoral_votes": 1, "state_popular_total": 3}[field]
+    assert {row[at] for row in shared_cells(tree)} == {labels.UNAVAILABLE_CELL}
+    # The exact notes (D117(d); #629's review, cr.2): the degraded column's note first,
+    # never the other column's, both bases, and the window only when C10's half was
+    # built, in the file and under the table alike.
+    window = (
+        []
+        if field == "state_popular_total"
+        else [
+            labels.OVER_TIME_WINDOW_NOTE.format(
+                pv_year_min=WINDOW[0], pv_year_max=WINDOW[1]
+            )
+        ]
+    )
+    expected = [note, labels.C4_BASIS, labels.C5_BASIS, *window]
+    assert shared_notes(csv.lines) == expected
+    (card,) = [k for k in cards(tree) if find(k, ELECTORS) is not None]
+    held = list(card.children)
+    (at_table,) = [i for i, k in enumerate(held) if find(k, ELECTORS) is not None]
+    assert shared_notes(texts(held[at_table + 1 :])) == expected
+
+
 class TestC7Degraded:
-    """A body T4 accepts that C7 cannot read as one allotment per election degrades
-    C7's section alone (D096(d)'s rule, #560's AC5 as D106(e) reads it): its heading
-    and :data:`C7_UNAVAILABLE`, no chart and no ``c7`` id, while T4, its filters and the
-    page's success marker stay. Which faults also degrade C10 is exact per test (#582,
-    D113(c) as amended): a fault in the allotment C7 alone; one in what both read (the
-    years, the state's name, ``pv_status``) both."""
+    """A body T4 accepts that C7 cannot read as one allotment per election (D096(d)'s
+    rule, #560's AC5) puts :data:`C7_UNAVAILABLE` in C7's place, with no chart, no
+    ``c7`` id and no headline figures. Which faults also reach C10 is exact per test
+    (#582, D113(c) as amended; #618, D117): a fault in the allotment C7 alone, when the
+    shared table stays with its electors column unavailable and C10 and its column as
+    they were; one in what both read (the years, the state's name, ``pv_status``) both,
+    when the table gives way to :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE`. T4, its
+    filters and the page's success marker stay either way."""
 
     def assert_degraded(self, body: dict[str, Any], *, both: bool) -> None:
         tree = render(body=body)
@@ -2091,17 +2156,34 @@ class TestC7Degraded:
         assert (find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None) is both
         assert [f.id for f in of_type(tree, "Figure")] == ([] if both else [C10_DOM])
         assert c7_figure(tree) is None
-        assert find(tree, ELECTORS) is None
+        # The figures are built from C7's collapse, so they go with it (D115(g)).
+        assert find(tree, MOD["METRICS_ID"]) is None
         assert find(tree, TABLE) is not None
         assert find(tree, MOD["YEARS_ID"]) is not None
         headings = [h.children for h in of_type(tree, "H2")]
-        assert headings[:2] == [MOD["C7_HEADING"], MOD["C10_HEADING"]]
-        assert headings.index(MOD["HISTORY_TABLE_HEADING"]) > 1
-        assert MOD["C7_TABLE_HEADING"] not in headings
-        # C7's note is in C7's card, the first of the page's three, C10's in the
-        # second (#582) and T4 in the third (#567).
-        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=3)
-        assert in_one_card(tree, TABLE, total=3) is not c7
+        assert headings[:4] == [
+            MOD["C7_HEADING"],
+            MOD["C10_HEADING"],
+            MOD["ELECTORS_TOTALS_TABLE_HEADING"],
+            MOD["HISTORY_TABLE_HEADING"],
+        ]
+        if both:
+            assert find(tree, ELECTORS) is None
+            assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is not None
+        else:
+            plain = render()
+            assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is None
+            assert_column_unavailable(
+                tree,
+                plain,
+                "state_electoral_votes",
+                MOD["ELECTORS_UNAVAILABLE_NOTE"],
+            )
+            assert c10_figure(tree) == c10_figure(plain)
+        # C7's note is in the page's first card, with C10 and the table (#618), and T4
+        # in the second (#567).
+        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=2)
+        assert in_one_card(tree, TABLE, total=2) is not c7
         assert every_card(tree)[0] is c7
 
     def test_two_allotments_in_one_election(self) -> None:
@@ -2124,9 +2206,10 @@ class TestC7Degraded:
         self.assert_degraded(body, both=True)
 
     def test_two_allotments_leave_c10_exactly_as_it_was(self) -> None:
-        """#582 (D113(c)), AC5's converse: an allotment C7 cannot read degrades C7
-        alone; C10 and its table are the undoctored render's (T4 shows the allotment,
-        so its file changes, and T4 stays)."""
+        """#582 (D113(c)), AC5's converse, kept inside one table by #618 (D117): an
+        allotment C7 cannot read leaves C10, its column and the status column the
+        undoctored render's (T4 shows the allotment, so its file changes, and T4
+        stays)."""
         plain = render()
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
@@ -2134,7 +2217,11 @@ class TestC7Degraded:
         tree = render(body=body)
         assert c7_figure(tree) is None
         assert c10_figure(tree) == c10_figure(plain)
-        assert download(tree, TOTALS).raw == download(plain, TOTALS).raw
+        for field in ("year", "pv_status", "state_popular_total", "state_usps"):
+            assert column(tree, field) == column(plain, field), field
+        assert [t for _, t, _ in totals_cells(tree)] == [
+            t for _, t, _ in totals_cells(plain)
+        ]
         assert find(tree, TABLE) is not None
 
     def test_a_gap_after_the_first_election(self) -> None:
@@ -2186,7 +2273,8 @@ class TestC7Degraded:
 # --- chart C10: the state's total popular vote in each election (#582, D113) ----------
 
 C10_DOM = charts.dom_id("C10")
-TOTALS = MOD["TOTALS_TABLE_ID"]
+#: C10's companion table, the one it shares with C7 since #618 (D117).
+TOTALS = ELECTORS
 #: The years the narrowed one-value rule decides for Georgia (D113(b)): each has a
 #: candidate row with no popular-vote record, whose total is null, beside the figure.
 GA_SKIPPED_YEARS = (1976, 1988, 2004, 2016)
@@ -2217,11 +2305,8 @@ def c10_caption(tree: Any) -> str:
 
 
 def totals_cells(tree: Any) -> list[tuple[str, str, str]]:
-    """C10's companion table's body: each row's year, total and status texts."""
-    return [
-        tuple(" ".join(texts(cell)) for cell in tr.children)  # type: ignore[misc]
-        for tr in body_rows(tree, TOTALS)
-    ]
+    """C10's columns of its companion table: each row's year, total and status."""
+    return [(year, total, status) for year, _, status, total in shared_cells(tree)]
 
 
 def bars_of(figure: dict[str, Any]) -> dict[int, int]:
@@ -2243,7 +2328,7 @@ def popular_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class TestC10:
-    def test_it_is_registered_on_the_history_page_with_its_own_table(self) -> None:
+    def test_it_is_registered_on_the_history_page_with_the_shared_table(self) -> None:
         assert charts.CHARTS["C10"] == charts.Chart(
             "/state/<usps>", TOTALS, short_value_ticks=True
         )
@@ -2251,7 +2336,13 @@ class TestC10:
         figures = [f.id for f in of_type(tree, "Figure")]
         assert figures == [C7_DOM, C10_DOM] and C10_DOM == "c10"
         csv = download(tree, TOTALS)
-        assert csv.header == ["year", "state_popular_total", "pv_status", "state_usps"]
+        assert csv.header == [
+            "year",
+            "state_electoral_votes",
+            "pv_status",
+            "state_popular_total",
+            "state_usps",
+        ]
         assert {r["state_usps"] for r in csv.rows} == {"GA"}
 
     def test_its_bars_are_popular_vote_blue_on_c7_s_axis_and_margin(self) -> None:
@@ -2325,20 +2416,27 @@ class TestC10:
                 for r in n2
             ], usps
 
-    def test_the_chart_equals_its_table_s_cells(self) -> None:
-        tree = render()
+    @pytest.mark.parametrize("usps", RECORDED_STATES)
+    def test_the_chart_equals_its_table_s_cells(self, usps: str) -> None:
+        # On every recorded state (#618's AC2: GA and TX), against the table C10
+        # shares with C7.
+        tree = render(usps=usps)
         figure = c10_figure(tree)
         rows = download(tree, TOTALS).rows
         cells = {int(r["year"]): r for r in rows}
-        assert set(cells) == set(range(1824, 2025, 4))
+        assert set(cells) == set(range(HISTORIES[usps].first, 2025, 4))
         for year, value in bars_of(figure).items():
             assert cells[year]["state_popular_total"] == str(value), year
         # Each hover writes the table's cells (D091), one per drawn point.
         hovers = hovers_by_year(figure)
+        assert hovers
         for shown, total, status in totals_cells(tree):
             if int(shown) in hovers:
                 assert hovers[int(shown)] == labels.C10_HOVER.format(
-                    year=shown, state="Georgia", total=total, pv_status=status
+                    year=shown,
+                    state=HISTORIES[usps].name,
+                    total=total,
+                    pv_status=status,
                 )
 
     def test_the_band_comes_from_coverage_never_a_literal(self) -> None:
@@ -2456,10 +2554,84 @@ class TestC10:
             lines
         )
         assert labels.C5_BASIS in lines
-        # C10 and its table share the page's second card (#567, #582).
-        card = in_one_card(tree, TOTALS, total=3)
-        assert in_one_card(tree, C10_DOM, total=3) is card
-        assert every_card(tree)[1] is card
+        # C7, C10 and their one table share the page's first card (#567, #618).
+        card = in_one_card(tree, TOTALS, total=2)
+        assert in_one_card(tree, C10_DOM, total=2) is card
+        assert in_one_card(tree, C7_DOM, total=2) is card
+        assert every_card(tree)[0] is card
+
+
+class TestSharedTable:
+    """The one table C7 and C10 share (#618, D117): joined on the year from the two
+    collapses, each column the cells its chart's hover writes, its notes by a fixed
+    rule, and a build that never takes the page down."""
+
+    @pytest.mark.parametrize("usps", RECORDED_STATES)
+    def test_c7_s_and_c10_s_status_cells_agree_every_year(self, usps: str) -> None:
+        # The status column is taken from C7's points; C10's must say the same (m-5).
+        body = copy.deepcopy(RECORDED[f"/v1/states/{usps}"])
+        rows = state_view.rows(body, usps, set(SERVED), f"/v1/states/{usps}")
+        c7 = MOD["_electors_part"](rows, set(SERVED), usps, "src")
+        c10 = MOD["_totals_part"](rows, set(SERVED), usps, body, "src")
+        assert c7 is not None and c10 is not None
+        assert [p.year for p in c7.points] == [p.year for p in c10.points]
+        assert [p.status_cell for p in c7.points] == [
+            p.status_cell for p in c10.points
+        ]
+        merged = MOD["merge"](c7, c10)
+        assert [m.status_cell for m in merged] == [
+            p.status_cell or labels.UNRECOGNIZED for p in c10.points
+        ]
+
+    def test_halves_that_disagree_on_the_years_are_a_code_fault(self) -> None:
+        body = ga_body()
+        rows = state_view.rows(body, "GA", set(SERVED), GA_PATH)
+        c7 = MOD["_electors_part"](rows, set(SERVED), "GA", GA_PATH)
+        c10 = MOD["_totals_part"](rows, set(SERVED), "GA", body, GA_PATH)
+        assert c7 is not None and c10 is not None
+        with pytest.raises(ValueError):
+            MOD["merge"](c7, c10._replace(points=c10.points[1:]))
+        shifted = [p._replace(year=p.year + 1) for p in c10.points]
+        with pytest.raises(ValueError):
+            MOD["merge"](c7, c10._replace(points=shifted))
+        assert MOD["merge"](None, None) == []
+
+    def test_its_notes_on_success(self) -> None:
+        # m-4: both bases always (they define headers that stay), then the window,
+        # which C10's half read; no unavailable note.
+        tree = render()
+        lines = download(tree, ELECTORS).lines
+        window_note = labels.OVER_TIME_WINDOW_NOTE.format(
+            pv_year_min=WINDOW[0], pv_year_max=WINDOW[1]
+        )
+        notes = [
+            line
+            for line in lines
+            if line
+            in (
+                labels.C4_BASIS,
+                labels.C5_BASIS,
+                window_note,
+                MOD["ELECTORS_UNAVAILABLE_NOTE"],
+                MOD["TOTALS_UNAVAILABLE_NOTE"],
+            )
+        ]
+        assert notes == [labels.C4_BASIS, labels.C5_BASIS, window_note]
+
+    @pytest.mark.parametrize("field", ["state_electoral_votes", "state_popular_total"])
+    @pytest.mark.parametrize("kind", sorted(SERVED_KINDS))
+    def test_no_served_value_takes_the_page_down(self, field: str, kind: str) -> None:
+        """I-1 (#618's architect review): the table is built after both halves'
+        ``try`` blocks, so a served value either half lets through must never raise
+        there. Every kind in each field of 2016's rows leaves the page, its success
+        marker and the shared table, or that half's sentence with the other half's
+        table."""
+        body = with_year(ga_body(), 2016, **{field: SERVED_KINDS[kind]})
+        tree = render(body=body)
+        assert getattr(tree, "id", None) == PAGE_ID
+        assert find(tree, TABLE) is not None
+        assert find(tree, ELECTORS) is not None
+        assert len(download(tree, ELECTORS).rows) == len(body_rows(tree, ELECTORS))
 
 
 class TestPopularTotals:
@@ -2558,10 +2730,12 @@ class TestPopularTotals:
 
 
 class TestC10Degraded:
-    """AC5: a body T4 accepts whose total popular vote C10 cannot read as one per
-    election degrades C10's section alone: its heading and :data:`C10_UNAVAILABLE`, no
-    chart, no ``c10`` id and no table, while C7 (exactly as it was), T4, its filters and
-    the page's success marker stay (D113(c))."""
+    """AC5 as #618 keeps it (owner's ruling, D117): a body T4 accepts whose total
+    popular vote C10 cannot read as one per election puts :data:`C10_UNAVAILABLE` in
+    C10's place, with no chart and no ``c10`` id, and the shared table's total column
+    reads unavailable with :data:`TOTALS_UNAVAILABLE_NOTE` first among its notes and no
+    window note, while C7 (exactly as it was), the headline figures, the electors and
+    status columns, T4, its filters and the page's success marker stay (D113(c))."""
 
     def assert_degraded(self, body: dict[str, Any], *, t4_file: bool = True) -> None:
         """``t4_file``: T4's CSV equals the undoctored render's; false only where the
@@ -2572,21 +2746,35 @@ class TestC10Degraded:
         assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
         assert c10_figure(tree) is None
         assert find(tree, C10_DOM) is None
-        assert find(tree, TOTALS) is None
         assert [f.id for f in of_type(tree, "Figure")] == [C7_DOM]
         assert c7_figure(tree) == c7_figure(plain)
-        assert download(tree, ELECTORS).rows == download(plain, ELECTORS).rows
+        metrics = find(tree, MOD["METRICS_ID"])
+        assert metrics is not None
+        assert texts(metrics) == texts(find(plain, MOD["METRICS_ID"]))
+        assert_column_unavailable(
+            tree, plain, "state_popular_total", MOD["TOTALS_UNAVAILABLE_NOTE"]
+        )
+        for field in ("year", "state_electoral_votes", "pv_status", "state_usps"):
+            assert column(tree, field) == column(plain, field), field
+        assert [c[:3] for c in shared_cells(tree)] == [
+            c[:3] for c in shared_cells(plain)
+        ]
+        window_note = labels.OVER_TIME_WINDOW_NOTE.format(
+            pv_year_min=WINDOW[0], pv_year_max=WINDOW[1]
+        )
+        assert window_note in download(plain, ELECTORS).lines
+        assert window_note not in download(tree, ELECTORS).lines
+        assert window_note not in texts(tree)
         if t4_file:
-            assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
             assert download(tree, TABLE).raw == download(plain, TABLE).raw
         else:
             assert download(tree, TABLE).rows == download(plain, TABLE).rows
         assert find(tree, MOD["YEARS_ID"]) is not None
+        assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is None
         headings = [h.children for h in of_type(tree, "H2")]
         assert MOD["C10_HEADING"] in headings
-        assert MOD["C10_TABLE_HEADING"] not in headings
-        card = in_one_card(tree, MOD["C10_UNAVAILABLE_ID"], total=3)
-        assert every_card(tree)[1] is card
+        card = in_one_card(tree, MOD["C10_UNAVAILABLE_ID"], total=2)
+        assert every_card(tree)[0] is card
 
     def test_two_totals_in_one_election(self) -> None:
         body = ga_body()
@@ -2611,6 +2799,10 @@ class TestC10Degraded:
         coverage = body["meta"]["provenance"]["coverage"]
         coverage["pv_year_min"], coverage["pv_year_max"] = window
         self.assert_degraded(body, t4_file=False)
+        # Accepted leftover (#618's architect review, m-1; D117): the file still
+        # carries a popular-vote field, so its preamble writes the window as served.
+        lines = download(render(body=body), ELECTORS).lines
+        assert f"Popular votes cover {window[0]}–{window[1]}" in lines
 
     @pytest.mark.parametrize("window", [(1976, "2024"), (None, 2024)])
     def test_a_window_t4_cannot_compare_degrades_the_page(
@@ -2624,6 +2816,58 @@ class TestC10Degraded:
         coverage["pv_year_min"], coverage["pv_year_max"] = window
         with pytest.raises(TypeError):
             render(body=body)
+
+    @pytest.mark.parametrize("bound", ["pv_year_min", "pv_year_max"])
+    @pytest.mark.parametrize(
+        "query", ["", "year_from=1824&year_to=1824&pv_status=popular_vote"]
+    )
+    def test_a_missing_window_bound_degrades_the_page_in_every_view(
+        self, bound: str, query: str
+    ) -> None:
+        """#629's review, cr.1 (D117 as amended): ``render`` reads both bounds before
+        either half, so a missing one is the page's in every view, T4's empty result
+        included, where the shared table's download preamble would read it anyway."""
+        body = ga_body()
+        del body["meta"]["provenance"]["coverage"][bound]
+        if query:
+            # The view leaves T4 empty (no table, no download), so only the shared
+            # table's preamble would read the window: the case main kept the page in.
+            assert find(render(query), TABLE) is None
+        with pytest.raises(KeyError):
+            render(query, body=body)
+
+    @pytest.mark.parametrize("bound", ["pv_year_min", "pv_year_max"])
+    def test_a_missing_bound_degrades_the_page_where_nothing_else_reads_it(
+        self, bound: str
+    ) -> None:
+        """The mechanism, not only the outcome: with both halves failed (two statuses in
+        1900) there is no shared table, and T4's view is empty, so no download
+        preamble reads the window; only ``render``'s own read makes a missing bound the
+        page's (D117 as amended)."""
+        query = "year_from=1824&year_to=1824&pv_status=popular_vote"
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["pv_status"] = "legislature_chosen"
+        kept = render(query, body=copy.deepcopy(body))
+        assert getattr(kept, "id", None) == PAGE_ID
+        assert find(kept, ELECTORS) is None and find(kept, TABLE) is None
+        del body["meta"]["provenance"]["coverage"][bound]
+        with pytest.raises(KeyError):
+            render(query, body=body)
+
+    def test_a_malformed_window_with_t4_empty_degrades_c10_alone(self) -> None:
+        """#629's review, cr.1: a bound that is present and malformed stays C10's half's
+        to refuse, so the page, C7 and the shared table stay in a view T4 shows
+        nothing in."""
+        body = ga_body()
+        coverage = body["meta"]["provenance"]["coverage"]
+        coverage["pv_year_min"], coverage["pv_year_max"] = (2000, 1990)
+        tree = render("year_from=1824&year_to=1824&pv_status=popular_vote", body=body)
+        assert getattr(tree, "id", None) == PAGE_ID
+        assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
+        assert c7_figure(tree) is not None
+        assert find(tree, ELECTORS) is not None
+        assert set(column(tree, "state_popular_total")) == {""}
 
     def test_a_row_without_the_total(self) -> None:
         body = ga_body()
@@ -2642,29 +2886,34 @@ class TestC10Degraded:
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
         assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
         assert of_type(tree, "Figure") == []
+        # Neither half was built, so the shared table gives way to its note (#618).
+        assert find(tree, ELECTORS) is None
+        assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is not None
         assert find(tree, TABLE) is not None
 
     def test_the_try_never_wraps_the_chart_call(self) -> None:
-        """D095(f): ``components.chart`` is called after the ``try``, never in it, so a
-        figure the chart rules refuse is logged, never swallowed as a degraded
-        section."""
-        tree = ast.parse(inspect.getsource(MOD["_totals_section"]).lstrip())
-        (handler,) = [n for n in ast.walk(tree) if isinstance(n, ast.Try)]
-        inside = [
+        """D095(f): ``components.chart`` is called after both halves' ``try`` blocks,
+        never in one, so a figure the chart rules refuse is logged, never swallowed as
+        a chart that could not be built (#618: C7's half as well as C10's)."""
+        for name in ("_electors_part", "_totals_part"):
+            tree = ast.parse(inspect.getsource(MOD[name]).lstrip())
+            (handler,) = [n for n in ast.walk(tree) if isinstance(n, ast.Try)]
+            assert [
+                n
+                for n in ast.walk(ast.Module(body=handler.body, type_ignores=[]))
+                if isinstance(n, ast.Attribute) and n.attr == "chart"
+            ] == [], name
+        section = ast.parse(inspect.getsource(MOD["_charts_section"]).lstrip())
+        assert [n for n in ast.walk(section) if isinstance(n, ast.Try)] == []
+        calls = [
             n
-            for n in ast.walk(ast.Module(body=handler.body, type_ignores=[]))
-            if isinstance(n, ast.Attribute) and n.attr == "chart"
-        ]
-        assert inside == []
-        after = [
-            n
-            for n in ast.walk(tree)
+            for n in ast.walk(section)
             if isinstance(n, ast.Attribute)
             and n.attr == "chart"
             and isinstance(n.value, ast.Name)
             and n.value.id == "components"
         ]
-        assert len(after) == 1
+        assert len(calls) == 2
 
 
 class TestStateSeries:
@@ -3124,7 +3373,7 @@ class TestStateFigures:
         self,
     ) -> None:
         tree = render()
-        card = in_one_card(tree, ST_FIGURES, total=3)
+        card = in_one_card(tree, ST_FIGURES, total=2)
         assert find(card, charts.dom_id(MOD["C7_ID"])) is not None
         order = [getattr(n, "id", None) for n in components._within(card.children)]
         assert order.index(ST_FIGURES) < order.index(charts.dom_id(MOD["C7_ID"]))

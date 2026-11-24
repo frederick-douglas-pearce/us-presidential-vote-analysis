@@ -55,9 +55,9 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 #: The chart registry (#432): every chart ID ever registered, live or retired. An ID is
 #: issued when its chart story registers it, is never renumbered or reused, and stays
 #: here once retired. C1 (#433) was the first, C3 (#435) the second, C2 (#434) the
-#: third, C4 and C5 (#436) the fourth and fifth, C7 (#560) the sixth and C10 (#582) the
-#: seventh: IDs follow the stories' filing order, and C6 (#550), C8 (#561) and C9 (#563)
-#: are filed but not yet registered.
+#: third, C4 and C5 (#436) the fourth and fifth, C7 (#560) the sixth, C10 (#582) the
+#: seventh and C9 (#563) the eighth: IDs follow the stories' filing order, and C6 (#550)
+#: and C8 (#561) are filed but not yet registered.
 #: ``components.chart`` reads it by attribute at call time. ``ISSUED``, a hand-written
 #: literal of every issued ID with its whole row, must equal this
 #: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
@@ -82,13 +82,13 @@ CHARTS: Mapping[str, Chart] = {
         "/elections/over-time", "elections-over-time-table", short_value_ticks=True
     ),
     # One state's electors appointed in each election, never narrowed by the page's
-    # filters, on the state's history page, beside its own companion table (#560,
-    # D106).
+    # filters, on the state's history page (#560, D106), above C10 and the one
+    # companion table the two share (#618, D117).
     "C7": Chart("/state/<usps>", "state-electors"),
-    # The same state's total popular vote in each election, below C7 on its page, never
-    # narrowed by the page's filters, beside its own companion table; its value axis
-    # writes its numbers short, as C5's does (#582, D113).
-    "C10": Chart("/state/<usps>", "state-popular-total", short_value_ticks=True),
+    # The same state's total popular vote in each election, directly below C7 on its
+    # page, never narrowed by the page's filters, sharing C7's companion table (#618,
+    # D117); its value axis writes its numbers short, as C5's does (#582, D113).
+    "C10": Chart("/state/<usps>", "state-electors", short_value_ticks=True),
     # How many candidates received electoral votes in each election, on the list of
     # elections, narrowed by its year filters (D110), above T1, its companion table
     # (#563, D116).

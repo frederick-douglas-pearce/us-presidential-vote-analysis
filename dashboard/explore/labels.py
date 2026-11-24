@@ -225,6 +225,15 @@ NOT_IN_DATASET = "Not in this dataset"
 #: writes the value as served.
 UNRECOGNIZED = "Unrecognized value"
 
+#: A cell this page could not read just now (#563, D116(e); #618): every cell of a
+#: column whose source could not be read or checked in this render. A table note names
+#: the column wherever the column is in the download; T1's page-only Recipients column
+#: in its tier 2 has none (D116(e)). Not a value, and never :data:`NOT_IN_DATASET`:
+#: the dataset may hold one. Moved from ``pages/elections.py``
+#: (``T1_N1_UNAVAILABLE_CELL``) unchanged, so T1 and the state history's table share
+#: one wording (ba spec, #618's plan gate).
+UNAVAILABLE_CELL = "Not available right now"
+
 #: The help text every :data:`UNRECOGNIZED` cell carries (#355). Wording approved by the
 #: owner at #354's plan gate, 2026-10-15. One sentence, true on the panel too, which has
 #: no download.

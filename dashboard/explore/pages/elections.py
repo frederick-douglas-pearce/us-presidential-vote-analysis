@@ -32,7 +32,7 @@ The first table, and the one that sets the conventions later tables reuse (#306)
   T1, its hover the year's Recipients cell, and narrows with T1 (D110). Two tiers
   (D116(e)): N1 unread, its items failing their check, the popular-vote window's
   bounds failing ``query.year_span``, or a served year's item lacking a field T1's
-  cells read empties every N1 cell (:data:`T1_N1_UNAVAILABLE_CELL`) and C9; a
+  cells read empties every N1 cell (:data:`explore.labels.UNAVAILABLE_CELL`) and C9; a
   recipient row check or the
   reconciliation with ``candidate_count`` failing in any served year empties the
   Recipients cells and C9 only. Both are checked over every served year before the
@@ -138,9 +138,9 @@ NO_COUNTED_VOTE_NOTE = (
     "Congress's count: either the elector did not vote, or the vote was cast and not "
     "counted. In 2000, one elector from the District of Columbia did not vote."
 )
-#: Each N1 cell, and the note first among T1's, when N1 cannot be read (tier 1); in a
-#: recipient-row fault (tier 2) only the Recipients cells read the cell, with no note.
-T1_N1_UNAVAILABLE_CELL = "Not available right now"
+#: The note first among T1's when N1 cannot be read (tier 1), when each N1 cell reads
+#: :data:`explore.labels.UNAVAILABLE_CELL`; in a recipient-row fault (tier 2) only the
+#: Recipients cells read the cell, with no note.
 T1_N1_UNAVAILABLE_NOTE = (
     "Some columns can't be shown right now: electoral votes cast outside the top two, "
     "electors without a counted vote, the electoral and popular-vote margins, and who "
@@ -206,7 +206,7 @@ class N1Cells(NamedTuple):
 
 
 #: Every N1 cell when N1 cannot be read (tier 1).
-UNAVAILABLE_CELLS = N1Cells(dict.fromkeys(N1_FIELDS, T1_N1_UNAVAILABLE_CELL), None)
+UNAVAILABLE_CELLS = N1Cells(dict.fromkeys(N1_FIELDS, labels.UNAVAILABLE_CELL), None)
 
 
 def recipient_lines(recipients: list[elections_view.Recipient]) -> tuple[str, ...]:
@@ -235,7 +235,7 @@ def _row(election: dict[str, Any], cells: N1Cells) -> html.Tr:
             *(labels.cell(cells.fields[field]) for field in N1_FIELDS),
             # The page-only column, last (D116): one line per recipient.
             html.Td(
-                T1_N1_UNAVAILABLE_CELL
+                labels.UNAVAILABLE_CELL
                 if lines is None
                 else [
                     part

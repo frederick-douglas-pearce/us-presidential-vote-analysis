@@ -47,10 +47,8 @@ TABLES = {
     "election-nation": "/election/<year>",
     "election-per-capita": "/election/<year>/per-capita",
     "state-history": "/state/<usps>",
-    # Chart C7's companion table (#560).
+    # Charts C7's and C10's one companion table (#560, #582, #618).
     "state-electors": "/state/<usps>",
-    # Chart C10's companion table (#582).
-    "state-popular-total": "/state/<usps>",
     # T7 has a page of its own since #559.
     "state-per-capita": "/state/<usps>/per-capita",
     "candidate-history": "/candidate/<slug>",
@@ -1593,8 +1591,7 @@ class TestExactlyTheView:
             "election-nation-csv": "election-1824-national.csv",
             "election-per-capita-csv": "election-1824-per-capita.csv",
             "state-history-csv": "state-GA-history.csv",
-            "state-electors-csv": "state-GA-electors.csv",
-            "state-popular-total-csv": "state-GA-total-popular-vote.csv",
+            "state-electors-csv": "state-GA-electors-and-total-popular-vote.csv",
             "state-per-capita-csv": "state-GA-per-capita.csv",
             "candidate-history-csv": "candidate-andrew-jackson-history.csv",
         }
@@ -2530,13 +2527,12 @@ UNRECOGNIZED_CELLS = {
         "election-per-capita": len(PER_CAPITA_ROW_FIELDS),
     },
     # T4's other rows of the doctored election carry its allotment and status too
-    # (#560), each with the popular-vote cell the status words, and C7's companion
-    # table words the allotment and status once; C10's (#582) words the total, which
-    # the status words, and the status once.
+    # (#560), each with the popular-vote cell the status words, and the companion
+    # table C7 and C10 share (#618) words the allotment, the status once and the
+    # total, which the status words.
     "/state/<usps>": {
         "state-history": len(STATE_ROW_FIELDS) + 1 + 3 * (GA_FIRST_ROWS - 1),
-        "state-electors": 2,
-        "state-popular-total": 2,
+        "state-electors": 3,
         # The doctored allotment makes both headline figures read it (#601, D115).
         "state-history-metrics": 2,
     },
@@ -2894,8 +2890,10 @@ SERVED_ROWS: dict[str, list[Served]] = {
 }
 
 #: What a chart's section shows when its own read fails, where it has one: C2's (#434),
-#: C4 and C5's (#436), and C7's and C10's, when T4's rows cannot be read as one
-#: allotment (#560) or one total popular vote (#582) per election.
+#: C4 and C5's (#436), and C7's and C10's sentence in the chart's place, when T4's rows
+#: cannot be read as one allotment (#560) or one total popular vote (#582) per election
+#: (their shared table stays, with that chart's column unavailable, unless both fail,
+#: when the table gives way to its own sentence, #618).
 SECTION_UNAVAILABLE = {
     "C2": "elections-leader-unavailable",
     "C4": "elections-over-time-unavailable",

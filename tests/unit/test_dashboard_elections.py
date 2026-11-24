@@ -224,7 +224,7 @@ class TestTable:
         ]
         tree = render(body=body)
         # No N1 here: T1's N1 cells read the unavailable cell (#563).
-        unavailable = [MOD["T1_N1_UNAVAILABLE_CELL"]] * 5
+        unavailable = [labels.UNAVAILABLE_CELL] * 5
         assert rows(tree) == [
             ["1788", "12", labels.NOT_IN_DATASET, *unavailable],
             ["2032", "3", "Yes", *unavailable],
@@ -3586,7 +3586,7 @@ class TestC9Degraded:
         assert labels.C9_UNAVAILABLE in texts(find(tree, MOD["C9_UNAVAILABLE_ID"]))
         headers = of_type(find(tree, TABLE_ID), "Th")
         assert len(headers) == len(MOD["FIELDS"]) + 1
-        cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        cell = labels.UNAVAILABLE_CELL
         assert rows(tree)
         for row in rows(tree):
             assert row[3:] == [cell] * 5
@@ -3638,7 +3638,7 @@ class TestC9Degraded:
         assert find(tree, MOD["PAGE_ID"]) is not None
         assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
         assert c9_figure(tree) is None
-        cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        cell = labels.UNAVAILABLE_CELL
         assert recipients_cell(tree, 1872) == [cell]
         assert t1_field_cell(tree, 1872, "electoral_votes_outside_top_two") == ["24"]
         assert t1_field_cell(tree, 2016, "ec_margin") != [cell]
@@ -3650,7 +3650,7 @@ class TestC9Degraded:
         tree = render_n1(index=index)
         assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
         assert c9_figure(tree) is None
-        cell = MOD["T1_N1_UNAVAILABLE_CELL"]
+        cell = labels.UNAVAILABLE_CELL
         assert recipients_cell(tree, 2016) == [cell]
         assert t1_field_cell(tree, 1872, "electoral_votes_outside_top_two") == ["24"]
         assert t1_field_cell(tree, 2016, "ec_margin") != [cell]
@@ -3677,7 +3677,7 @@ class TestC9Degraded:
         row[field] = value
         tree = render_n1(summary)
         assert find(tree, MOD["C9_UNAVAILABLE_ID"]) is not None
-        assert recipients_cell(tree, 2016) == [MOD["T1_N1_UNAVAILABLE_CELL"]]
+        assert recipients_cell(tree, 2016) == [labels.UNAVAILABLE_CELL]
         assert t1_field_cell(tree, 2016, "electoral_votes_outside_top_two") == ["7"]
 
     def test_a_defect_in_a_year_the_filters_hide_still_degrades(self) -> None:

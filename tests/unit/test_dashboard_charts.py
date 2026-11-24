@@ -52,7 +52,7 @@ ISSUED: dict[str, tuple[str, str, bool, bool]] = {
     "C4": ("/elections/over-time", "elections-over-time-table", False, False),
     "C5": ("/elections/over-time", "elections-over-time-table", False, True),
     "C7": ("/state/<usps>", "state-electors", False, False),
-    "C10": ("/state/<usps>", "state-popular-total", False, True),
+    "C10": ("/state/<usps>", "state-electors", False, True),
     "C9": ("/elections", "elections-table", False, False),
 }
 

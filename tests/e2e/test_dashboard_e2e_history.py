@@ -56,12 +56,12 @@ PER_CAPITA_PATH = "/state/GA/per-capita"
 CANDIDATE_PATH = "/candidate/andrew-jackson"
 #: Each page's success marker and its tables, which must be on it before their scroll
 #: is checked, the table its filters narrow first: T4 on the state history, then C7's
-#: and C10's companion tables above its filters (#560, #582); T7 on its per-capita page (#559); T5 on
-#: the candidate page.
+#: and C10's one companion table above its filters (#560, #582, #618); T7 on its
+#: per-capita page (#559); T5 on the candidate page.
 PAGES = {
     STATE_PATH: (
         STATE_SUCCESS,
-        ("#state-history", "#state-electors", "#state-popular-total"),
+        ("#state-history", "#state-electors"),
     ),
     PER_CAPITA_PATH: (STATE_PER_CAPITA_SUCCESS, ("#state-per-capita",)),
     CANDIDATE_PATH: (CANDIDATE_SUCCESS, ("#candidate-history",)),
@@ -311,7 +311,7 @@ STATE_CHARTS = {
         labels.C5_VALUE_AXIS,
         # Georgia's legislature chose its electors in 1824.
         labels.C5_LEGISLATURE,
-        "#state-popular-total",
+        "#state-electors",
         "--chart-pv",
     ),
 }
