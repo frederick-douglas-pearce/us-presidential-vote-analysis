@@ -17,8 +17,11 @@ The states, each confirmed before the sentence's absence is asserted:
   the test records show the page got past validation. A malformed body (the pattern
   of ``test_dashboard_state.TestMalformedBodies.client_with``) makes the page's
   ``render`` raise. On the elections subpages, whose read is N1, a failed N1 degrades
-  the section instead and the page keeps its success marker: the one state where the
-  page's ``filtered`` flag, not the success path, withholds the sentence;
+  the section instead and the page keeps its success marker: one of the two states
+  where the page's ``filtered`` flag, not the success path, withholds the sentence.
+  The other is the state history's (#620): a served body whose two charts'
+  collapses both fail leaves nothing to narrow, so the page keeps its success
+  marker and shows neither the slider nor the sentence;
 - **not-found**, on the pages that validate a path value.
 
 Not covered: a validate source failing inside ``api.accepted`` while a snapshot
@@ -35,8 +38,10 @@ the rule (architect ruling on #419).
 
 from __future__ import annotations
 
+import copy
 import re
 import sys
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 import dash
@@ -67,6 +72,18 @@ class Break(NamedTuple):
     path: str
     #: The id the section shows when it degrades; ``None`` when the page degrades.
     section_unavailable: str | None = None
+    #: With ``section_unavailable``: a change that serves ``path`` doctored rather
+    #: than failing its read, for a page that withholds its filters when a served
+    #: value leaves nothing to narrow (the state history, #620).
+    doctor: Callable[[dict[str, Any]], None] | None = None
+
+
+def _no_collapse(body: dict[str, Any]) -> None:
+    """Two statuses in one of Georgia's elections: neither C7's nor C10's collapse
+    can be read, so the state history has nothing to narrow and shows no slider
+    (#620, D119), while the page keeps its success marker."""
+    (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+    first["pv_status"] = "legislature_chosen"
 
 
 #: Every filtered page (a registered ``query=`` parser) and the read to break on it.
@@ -82,6 +99,13 @@ BREAKS: dict[str, Break] = {
     "pages.election_per_capita": Break("/v1/elections/1824/per-capita"),
     # T4 and its filters left the state history for this page (#619, D118).
     "pages.state_results": Break("/v1/states/GA"),
+    # The state history's one filter, the year range (#620, D119): with both charts'
+    # collapses unreadable, the shared table's sentence stands in its place and the
+    # page keeps its success marker, but neither the slider nor the filter sentence
+    # shows. Its whole-page degraded state is test_dashboard_state.TestLede's.
+    "pages.state": Break(
+        "/v1/states/GA", "state-electors-table-unavailable", _no_collapse
+    ),
     "pages.state_per_capita": Break("/v1/states/GA/per-capita"),
     "pages.candidate": Break("/v1/candidates/andrew-jackson"),
 }
@@ -160,6 +184,18 @@ def broken(monkeypatch: pytest.MonkeyPatch, spec: Break) -> list[str]:
     (never a changed value, which could reach a figure)."""
     if spec.section_unavailable is None:
         return state_tests.TestMalformedBodies.client_with(monkeypatch, spec.path)
+    if spec.doctor is not None:
+        bodies = copy.deepcopy(RECORDED)
+        spec.doctor(bodies[spec.path])
+        fetch_doctored, served = fake_fetch(bodies, VERSION)
+        client = offline_client(
+            fetch_doctored, prefetch_paths=lambda: [api.ELECTIONS_PATH]
+        )
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        client.refresh()
+        served.clear()
+        monkeypatch.setattr(api, "CLIENT", client)
+        return served
     good, calls = fake_fetch(RECORDED, VERSION)
 
     def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:

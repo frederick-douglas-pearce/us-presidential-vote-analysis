@@ -717,12 +717,21 @@ def _controls(chosen: Range) -> html.Div:
     first, last = chosen.span
     return html.Div(
         [
-            html.Label(labels.YEARS_FILTER, htmlFor=YEARS_ID, className="label"),
-            components.year_slider(
-                YEARS_ID, first, last, (chosen.year_from, chosen.year_to)
+            html.Div(
+                [
+                    html.Label(
+                        labels.YEARS_FILTER, htmlFor=YEARS_ID, className="label"
+                    ),
+                    components.year_slider(
+                        YEARS_ID, first, last, (chosen.year_from, chosen.year_to)
+                    ),
+                ],
+                className="filter filter-own-row",
             ),
         ],
-        className="filter filter-own-row",
+        # The filters box, whose margin gives the card its space under its top rule
+        # (#567, D111), as on the state's per-capita page.
+        className="filters filter-row",
     )
 
 

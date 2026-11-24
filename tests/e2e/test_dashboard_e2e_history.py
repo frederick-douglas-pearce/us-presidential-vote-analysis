@@ -3,15 +3,17 @@ on a state's results by election (T4, its own page since #619), its people per
 electoral vote (#559) and the candidate page, from 76rem a year control keeps a row of
 its own at the 42rem measure (``.filter-own-row``) and the dropdown filters share the
 row below it (``.filter-row``); below 76rem each page is the one column it always was;
-the state history has no filter since #619 (D118). And a state's three pages as one
-client-side chain (#559, #619; D105, D118): the section links move between them, the
-subpages' carrying the year range applied and the history's none, with the URL, tab
-and marks following, and back and forward; an old filtered history link lands on the
-results page with its filters; an unserved state or an unknown section reads as not
-found. And charts C7 (#560, D106) and C10 (#582, D113) on the state history:
-readable at phone width with the year along the bottom, their plots aligned at every
-width, redrawn on a theme switch with no request, and their titles, captions and
-tables left when plotly.js cannot load.
+the state history's one filter since #620 (D119) is the Years slider, over the state's
+own span. And a state's three pages as one client-side chain (#559, #619, #620; D105,
+D118, D119): the section links move between them, each carrying the year range its
+page applied, with the URL, tab and marks following, and back and forward; an old
+filtered history link lands on the results page with its filters; an unserved state or
+an unknown section reads as not found. And charts C7 (#560, D106) and C10 (#582, D113)
+on the state history: readable at phone width with the year along the bottom, also
+under a narrowed range (#620), their plots aligned at every width, redrawn on a theme
+switch with no request, and their titles, captions and tables left when plotly.js
+cannot load; the Years slider's chain to the URL, back and forward, its labels apart,
+and the note in place of both charts when the range holds no election.
 
 The rules are pinned in ``TestLayoutRules`` (``tests/unit/test_dashboard_theme.py``)
 and the markup in each page's ``TestWideLayout``; these check what Chromium draws.
@@ -19,6 +21,7 @@ and the markup in each page's ``TestWideLayout``; these check what Chromium draw
 
 from __future__ import annotations
 
+import itertools
 import re
 from urllib.parse import urlsplit
 
@@ -35,9 +38,11 @@ from tests.e2e.dashboard_pages import (
     NARROW_DESKTOP,
     PHONE_WIDTHS,
     RESOURCE_ERROR,
+    STATE_NO_MATCH,
     STATE_PER_CAPITA_SUCCESS,
     STATE_RESULTS_SUCCESS,
     STATE_SUCCESS,
+    STATE_YEARS,
     UNAVAILABLE,
     WIDE_WIDTHS,
     assert_figures_inside,
@@ -51,6 +56,7 @@ from tests.e2e.dashboard_pages import (
     year_ticks,
 )
 from tests.e2e.test_dashboard_e2e_election import boxes, overlaps, rgb, token
+from tests.e2e.test_dashboard_e2e_elections import MIN_LABEL_GAP_PX
 from tests.e2e.test_dashboard_e2e_elections_over_time import assert_band_label_inside
 
 pytestmark = pytest.mark.e2e
@@ -61,8 +67,9 @@ PER_CAPITA_PATH = "/state/GA/per-capita"
 CANDIDATE_PATH = "/candidate/andrew-jackson"
 #: Each page's success marker and its tables, which must be on it before their scroll
 #: is checked, the table its filters narrow first: C7's and C10's one companion table
-#: on the state history, which has no filter (#560, #582, #618, #619); T4 on its
-#: results page (#619); T7 on its per-capita page (#559); T5 on the candidate page.
+#: on the state history, which its Years slider narrows (#560, #582, #618, #620); T4
+#: on its results page (#619); T7 on its per-capita page (#559); T5 on the candidate
+#: page.
 PAGES = {
     STATE_PATH: (STATE_SUCCESS, ("#state-electors",)),
     RESULTS_PATH: (STATE_RESULTS_SUCCESS, ("#state-results",)),
@@ -195,12 +202,26 @@ def test_every_width_keeps_order_measure_and_tables(
 
 
 @pytest.mark.plotlyjs_fetches(1)
-def test_the_state_history_shows_no_filter_and_no_t4(page: Page) -> None:
-    """T4 and its filters left the history for the results page (#619, D118)."""
+def test_the_state_history_shows_one_years_filter_and_no_t4(page: Page) -> None:
+    """T4 and its filters left the history for the results page (#619, D118); its
+    one filter since #620 (D119) is the Years slider, labeled, above C7's heading in
+    the page's one card, with no dropdown and no popular-vote checkbox."""
     open_at(page, STATE_PATH, 390)
-    for gone in (".filters", "#state-results", "#state-history", "#state-years"):
+    for gone in ("#state-results", "#state-history", "#state-years"):
         expect(page.locator(gone)).to_have_count(0)
     expect(page.locator(PAGES[STATE_PATH][1][0])).to_be_visible()
+    expect(page.locator(f"{STATE_SUCCESS} .filter")).to_have_count(1)
+    expect(page.locator(f"{STATE_SUCCESS} {STATE_YEARS}")).to_have_count(1)
+    expect(page.locator(f"{STATE_SUCCESS} [role=slider]")).to_have_count(2)
+    expect(page.locator(f"{STATE_SUCCESS} input[type=checkbox]")).to_have_count(0)
+    expect(page.locator(f"{STATE_SUCCESS} .dash-dropdown")).to_have_count(0)
+    expect(page.locator(f"{STATE_SUCCESS} label[for='{STATE_YEARS[1:]}']")).to_have_text(
+        labels.YEARS_FILTER
+    )
+    slider = rect(page, STATE_YEARS)
+    heading = rect(page, f"{STATE_SUCCESS} .card > h2:first-of-type")
+    assert slider["bottom"] <= heading["top"], (slider, heading)
+    assert slider["right"] <= 390, slider
 
 
 # --- a state's three pages as one chain (#559, #619; D105, D118) -----------------------
@@ -218,9 +239,9 @@ def assert_state_page(
 ) -> None:
     """GA's page ``section`` with exactly ``search``: its URL, success marker, tab,
     the section mark on it and the links to the other two, in page order, each
-    carrying the year range the page applied (``carried``, by default ``search`` on a
-    subpage and nothing on the history, which applies none, D118), and the site
-    navigation marking States (#448)."""
+    carrying the year range the page applied (``carried``, by default ``search``: the
+    history applies its year range since #620, D119), and the site navigation marking
+    States (#448)."""
     success, title = STATE_PAGES[section]
     expect(page).to_have_url(
         re.compile(re.escape(f"{state_view.path('GA', section)}{search}") + "$")
@@ -235,7 +256,7 @@ def assert_state_page(
     )
     others = [s for s in state_view.SECTIONS if s != section]
     if carried is None:
-        carried = "" if section == state_view.HISTORY else search
+        carried = search
     links = nav.get_by_role("link")
     expect(links).to_have_count(len(others))
     expect(links).to_have_text([state_view.SECTION_TEXT[o] for o in others])
@@ -249,11 +270,11 @@ def assert_state_page(
 
 
 def test_a_state_s_three_pages_are_one_client_side_chain(page: Page) -> None:
-    """#559, #619: from a filtered results page, the section link opens the
+    """#559, #619, #620: from a filtered results page, the section link opens the
     per-capita page with the year range only (the candidate filter dropped, D105),
-    showing T7 and not T4; its history link carries the range, and the history's
-    links carry none (it applies none, D118); back and forward follow, with no
-    document load in between."""
+    showing T7 and not T4; its history link carries the range, which the history
+    applies and its links carry on (D119); back and forward follow, with no document
+    load in between."""
     filtered = "?candidate=horatio-seymour&year_from=1860&year_to=1900"
     ranged = "?year_from=1860&year_to=1900"
     page.goto(f"{RESULTS_PATH}{filtered}")
@@ -272,11 +293,16 @@ def test_a_state_s_three_pages_are_one_client_side_chain(page: Page) -> None:
     assert_state_page(page, state_view.HISTORY, ranged)
     expect(page.locator("#state-results")).to_have_count(0)
     expect(page.locator("#state-per-capita")).to_have_count(0)
+    # The history applies the range (#620): its table holds 1860 to 1900.
+    expect(page.locator("#state-electors tbody tr")).to_have_count(11)
     nav.get_by_role("link", name=labels.SECTION_RESULTS_BY_ELECTION).click()
-    assert_state_page(page, state_view.RESULTS, "")
-    # Unfiltered: every recorded row of Georgia's, more than one per election.
+    assert_state_page(page, state_view.RESULTS, ranged)
+    # T4 narrowed to the range, every candidate's row in it: more than one per
+    # election, each in 1860 to 1900.
     expect(page.locator("#state-results tbody tr").first).to_be_visible()
-    assert page.locator("#state-results tbody tr").count() > len(served_years())
+    cells = page.locator("#state-results tbody tr td:first-child")
+    years = [int(t) for t in cells.all_inner_texts()]
+    assert len(years) > 11 and all(1860 <= y <= 1900 for y in years), years
     page.go_back()
     assert_state_page(page, state_view.HISTORY, ranged)
     page.go_back()
@@ -284,7 +310,36 @@ def test_a_state_s_three_pages_are_one_client_side_chain(page: Page) -> None:
     page.go_forward()
     assert_state_page(page, state_view.HISTORY, ranged)
     page.go_forward()
-    assert_state_page(page, state_view.RESULTS, "")
+    assert_state_page(page, state_view.RESULTS, ranged)
+    assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
+
+
+def test_the_chain_carries_the_range_from_the_history_page(page: Page) -> None:
+    """#620 (D119, restoring D105 for the history hop): a range chosen on the
+    history page rides each section link, client-side, and back and forward keep
+    it."""
+    ranged = "?year_from=1900&year_to=1960"
+    page.goto(f"{STATE_PATH}{ranged}")
+    assert_state_page(page, state_view.HISTORY, ranged)
+    expect(page.locator("#state-electors tbody tr")).to_have_count(16)
+    page.evaluate("window.__e2e_mark = 1")
+    nav = page.get_by_role("navigation", name=labels.STATE_SECTIONS_LABEL)
+    nav.get_by_role("link", name=labels.SECTION_PER_CAPITA).click()
+    assert_state_page(page, state_view.PER_CAPITA, ranged)
+    expect(page.locator("#state-per-capita tbody tr")).to_have_count(16)
+    nav.get_by_role("link", name=labels.SECTION_RESULTS_BY_ELECTION).click()
+    assert_state_page(page, state_view.RESULTS, ranged)
+    nav.get_by_role("link", name=labels.SECTION_STATE_HISTORY).click()
+    assert_state_page(page, state_view.HISTORY, ranged)
+    expect(page.locator("#state-electors tbody tr")).to_have_count(16)
+    page.go_back()
+    assert_state_page(page, state_view.RESULTS, ranged)
+    page.go_back()
+    assert_state_page(page, state_view.PER_CAPITA, ranged)
+    page.go_back()
+    assert_state_page(page, state_view.HISTORY, ranged)
+    page.go_forward()
+    assert_state_page(page, state_view.PER_CAPITA, ranged)
     assert page.evaluate("window.__e2e_mark") == 1  # no document load in between
 
 
@@ -458,17 +513,145 @@ def test_c7_and_c10_plots_stay_aligned_when_wide(page: Page, width: int) -> None
     assert_plots_align(page)
 
 
+#: A narrowed range on Georgia's history (#620, D119), and the elections it holds.
+NARROWED = "?year_from=1900&year_to=1990"
+NARROWED_YEARS = [int(y) for y in served_years() if 1900 <= int(y) <= 1990]
+
+
 @pytest.mark.plotlyjs_fetches(1)
-def test_c7_and_c10_ignore_the_query(page: Page) -> None:
-    """D093(a), D118: the page reads no filter since T4 left it (#619), so a year
-    range in its URL (the one key not moved) changes neither C7, C10 nor their
-    table."""
-    open_charts(page, "?year_from=1900&year_to=1960")
-    expect(page).to_have_url(re.compile(re.escape(STATE_PATH) + r"\?year_from=1900"))
+def test_c7_and_c10_narrow_with_the_query(page: Page) -> None:
+    """#620 (D119, amending D093(a) here): the year range in the URL narrows C7, C10
+    and their table together, each chart's ticks the axis of the years shown."""
+    open_charts(page, NARROWED)
+    expect(page).to_have_url(re.compile(re.escape(f"{STATE_PATH}{NARROWED}") + "$"))
     for chart, (_, _, _, table, _) in STATE_CHARTS.items():
         ticks = [b["text"] for b in boxes(page, f"{chart} .xtick text")]
-        assert ticks == year_ticks(), chart
-        expect(page.locator(f"{table} tbody tr")).to_have_count(len(served_years()))
+        assert ticks == year_ticks(NARROWED_YEARS), chart
+        assert ticks != year_ticks(), chart
+        expect(page.locator(f"{table} tbody tr")).to_have_count(len(NARROWED_YEARS))
+    expect(page.locator("#state-history-metrics-all-years")).to_have_text(
+        labels.METRIC_ALL_YEARS_NOTE
+    )
+
+
+@pytest.mark.plotlyjs_fetches(1)
+@pytest.mark.parametrize("width", PHONE_WIDTHS)
+def test_narrowed_c7_and_c10_are_readable_at_phone_width(
+    page: Page, width: int
+) -> None:
+    """#620's AC (D113(f), D104): under a narrowed range, at 390 and 360 px, each
+    chart's year ticks are apart, every tick, axis title, key entry and band label
+    sits inside the width with none over another, there is no sideways scroll, and
+    the two plots stay aligned."""
+    page.set_viewport_size({"width": width, "height": 844})
+    open_charts(page, NARROWED, width=width)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    for chart in STATE_CHARTS:
+        assert_year_ticks_apart(page, chart, NARROWED_YEARS)
+        expect(page.locator(f"{chart} .bartext")).to_have_count(0)
+        expect(page.locator(f"{chart} .textpoint")).to_have_count(0)
+        drawn = [
+            b
+            for part in (*CHART_TEXTS, ".annotation-text")
+            for b in boxes(page, f"{chart} {part}")
+            if b["w"] > 0 and b["text"]
+        ]
+        assert len(drawn) > len(year_ticks(NARROWED_YEARS)) + 2, chart
+        for i, a in enumerate(drawn):
+            assert a["x"] >= 0 and a["x"] + a["w"] <= width, (chart, a)
+            for b in drawn[i + 1 :]:
+                assert not overlaps(a, b), (chart, a, b)
+        (svg,) = boxes(page, f"{chart} .main-svg >> nth=0")
+        for b in boxes(page, f"{chart} .ytick text, {chart} .g-ytitle text"):
+            if b["w"] > 0:
+                assert b["x"] - svg["x"] >= MARGIN_SLACK_PX, (chart, b)
+    assert_plots_align(page)
+
+
+def history_rows(page: Page) -> list[int]:
+    cells = page.locator("#state-electors tbody tr td:first-child")
+    return [int(t) for t in cells.all_inner_texts()]
+
+
+def assert_history_view(
+    page: Page, search: str, years: list[int], lower: int
+) -> None:
+    """GA's history with exactly ``search``, its table holding ``years`` and the
+    slider's lower handle at ``lower``."""
+    expect(page).to_have_url(re.compile(re.escape(f"{STATE_PATH}{search}") + "$"))
+    page.locator(STATE_SUCCESS).wait_for()
+    expect(page.locator("#state-electors tbody tr")).to_have_count(len(years))
+    assert history_rows(page) == years
+    expect(
+        page.locator(f"{STATE_YEARS} [role=slider].dash-slider-thumb-1")
+    ).to_have_attribute("aria-valuenow", str(lower))
+
+
+def test_the_years_slider_writes_the_url_and_back_and_forward_restore_it(
+    page: Page,
+) -> None:
+    """#620's AC: a slider change writes the normalized query through the page's one
+    callback, client-side; the router re-renders the history narrowed; back and
+    forward restore each view with no document load."""
+    every = [int(y) for y in served_years()]
+    page.goto(STATE_PATH)
+    assert_history_view(page, "", every, 1824)
+    page.evaluate("window.__e2e_mark = 1")
+    # ArrowRight is one step, a year; the router re-renders the slider, so it is
+    # located afresh.
+    page.locator(f"{STATE_YEARS} [role=slider].dash-slider-thumb-1").press(
+        "ArrowRight"
+    )
+    later = [y for y in every if y >= 1825]
+    assert_history_view(page, "?year_from=1825", later, 1825)
+    page.go_back()
+    assert_history_view(page, "", every, 1824)
+    page.go_forward()
+    assert_history_view(page, "?year_from=1825", later, 1825)
+    # The section links follow the range the render applied.
+    nav = page.get_by_role("navigation", name=labels.STATE_SECTIONS_LABEL)
+    expect(nav.get_by_role("link", name=labels.SECTION_PER_CAPITA)).to_have_attribute(
+        "href", "/state/GA/per-capita?year_from=1825"
+    )
+    assert page.evaluate("window.__e2e_mark") == 1
+
+
+@pytest.mark.plotlyjs_fetches(0)
+def test_a_range_holding_no_election_shows_the_note(page: Page) -> None:
+    """#620 (I1): on Texas, 1850 alone holds no election: the note stands in place of
+    C7, C10 and their table, the slider, C7's heading and the figures (with the
+    all-years note) stay, and no chart mounts, so plotly.js is not fetched."""
+    page.goto("/state/TX?year_from=1850&year_to=1850")
+    assert_rendered(page, STATE_SUCCESS)
+    expect(page.locator(STATE_NO_MATCH)).to_have_text(
+        labels.STATE_NO_ELECTIONS_IN_RANGE
+    )
+    expect(page.locator(STATE_YEARS)).to_have_count(1)
+    expect(page.locator("#state-history-metrics")).to_be_visible()
+    expect(page.locator("#state-history-metrics-all-years")).to_be_visible()
+    for gone in (C7, C10, "#state-electors"):
+        expect(page.locator(gone)).to_have_count(0)
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+@pytest.mark.parametrize(("path", "first"), [(STATE_PATH, 1824), ("/state/TX", 1848)])
+def test_the_years_slider_labels_keep_apart(page: Page, path: str, first: int) -> None:
+    """The slider's labels over each state's own span (from Texas's first election,
+    1848) never run together (#306's check, on the history page since #620)."""
+    page.goto(path)
+    assert_rendered(page, STATE_SUCCESS)
+    marks = page.locator(f"{STATE_YEARS} .dash-slider-mark")
+    expect(marks).to_have_count(len(components.year_marks(first, 2024)))
+    found = [box for box in (m.bounding_box() for m in marks.all()) if box is not None]
+    assert len(found) == marks.count()
+    for a, b in itertools.combinations(found, 2):
+        apart = (
+            a["x"] + a["width"] + MIN_LABEL_GAP_PX <= b["x"]
+            or b["x"] + b["width"] + MIN_LABEL_GAP_PX <= a["x"]
+            or a["y"] + a["height"] <= b["y"]
+            or b["y"] + b["height"] <= a["y"]
+        )
+        assert apart, f"slider labels closer than {MIN_LABEL_GAP_PX}px: {a} and {b}"
 
 
 @pytest.mark.plotlyjs_fetches(1)

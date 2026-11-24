@@ -75,8 +75,11 @@ OVER_TIME_ROWS = "#elections-over-time-table tbody tr"
 
 # Ids of the state history (pages/state.py), its results by election
 # (pages/state_results.py, #619) and its people per electoral vote
-# (pages/state_per_capita.py, #559).
+# (pages/state_per_capita.py, #559), and the history's Years filter and its note when
+# the range holds no election (#620).
 STATE_SUCCESS = "#state"
+STATE_YEARS = "#state-history-years"
+STATE_NO_MATCH = "#state-history-no-match"
 STATE_RESULTS_SUCCESS = "#state-results-page"
 STATE_PER_CAPITA_SUCCESS = "#state-per-capita-page"
 
@@ -411,17 +414,23 @@ def served_years() -> list[str]:
     return [str(row["year"]) for row in recorded("/v1/elections")["data"]]
 
 
-def year_ticks() -> list[str]:
-    """The year axis's tick text for the served years (#558, D104)."""
-    axis = components.year_axis([int(year) for year in served_years()])
+def year_ticks(years: list[int] | None = None) -> list[str]:
+    """The year axis's tick text for ``years``, by default the served years (#558,
+    D104); a narrowed chart (#596, #620) passes the years it shows."""
+    if years is None:
+        years = [int(year) for year in served_years()]
+    axis = components.year_axis(years)
     return list(axis["ticktext"])
 
 
-def assert_year_ticks_apart(page: Page, chart: str) -> None:
-    """The year ticks along ``chart``'s bottom, as the axis names them, each at least
-    :data:`TICK_GAP_PX` clear of the next."""
+def assert_year_ticks_apart(
+    page: Page, chart: str, years: list[int] | None = None
+) -> None:
+    """The year ticks along ``chart``'s bottom, as the axis names them for ``years``
+    (by default every served year), each at least :data:`TICK_GAP_PX` clear of the
+    next."""
     ticks = boxes(page, f"{chart} .xtick text")
-    assert [b["text"] for b in ticks] == year_ticks(), chart
+    assert [b["text"] for b in ticks] == year_ticks(years), chart
     ordered = sorted(ticks, key=lambda b: b["x"])
     for a, b in itertools.pairwise(ordered):
         assert b["x"] - (a["x"] + a["w"]) >= TICK_GAP_PX, (chart, a, b)

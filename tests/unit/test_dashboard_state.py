@@ -101,16 +101,29 @@ def ga_per_capita() -> dict[str, Any]:
     return copy.deepcopy(RECORDED[GA_PER_CAPITA_PATH])
 
 
-def render(*, body: Any = None, index: Any = None, usps: str = "GA") -> Any:
-    """The history page's body, as the layout builds it: ``usps``'s recorded history
-    unless ``body`` is given. The page reads no query (D118), so there is none to pass:
-    a filtered URL goes through :func:`history_layout`."""
-    content, _ = MOD["render"](
+def render_all(
+    query: str = "", *, body: Any = None, index: Any = None, usps: str = "GA"
+) -> tuple[Any, Any, bool]:
+    """``render``'s three values for ``query`` (#620, D119): the history page's body,
+    the state's name as served and whether the Years slider rendered, for ``usps``'s
+    recorded history unless ``body`` is given, the query read by the page's own
+    parser, as the layout reads it."""
+    content, name, filtered = MOD["render"](
         copy.deepcopy(RECORDED[f"/v1/states/{usps}"]) if body is None else body,
         copy.deepcopy(INDEX) if index is None else index,
         usps,
+        MOD["parse_filters"](parse(query)),
     )
-    return content
+    return content, name, filtered
+
+
+def render(
+    query: str = "", *, body: Any = None, index: Any = None, usps: str = "GA"
+) -> Any:
+    """The history page's body for ``query`` (its one filter, the year range, #620,
+    D119), as the layout builds it: ``usps``'s recorded history unless ``body`` is
+    given."""
+    return render_all(query, body=body, index=index, usps=usps)[0]
 
 
 def serve_history(monkeypatch: pytest.MonkeyPatch, body: dict[str, Any]) -> None:
@@ -163,25 +176,112 @@ def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["validate"] is MOD["VALIDATE"]
     assert PAGE["validate"] == (api.ROSTER_PATH, state_view.on_roster)
     assert PAGE.get("order") is None
-    # It reads no filter (D118): T4's two keys moved with it to the results page, so
-    # an old link naming either answers 302 there; the year range is not moved.
-    assert PAGE.get("query") is None
+    # Its one filter is the year range (#620, D119), read by its own parser; T4's two
+    # keys moved with it to the results page (D118), so an old link naming either
+    # answers 302 there; the year range is not moved.
+    assert PAGE["query"] is MOD["parse_filters"]
     assert PAGE["moved"] == (("candidate", "pv_status"), "/state/<usps>/elections")
     assert PAGE["moved"] == (
         state_view.MOVED_KEYS,
         state_view.template(state_view.RESULTS),
     )
-    for name in (
-        "parse_filters",
-        "on_filter_change",
-        "FILTER_SENTENCE",
-        "TABLE_ID",
-        "URL_ID",
-        "YEARS_ID",
-        "HISTORY_TABLE_HEADING",
-    ):
+    # New ids (D097(g)): T4's retired ones are never reused, here or on the results
+    # page, whose ids are its own.
+    assert (MOD["YEARS_ID"], MOD["URL_ID"], MOD["NO_MATCH_ID"]) == (
+        "state-history-years",
+        "state-history-url",
+        "state-history-no-match",
+    )
+    assert MOD["METRICS_ALL_YEARS_ID"] == "state-history-metrics-all-years"
+    retired = {"state-history", "state-url", "state-years", "state-candidate"}
+    assert not retired & {MOD["YEARS_ID"], MOD["URL_ID"], MOD["NO_MATCH_ID"]}
+    assert MOD["URL_ID"] not in (RS_MOD["URL_ID"], PC_MOD["URL_ID"])
+    assert MOD["YEARS_ID"] not in (RS_MOD["YEARS_ID"], PC_MOD["YEARS_ID"])
+    for name in ("TABLE_ID", "HISTORY_TABLE_HEADING"):
         assert name not in MOD, name
     assert not hasattr(labels, "C7_FILTERS_NOTE")
+    # The four first-election notes are retired (#620): the axis no longer starts
+    # before the state's first election.
+    for retired_note in (
+        "FIRST_ELECTION_NOTE",
+        "FIRST_ELECTION_NOTE_THIS_STATE",
+        "C10_FIRST_ELECTION_NOTE",
+        "C10_FIRST_ELECTION_NOTE_THIS_STATE",
+    ):
+        assert not hasattr(labels, retired_note), retired_note
+
+
+@pytest.mark.parametrize(
+    ("params", "pairs"),
+    [
+        (
+            {"year_from": "1900", "year_to": "1990"},
+            [("year_from", "1900"), ("year_to", "1990")],
+        ),
+        # T4's moved keys, the path variable and anything else are dropped (D118).
+        (
+            {
+                "candidate": "andrew-jackson",
+                "pv_status": "popular_vote",
+                "usps": "TX",
+                "state": "TX",
+                "junk": "1",
+                "year_to": "1900",
+            },
+            [("year_to", "1900")],
+        ),
+        ({"candidate": "andrew-jackson"}, []),
+        # An inverted pair drops both bounds, as on every year-filtered page.
+        ({"year_from": "1990", "year_to": "1900"}, []),
+        ([("year_from", "1900")], []),
+        (None, []),
+    ],
+    ids=repr,
+)
+def test_the_history_parser_keeps_only_the_year_range(params: Any, pairs: Any) -> None:
+    """#620 (D119): the history page's one filter, syntactic, as the per-capita
+    page's parser reads it."""
+    assert MOD["parse_filters"](params) == pairs
+    if isinstance(params, dict):
+        assert MOD["parse_filters"](params) == PC_MOD["parse_filters"](params)
+
+
+class TestFirstElection:
+    """The state's first election (#620, D119): the first year of C7's collapse whose
+    allotment is an ``int`` above 0, never a ``bool``; ``None`` where none is."""
+
+    @staticmethod
+    def records(*pairs: tuple[int, Any]) -> list[dict[str, Any]]:
+        return [{"year": y, "state_electoral_votes": v} for y, v in pairs]
+
+    def test_the_first_year_with_an_int_above_0(self) -> None:
+        first = MOD["first_election"]
+        assert first(self.records((1824, 0), (1828, 0), (1832, 5))) == 1832
+        assert first(self.records((1832, 5), (1828, 3))) == 1828
+
+    @pytest.mark.parametrize(
+        "value", [True, False, 0, -1, None, 1.0, "5", float("nan")], ids=repr
+    )
+    def test_nothing_but_an_int_above_0_counts(self, value: Any) -> None:
+        first = MOD["first_election"]
+        assert first(self.records((1824, value), (1828, 7))) == 1828
+        assert first(self.records((1824, value))) is None
+
+    def test_none_where_there_is_none(self) -> None:
+        assert MOD["first_election"]([]) is None
+        assert MOD["first_election"](self.records((1864, 0), (1868, 0))) is None
+
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_on_each_recorded_state(self, usps: str) -> None:
+        path = f"/v1/states/{usps}"
+        served = set(state_view.served_years(INDEX))
+        records = MOD["electors"](
+            state_view.rows(copy.deepcopy(RECORDED[path]), usps, served, path),
+            served,
+            usps,
+            path,
+        )
+        assert MOD["first_election"](records) == {"GA": 1824, "TX": 1848}[usps]
 
 
 def test_the_per_capita_page_is_registered_as_planned() -> None:
@@ -322,8 +422,9 @@ class TestGeorgia:
     """The history page's heading and what it does not show (#279, #559, #619)."""
 
     def test_the_heading_names_the_state_from_the_rows(self) -> None:
-        _, name = MOD["render"](ga_body(), copy.deepcopy(INDEX), "GA")
+        _, name, filtered = MOD["render"](ga_body(), copy.deepcopy(INDEX), "GA")
         assert name == "Georgia"
+        assert filtered is True
 
     @pytest.mark.parametrize("name", ["", "  ", "\u200b"], ids=repr)
     def test_a_name_with_nothing_in_it_keeps_the_generic_heading(
@@ -350,15 +451,23 @@ class TestGeorgia:
             h.children for h in of_type(tree, "H2")
         ]
 
-    def test_the_history_page_shows_no_t4_and_no_filter(self) -> None:
-        """T4 and its filters left with #619 (D118): no T4, no control, no page-local
-        Location, and none of T4's retired ids."""
+    def test_the_history_page_shows_no_t4_and_one_year_filter(self) -> None:
+        """T4 and its filters left with #619 (D118): no T4, no dropdown and none of
+        T4's retired ids. Since #620 (D119) its one filter is the Years slider, over
+        the state's span, with its own page-local Location; no popular-vote checkbox
+        (the owner's ruling at #620's plan gate)."""
         tree = render()
         assert find(tree, RESULTS) is None
-        assert of_type(tree, "RangeSlider") == []
+        (slider,) = of_type(tree, "RangeSlider")
+        assert slider.id == MOD["YEARS_ID"]
+        assert (slider.min, slider.max) == (1824, 2024)
+        (location,) = of_type(tree, "Location")
+        assert location.id == MOD["URL_ID"]
+        assert location.refresh == "callback-nav"
         assert of_type(tree, "Dropdown") == []
-        assert of_type(tree, "Location") == []
-        assert classed(tree, "filters") == []
+        assert of_type(tree, "Checklist") == []
+        (own,) = classed(tree, "filter")
+        assert find(own, MOD["YEARS_ID"]) is slider
         assert not {
             "state-history",
             "state-url",
@@ -531,12 +640,12 @@ class TestRoster:
     @pytest.mark.parametrize(
         "search", ["?year_from=1860", "?candidate=horatio-seymour", "?pv_status=x", ""]
     )
-    def test_a_client_side_route_with_a_query_renders_the_history_unfiltered(
+    def test_a_client_side_route_with_a_query_renders_the_history_with_no_request(
         self, monkeypatch: pytest.MonkeyPatch, search: str
     ) -> None:
         """A routing request never reaches the index, so a moved key is not
-        redirected there (D092): the history renders, reads no filter, makes no
-        request, and shows no T4."""
+        redirected there (D092): the history renders, applies only the year range
+        (#620, D119), makes no request, and shows no T4."""
         _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
         route("/state/GA")
         calls.clear()
@@ -544,6 +653,9 @@ class TestRoster:
         assert PAGE_ID in ids
         assert RS_PAGE_ID not in ids and RESULTS not in ids
         assert calls == []
+        (slider,) = of_type(history_layout(search.lstrip("?")), "RangeSlider")
+        expected = [1860, 2024] if search == "?year_from=1860" else [1824, 2024]
+        assert slider.value == expected
 
     def test_an_unserved_code_is_not_found_and_fills_nothing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -678,35 +790,68 @@ class TestMalformedBodies:
 
 class TestLede:
     """The history page's lede shows on success and on the degraded state, and the
-    not-found state shows none (#325). The page has no filters since #619 (D118), so
-    no state of it shows a filter sentence, its own or another state page's."""
+    not-found state shows none (#325). Its filter sentence follows the lede only where
+    the Years slider renders (#620, D119): on success, not on the degraded or
+    not-found state, nor where neither chart's collapse can be read; and no state of
+    it shows another state page's sentence."""
 
     #: Every state page's filter sentence, and the word each one opens with.
-    SENTENCES = (RS_MOD["FILTER_SENTENCE"], PC_MOD["FILTER_SENTENCE"], "Narrow ")
+    SENTENCES = (
+        RS_MOD["FILTER_SENTENCE"],
+        PC_MOD["FILTER_SENTENCE"],
+        MOD["FILTER_SENTENCE"],
+        "Narrow ",
+    )
 
-    def test_the_lede_is_today_s_and_the_page_has_no_filter_sentence(self) -> None:
+    def test_the_lede_and_filter_sentence_are_the_spec_s(self) -> None:
         # People per electoral vote left the lede with T7 (#559), and each
         # candidate's electoral votes with T4 (#619; ba spec, approved at its plan
-        # gate, 2026-11-23).
+        # gate, 2026-11-23); the filter sentence is #620's ba spec.
         assert MOD["LEDE"] == (
             "This state's electors appointed in every election this dataset holds for "
             "it, and its total popular vote where the dataset has it."
         )
-        assert not [k for k in MOD if k.startswith("FILTER_SENTENCE")]
+        assert MOD["FILTER_SENTENCE"] == (
+            "Narrow the charts and table to a range of years."
+        )
+        assert [k for k in MOD if k.startswith("FILTER_SENTENCE")] == [
+            "FILTER_SENTENCE"
+        ]
 
-    def test_success_shows_the_lede_alone(
+    def test_success_shows_the_lede_then_its_filter_sentence(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
         response = route("/state/GA")
         assert PAGE_ID in routed_ids(response)
         body = response.get_data(as_text=True)
-        assert MOD["LEDE"] in body
-        for sentence in self.SENTENCES:
+        assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" in body
+        for sentence in (RS_MOD["FILTER_SENTENCE"], PC_MOD["FILTER_SENTENCE"]):
             assert sentence not in body
         heading, lede, content = MOD["layout"](usps="GA").children
-        assert lede.children == MOD["LEDE"]
+        assert lede.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
         assert content.id == PAGE_ID
+
+    def test_both_collapses_failed_shows_the_lede_alone_and_no_slider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """I2 (#620's architect review): two statuses in one year fail both
+        collapses, so there is nothing to narrow: no slider and no filter sentence,
+        while the page keeps its success marker."""
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["pv_status"] = "legislature_chosen"
+        _, name, filtered = render_all(body=copy.deepcopy(body))
+        assert (name, filtered) == ("Georgia", False)
+        serve_history(monkeypatch, body)
+        heading, lede, content = MOD["layout"](usps="GA").children
+        assert content.id == PAGE_ID
+        assert lede.children == MOD["LEDE"]
+        assert of_type(content, "RangeSlider") == []
+        # Even under a query: nothing to narrow, so the range shows nowhere.
+        _, lede, content = MOD["layout"](usps="GA", year_from="1900").children
+        assert lede.children == MOD["LEDE"]
+        assert of_type(content, "RangeSlider") == []
 
     def test_the_degraded_state_shows_the_lede(
         self, monkeypatch: pytest.MonkeyPatch
@@ -814,9 +959,31 @@ class TestIndex:
         status, head, _ = get("/state/GA?year_from=1860&usps=TX&junk=1")
         assert status == 200
         assert head.canonical == url("/state/GA")
-        # The page registers no query= (D118), so og:url names no query: not even the
-        # year range, which lands here unread until #620.
-        assert head.og_url == url("/state/GA")
+        # Its parser keeps the year range alone (#620, D119), so og:url names it and
+        # nothing else, the path variable dropped (D081).
+        assert head.og_url == url("/state/GA?year_from=1860")
+
+    @pytest.mark.parametrize(
+        ("search", "og"),
+        [
+            ("?year_to=1990&year_from=1900", "?year_from=1900&year_to=1990"),
+            ("?year_from=1900&year_from=1900", "?year_from=1900"),
+            ("?year_from=1990&year_to=1900", ""),
+            ("?year_from=abc", ""),
+            # Syntactic, as og:url always is: an out-of-span year is kept here and
+            # replaced by its default in the render.
+            ("?year_from=1700", "?year_from=1700"),
+            ("?year_to=1844", "?year_to=1844"),
+        ],
+    )
+    def test_og_url_names_the_normalized_range(
+        self, monkeypatch: pytest.MonkeyPatch, search: str, og: str
+    ) -> None:
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        status, head, _ = get(f"/state/GA{search}")
+        assert status == 200
+        assert head.canonical == url("/state/GA")
+        assert head.og_url == url(f"/state/GA{og}")
 
     @pytest.mark.parametrize("path", ["/state/ZZ", "/state/ga", "/state/G1"])
     def test_with_the_roster_cached_an_unserved_code_is_a_404(
@@ -1292,23 +1459,35 @@ class TestSectionLinks:
             assert not hasattr(link, "aria-current")
 
     @pytest.mark.parametrize(
-        "query",
+        ("query", "usps", "carried"),
         [
-            "year_from=1860&year_to=1900",
-            "year_to=1900&candidate=horatio-seymour&pv_status=popular_vote",
-            "candidate=horatio-seymour",
+            ("year_from=1860&year_to=1900", "GA", "?year_from=1860&year_to=1900"),
+            (
+                "year_to=1900&candidate=horatio-seymour&pv_status=popular_vote",
+                "GA",
+                "?year_to=1900",
+            ),
+            ("candidate=horatio-seymour", "GA", ""),
+            # A bound outside the state's span is its default, so it is not carried.
+            ("year_from=1700", "GA", ""),
+            # Texas's span starts at its first election, 1848 (#620, D119): a bound
+            # at that end is the default; one before it falls back to it.
+            ("year_from=1848&year_to=1900", "TX", "?year_to=1900"),
+            ("year_from=1840&year_to=1870", "TX", "?year_to=1870"),
+            ("year_from=1852", "TX", "?year_from=1852"),
         ],
     )
-    def test_the_history_s_links_carry_no_query(
-        self, monkeypatch: pytest.MonkeyPatch, query: str
+    def test_the_history_s_links_carry_the_range_applied_only(
+        self, monkeypatch: pytest.MonkeyPatch, query: str, usps: str, carried: str
     ) -> None:
-        # Through the layout, as the router calls it with the URL's keys: the page
-        # reads none of them, so its links carry none.
+        """#620 (D119, restoring D105 for the history hop): through the layout, as the
+        router calls it with the URL's keys, the links carry the year range the render
+        applied against the state's span, in the normal form, and nothing else."""
         cached_client(monkeypatch)
-        _, results, per_capita = section_entries(history_layout(query))
+        _, results, per_capita = section_entries(history_layout(query, usps=usps))
         assert (results.href, per_capita.href) == (
-            "/state/GA/elections",
-            "/state/GA/per-capita",
+            f"/state/{usps}/elections{carried}",
+            f"/state/{usps}/per-capita{carried}",
         )
 
     def test_on_the_per_capita_page_t7_is_marked(self) -> None:
@@ -1388,13 +1567,14 @@ class TestWideLayout:
     def test_the_history_is_the_section_links_then_c7_and_c10_s_one_card(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # #560, D106; #618, D117; #619, D118: the lede is added by layout(), so the
-        # whole page is checked there: the heading, the lede and the page body,
-        # nothing between. In the body, the section links first (#559, D105); then one
-        # card holding C7's heading, its headline figures (#601, D115), C7, C10's
-        # heading, C10, the heading of the table the two share, the table in its
-        # scroll box, its download, its notes and its column-name list; then the
-        # footer. Two charts, C7 and C10; no T4, no filter and no Location.
+        # #560, D106; #618, D117; #619, D118; #620, D119: the lede is added by
+        # layout(), so the whole page is checked there: the heading, the lede and the
+        # page body, nothing between. In the body, the section links first (#559,
+        # D105), then the page-local Location (#620); then one card holding the Years
+        # slider in a row of its own, C7's heading, its headline figures (#601, D115),
+        # C7, C10's heading, C10, the heading of the table the two share, the table in
+        # its scroll box, its download, its notes and its column-name list; then the
+        # footer. Two charts, C7 and C10; no T4 and no dropdown.
         cached_client(monkeypatch)
         page = MOD["layout"](usps="GA")
         heading, lede, content = page.children
@@ -1403,11 +1583,13 @@ class TestWideLayout:
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
         assert kids[0].id == state_view.SECTIONS_ID
+        assert type(kids[1]).__name__ == "Location" and kids[1].id == MOD["URL_ID"]
         # One card (#567, D111; #618, D117; #619): C7 and C10 with their table.
-        assert cards(content) == [kids[1]]
-        assert len(kids) == 3
-        charts_card = card_children(content, 1)
-        assert [type(k).__name__ for k in charts_card[:6]] == [
+        assert cards(content) == [kids[2]]
+        assert len(kids) == 4
+        charts_card = card_children(content, 2)
+        assert [type(k).__name__ for k in charts_card[:7]] == [
+            "Div",
             "H2",
             "Div",
             "Figure",
@@ -1415,6 +1597,14 @@ class TestWideLayout:
             "Figure",
             "H2",
         ]
+        # The card opens with the slider's box, its row of its own (#545's rule).
+        (own,) = classed(charts_card[0], "filter-own-row")
+        assert "filter" in own.className.split()
+        label, slider = own.children
+        assert type(label).__name__ == "Label"
+        assert (label.children, label.htmlFor) == (labels.YEARS_FILTER, MOD["YEARS_ID"])
+        assert slider.id == MOD["YEARS_ID"]
+        charts_card = charts_card[1:]
         assert charts_card[0].children == MOD["C7_HEADING"]
         assert charts_card[1].id == MOD["METRICS_ID"]
         assert charts_card[2].id == charts.dom_id(MOD["C7_ID"])
@@ -1433,8 +1623,10 @@ class TestWideLayout:
         ):
             assert find(content, retired) is None, retired
         assert find(content, RESULTS) is None
-        assert of_type(content, "Location") == []
-        assert classed(content, "filters") == []
+        assert [loc.id for loc in of_type(content, "Location")] == [MOD["URL_ID"]]
+        assert of_type(content, "Dropdown") == []
+        (only,) = classed(content, "filter")
+        assert only is own
         assert [h.children for h in of_type(charts_card, "H2")] == [
             MOD["C7_HEADING"],
             MOD["C10_HEADING"],
@@ -1562,15 +1754,22 @@ def with_year(body: dict[str, Any], year: int, **fields: Any) -> dict[str, Any]:
     return body
 
 
-#: URLs carrying every key the page read before #619 (D118): it reads none of them.
-FILTERED_URLS = [
-    "year_from=1900",
-    "year_to=1900",
+#: URLs that change nothing on the history page: T4's moved keys (#619, D118), which
+#: its parser drops, and year ranges whose every bound is outside the state's span or
+#: at its end, each falling back to or being the default (#620, D119).
+UNFILTERED_URLS = [
     "candidate=andrew-jackson",
     "pv_status=not_participating",
     "year_from=1700&year_to=1800",
-    "year_from=1860&year_to=1872&candidate=horatio-seymour&pv_status=popular_vote",
+    "year_from=1824&year_to=2024",
+    "candidate=horatio-seymour&pv_status=popular_vote&junk=1",
 ]
+
+
+def state_years(usps: str) -> list[int]:
+    """The served years from ``usps``'s first election: the default view's axis and
+    table (#620, D119)."""
+    return [y for y in SERVED if y >= HISTORIES[usps].first]
 
 
 def assert_no_filter_sentence(caption: str) -> None:
@@ -1646,9 +1845,10 @@ class TestC7:
         name = HISTORIES[usps].name
         tree = render(usps=usps)
         figure = c7_figure(tree)
+        # The default view starts at the state's first election (#620, D119).
         expected = over_time.c4_figure(
             over_time.appointed_points(n2),
-            SERVED,
+            state_years(usps),
             labels.C4_TITLE_STATE.format(state=name),
             name,
         ).figure
@@ -1717,15 +1917,23 @@ class TestC7:
                 year=year, state=name, appointed=appointed, pv_status=status
             )
 
-    @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
+    @pytest.mark.parametrize(
+        ("query", "view"),
+        [
+            ("", ""),
+            ("year_from=1900&candidate=jimmy-carter", "?year_from=1900"),
+            ("year_to=1990&year_from=1900", "?year_from=1900&year_to=1990"),
+            ("year_from=1700&pv_status=popular_vote", ""),
+        ],
+    )
     def test_the_table_s_links_view_and_note(
-        self, monkeypatch: pytest.MonkeyPatch, query: str
+        self, monkeypatch: pytest.MonkeyPatch, query: str, view: str
     ) -> None:
         # The table C7 shares with C10 (#618): each year links to that election's
-        # page, its file names the history page with no filter whatever the URL
-        # carried (D093(a); the page reads none, D118), and the allotment's basis is
-        # among its notes, under the table and in the file's preamble (#560's
-        # acceptance gate, Class B).
+        # page, its file names the history page with the year range the render
+        # applied and nothing else (#620, D119; T4's moved keys are never read,
+        # D118), and the allotment's basis is among its notes, under the table and in
+        # the file's preamble (#560's acceptance gate, Class B).
         cached_client(monkeypatch)
         tree = history_layout(query)
         rows = body_rows(tree, ELECTORS)
@@ -1734,8 +1942,9 @@ class TestC7:
             (link,) = of_type(tr.children[0], "Link")
             assert link.href == f"/election/{link.children}"
         lines = download(tree, ELECTORS).lines
-        assert "View: https://explore.us-presidential-election-center.org/state/GA" in (
-            lines
+        assert (
+            f"View: https://explore.us-presidential-election-center.org/state/GA{view}"
+            in lines
         )
         assert labels.C4_BASIS in lines
         # The note follows the table's scroll box, in C7's card (#567).
@@ -1763,15 +1972,38 @@ class TestC7:
         assert not set(HISTORIES[usps].zeros) & set(bar)
         assert labels.C4_ZERO_NOTE in c7_caption(tree)
 
-    def test_texas_s_first_election_is_named_on_its_own_history(self) -> None:
-        """Texas's first election, 1848, is after the dataset's, so its caption names
-        it and its axis keeps the dataset's span (on real data; the doctored Georgia
-        case is :meth:`test_a_later_first_election_is_named_and_the_axis_keeps_the_dataset_s`)."""
+    def test_texas_s_default_starts_at_its_first_election(self) -> None:
+        """#620 (D119), AC1: Texas's first election, 1848, is after the dataset's, so
+        its default view starts there: C7's and C10's axis and the table hold 1848 on,
+        and both captions name the start (on real data; the doctored Georgia case is
+        :meth:`test_a_later_first_election_starts_the_axis_and_is_named`)."""
         tree = render(usps="TX")
-        assert labels.FIRST_ELECTION_NOTE.format(state="Texas", year=1848) in (
-            c7_caption(tree)
-        )
-        assert c7_figure(tree)["layout"]["xaxis"] == components.year_axis(SERVED)
+        years = state_years("TX")
+        assert years[0] == 1848
+        axis = components.year_axis(years)
+        assert c7_figure(tree)["layout"]["xaxis"] == axis
+        assert c10_figure(tree)["layout"]["xaxis"] == axis
+        assert [int(y) for y, _, _ in body_cells(tree)] == years
+        note = labels.FIRST_ELECTION_START_NOTE.format(state="Texas", year=1848)
+        assert note in c7_caption(tree)
+        assert note in c10_caption(tree)
+        # The slider runs over the state's span, both ends chosen.
+        (slider,) = of_type(tree, "RangeSlider")
+        assert (slider.min, slider.max, slider.value) == (1848, 2024, [1848, 2024])
+
+    def test_georgia_s_default_is_unchanged(self) -> None:
+        """Georgia's first election is the dataset's, 1824, so its default view keeps
+        every served year, and neither caption names a start."""
+        tree = render()
+        assert state_years("GA") == SERVED
+        axis = components.year_axis(SERVED)
+        assert c7_figure(tree)["layout"]["xaxis"] == axis
+        assert c10_figure(tree)["layout"]["xaxis"] == axis
+        assert [int(y) for y, _, _ in body_cells(tree)] == SERVED
+        for caption in (c7_caption(tree), c10_caption(tree)):
+            assert "This chart starts at" not in caption
+        (slider,) = of_type(tree, "RangeSlider")
+        assert (slider.min, slider.max, slider.value) == (1824, 2024, [1824, 2024])
 
     @pytest.mark.parametrize(
         ("value", "label"),
@@ -1802,49 +2034,59 @@ class TestC7:
         ]
         assert hovers and cell in hovers[0]
 
-    @pytest.mark.parametrize("query", FILTERED_URLS)
-    def test_no_query_changes_the_chart_or_its_table(
+    @pytest.mark.parametrize("query", UNFILTERED_URLS)
+    def test_a_query_that_applies_no_range_changes_neither_chart_nor_table(
         self, monkeypatch: pytest.MonkeyPatch, query: str
     ) -> None:
-        # The page reads no query (D118): through the layout, as the router calls it
-        # with the URL's keys, a filtered URL renders exactly the unfiltered C7.
+        # T4's moved keys are never read (D118), and a range wholly outside the
+        # state's span falls back to its default (#620, D119): through the layout, as
+        # the router calls it with the URL's keys, such a URL renders exactly the
+        # unfiltered C7, C10 and their table, view URL included.
         cached_client(monkeypatch)
         plain, tree = history_layout(), history_layout(query)
         assert c7_figure(tree) == c7_figure(plain)
+        assert c10_figure(tree) == c10_figure(plain)
         assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
         assert c7_caption(tree) == c7_caption(plain)
+        assert c10_caption(tree) == c10_caption(plain)
 
     def test_the_caption_describes_the_series(self) -> None:
         caption = c7_caption(render())
         assert caption.startswith(labels.C4_BASIS)
-        # No filter sentence since #619: the page has no filters to name (D118).
+        # No filter sentence in a caption: the lede carries it (#619, #620).
         assert_no_filter_sentence(caption)
-        # Georgia's first election is the dataset's, so no first-election sentence.
-        assert "The first election in this dataset" not in caption
+        # Georgia's first election is the dataset's, so no start sentence.
+        assert "This chart starts at" not in caption
         assert labels.C4_NO_FIGURE_NOTE not in caption
 
-    def test_a_later_first_election_is_named_and_the_axis_keeps_the_dataset_s(
-        self,
-    ) -> None:
+    def test_a_later_first_election_starts_the_axis_and_is_named(self) -> None:
+        # Georgia doctored to start in 1832 (#620, D119): the axis and the table start
+        # there, and the caption names the start.
         body = ga_body()
         body["data"] = [r for r in body["data"] if r["year"] >= 1832]
         tree = render(body=body)
-        assert labels.FIRST_ELECTION_NOTE.format(state="Georgia", year=1832) in (
+        assert labels.FIRST_ELECTION_START_NOTE.format(state="Georgia", year=1832) in (
             c7_caption(tree)
         )
-        figure = c7_figure(tree)
-        assert figure["layout"]["xaxis"] == components.year_axis(SERVED)
+        years = [y for y in SERVED if y >= 1832]
+        assert c7_figure(tree)["layout"]["xaxis"] == components.year_axis(years)
+        assert [int(y) for y, _, _ in body_cells(tree)] == years
 
-    def test_the_first_election_sentence_follows_the_served_years_not_coverage(
+    def test_the_start_sentence_compares_with_the_coverage_s_first_year(
         self,
     ) -> None:
-        # The sentence compares the state's first election with the first served
-        # year (the index's, as C4 does), never the body's ``coverage.year_min``: with
-        # coverage starting before 1824, Georgia's 1824 is still the dataset's first.
+        """The start sentence shows only when the state's first election is after the
+        dataset's first year, read from the body's ``coverage.year_min`` (#620's ba
+        spec; the retired sentence compared with the first served year instead).
+        Served data never differs; doctored, Georgia's 1824 is after a coverage
+        starting in 1700, so the sentence names it."""
         body = ga_body()
         body["meta"]["provenance"]["coverage"]["year_min"] = 1700
         tree = render(body=body)
-        assert "The first election in this dataset" not in c7_caption(tree)
+        assert labels.FIRST_ELECTION_START_NOTE.format(state="Georgia", year=1824) in (
+            c7_caption(tree)
+        )
+        assert "This chart starts at" not in c7_caption(render())
 
     def test_a_name_that_is_not_plain_text_takes_this_state_s_forms(self) -> None:
         body = ga_body()
@@ -1854,7 +2096,7 @@ class TestC7:
         tree = render(body=body)
         figure = c7_figure(tree)
         assert c7_title(tree) == labels.C7_TITLE_THIS_STATE
-        assert labels.FIRST_ELECTION_NOTE_THIS_STATE.format(year=1832) in (
+        assert labels.FIRST_ELECTION_START_NOTE_THIS_STATE.format(year=1832) in (
             c7_caption(tree)
         )
         hovers = [h for t in figure["data"] for h in t["hovertext"]]
@@ -2040,7 +2282,10 @@ class TestC7Degraded:
         page = MOD["layout"](usps="GA")
         _, lede, content = page.children
         assert content.id == PAGE_ID
-        assert lede.children == MOD["LEDE"]
+        # C10's collapse is read, so there is a range to narrow: the slider and the
+        # filter sentence stay (#620, D119).
+        assert lede.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        assert find(content, MOD["YEARS_ID"]) is not None
         assert find(content, MOD["C7_UNAVAILABLE_ID"]) is not None
         assert find(content, C7_DOM) is None
         assert find(content, ELECTORS) is not None
@@ -2145,7 +2390,7 @@ class TestC10:
         totals, read straight from the recording and never through C10's collapse or
         figure builder, against the bars and hovers C10 draws from its history."""
         body = copy.deepcopy(RECORDED[f"/v1/states/{usps}"])
-        content, _ = MOD["render"](body, copy.deepcopy(INDEX), usps)
+        content, _, _ = MOD["render"](body, copy.deepcopy(INDEX), usps)
         figure = c10_figure(content)
         bars = bars_of(figure)
         hovers = hovers_by_year(figure)
@@ -2272,8 +2517,8 @@ class TestC10:
         symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
         assert symbols[label] == over_time.C10_SYMBOLS[label]
 
-    @pytest.mark.parametrize("query", FILTERED_URLS)
-    def test_no_query_changes_the_chart_or_its_table(
+    @pytest.mark.parametrize("query", UNFILTERED_URLS)
+    def test_a_query_that_applies_no_range_changes_neither_chart_nor_table(
         self, monkeypatch: pytest.MonkeyPatch, query: str
     ) -> None:
         cached_client(monkeypatch)
@@ -2288,24 +2533,28 @@ class TestC10:
         assert labels.C10_SHORT_TICKS_NOTE in caption
         assert labels.C5_BEFORE_NOTE.format(pv_year_min=WINDOW[0]) in caption
         assert labels.C5_MARKER_NOTE in caption
-        # No filter sentence since #619 (D118), after the marker note or anywhere.
+        # No filter sentence in a caption (#619, #620), after the marker note or
+        # anywhere.
         assert_no_filter_sentence(caption)
-        assert "The first election in this dataset" not in caption
+        assert "This chart starts at" not in caption
 
     def test_a_later_first_election_and_a_name_that_is_not_plain_text(self) -> None:
+        # #620 (D119): C10's axis starts at the state's first election with C7's, and
+        # its caption shares C7's start sentence.
         body = ga_body()
         body["data"] = [r for r in body["data"] if r["year"] >= 1832]
         tree = render(body=body)
         assert labels.C10_TITLE_STATE.format(state="Georgia") == c10_title(tree)
-        assert labels.C10_FIRST_ELECTION_NOTE.format(state="Georgia", year=1832) in (
+        assert labels.FIRST_ELECTION_START_NOTE.format(state="Georgia", year=1832) in (
             c10_caption(tree)
         )
-        assert c10_figure(tree)["layout"]["xaxis"] == components.year_axis(SERVED)
+        years = [y for y in SERVED if y >= 1832]
+        assert c10_figure(tree)["layout"]["xaxis"] == components.year_axis(years)
         for row in body["data"]:
             row["state"] = "<b>Georgia"
         tree = render(body=body)
         assert c10_title(tree) == labels.C10_TITLE_THIS_STATE
-        assert labels.C10_FIRST_ELECTION_NOTE_THIS_STATE.format(year=1832) in (
+        assert labels.FIRST_ELECTION_START_NOTE_THIS_STATE.format(year=1832) in (
             c10_caption(tree)
         )
         hovers = hovers_by_year(c10_figure(tree)).values()
@@ -2320,15 +2569,31 @@ class TestC10:
             (link,) = of_type(tr.children[0], "Link")
             assert link.href == f"/election/{link.children}"
         lines = download(tree, TOTALS).lines
-        assert "View: https://explore.us-presidential-election-center.org/state/GA" in (
-            lines
-        )
+        # The range applied, and never T4's moved key (#620, D119).
+        assert (
+            "View: https://explore.us-presidential-election-center.org/state/GA"
+            "?year_from=1900"
+        ) in lines
         assert labels.C5_BASIS in lines
         # C7, C10 and their one table share the page's one card (#567, #618, #619).
         card = in_one_card(tree, TOTALS, total=1)
         assert in_one_card(tree, C10_DOM, total=1) is card
         assert in_one_card(tree, C7_DOM, total=1) is card
         assert every_card(tree)[0] is card
+
+
+def halves(body: dict[str, Any], usps: str) -> tuple[Any, Any]:
+    """C7's and C10's halves over ``usps``'s whole history, built as ``render`` builds
+    them under the default view (each collapse once, #620, D119), with no start
+    sentence."""
+    path = f"/v1/states/{usps}"
+    rows = state_view.rows(body, usps, set(SERVED), path)
+    electors_full = MOD["electors"](rows, set(SERVED), usps, path)
+    totals_full = MOD["popular_totals"](rows, set(SERVED), usps, path)
+    return (
+        MOD["_electors_part"](electors_full, rows, usps, path, None),
+        MOD["_totals_part"](totals_full, rows, usps, body, path, None),
+    )
 
 
 class TestSharedTable:
@@ -2340,9 +2605,7 @@ class TestSharedTable:
     def test_c7_s_and_c10_s_status_cells_agree_every_year(self, usps: str) -> None:
         # The status column is taken from C7's points; C10's must say the same (m-5).
         body = copy.deepcopy(RECORDED[f"/v1/states/{usps}"])
-        rows = state_view.rows(body, usps, set(SERVED), f"/v1/states/{usps}")
-        c7 = MOD["_electors_part"](rows, set(SERVED), usps, "src")
-        c10 = MOD["_totals_part"](rows, set(SERVED), usps, body, "src")
+        c7, c10 = halves(body, usps)
         assert c7 is not None and c10 is not None
         assert [p.year for p in c7.points] == [p.year for p in c10.points]
         assert [p.status_cell for p in c7.points] == [
@@ -2354,10 +2617,7 @@ class TestSharedTable:
         ]
 
     def test_halves_that_disagree_on_the_years_are_a_code_fault(self) -> None:
-        body = ga_body()
-        rows = state_view.rows(body, "GA", set(SERVED), GA_PATH)
-        c7 = MOD["_electors_part"](rows, set(SERVED), "GA", GA_PATH)
-        c10 = MOD["_totals_part"](rows, set(SERVED), "GA", body, GA_PATH)
+        c7, c10 = halves(ga_body(), "GA")
         assert c7 is not None and c10 is not None
         with pytest.raises(ValueError):
             MOD["merge"](c7, c10._replace(points=c10.points[1:]))
@@ -2993,15 +3253,27 @@ class TestStateFigures:
     def test_a_filtered_url_renders_the_same_figures(
         self, monkeypatch: pytest.MonkeyPatch, query: str
     ) -> None:
-        """The figures were never narrowed by T4's filters; since #619 the page reads
-        no query at all (D118), so a filtered URL, through the layout as the router
-        calls it, renders the unfiltered page's figures. The same query does narrow
-        T4 on the results page, so it is a real filter, not one the parser drops."""
+        """AC3 (#620, D119; the owner's ruling at the plan gate): the figures read the
+        state's whole history whatever the URL holds, T4's moved keys (D118) or the
+        history page's own year range, which narrows C7, C10 and their table but never
+        the figures; while it does, :data:`labels.METRIC_ALL_YEARS_NOTE` follows them.
+        Through the layout as the router calls it. The same query does narrow T4 on
+        the results page, so it is a real filter, not one the parser drops."""
         cached_client(monkeypatch)
         plain, filtered = history_layout(), history_layout(query)
         for key in ST_FIGURE_IDS:
             assert st_figure(filtered, key) == st_figure(plain, key), (query, key)
-        assert texts(find(filtered, ST_FIGURES)) == texts(find(plain, ST_FIGURES))
+        narrowed = query.startswith("year_")
+        note = [labels.METRIC_ALL_YEARS_NOTE] if narrowed else []
+        assert texts(find(filtered, ST_FIGURES)) == [
+            *texts(find(plain, ST_FIGURES)),
+            *note,
+        ]
+        assert (find(filtered, MOD["METRICS_ALL_YEARS_ID"]) is not None) is narrowed
+        assert find(plain, MOD["METRICS_ALL_YEARS_ID"]) is None
+        if narrowed:
+            # The range does narrow the table, so the note is true.
+            assert len(body_rows(filtered, ELECTORS)) < len(body_rows(plain, ELECTORS))
         results = RS_MOD["layout"](usps="GA", **parse(query))
         unfiltered = RS_MOD["layout"](usps="GA")
         assert texts(find(results, RESULTS)) != texts(find(unfiltered, RESULTS))
@@ -3169,3 +3441,394 @@ class TestStateFigures:
         ids = routed_ids(route("/state/GA"))
         assert ST_FIGURES in ids and all(i in ids for i in ST_FIGURE_IDS.values())
         assert calls == [GA_PATH]
+
+
+# --- the Years filter (#620, D119) ------------------------------------------------------
+
+NO_MATCH = MOD["NO_MATCH_ID"]
+ALL_YEARS = MOD["METRICS_ALL_YEARS_ID"]
+YEARS = MOD["YEARS_ID"]
+
+
+def slider_of(tree: Any) -> Any:
+    (slider,) = of_type(tree, "RangeSlider")
+    assert slider.id == YEARS
+    return slider
+
+
+def xs_of(figure: dict[str, Any]) -> set[int]:
+    """Every year a figure's traces draw a point at."""
+    return {x for t in figure["data"] for x in t.get("x", []) if x is not None}
+
+
+def table_years(tree: Any) -> list[int]:
+    return [int(y) for y, _, _ in body_cells(tree)]
+
+
+def zeroed(body: dict[str, Any], *years: int) -> dict[str, Any]:
+    """``body`` with no electors appointed in ``years``, on every row of each, so C7's
+    collapse reads one zero there and the state's first election moves past them."""
+    for year in years:
+        with_year(body, year, state_electoral_votes=0)
+    return body
+
+
+class TestYearsFilter:
+    """The state history's one filter (#620, D119): the year range, judged against the
+    state's own span, from its first election to the latest served year, narrows C7,
+    C10 and their table together; the headline figures read the whole history."""
+
+    @pytest.mark.parametrize(
+        ("usps", "query"),
+        [
+            ("GA", "year_from=1900&year_to=1990"),
+            ("GA", "year_to=1872"),
+            ("TX", "year_from=1840&year_to=1870"),
+            ("TX", "year_from=2000"),
+        ],
+    )
+    def test_both_charts_and_the_table_hold_the_same_years(
+        self, usps: str, query: str
+    ) -> None:
+        tree = render(query, usps=usps)
+        pairs = dict(MOD["parse_filters"](parse(query)))
+        first = HISTORIES[usps].first
+        low = max(int(pairs.get("year_from", first)), first)
+        high = int(pairs.get("year_to", 2024))
+        years = [y for y in SERVED if low <= y <= high]
+        assert years and years != state_years(usps)
+        axis = components.year_axis(years)
+        c7, c10 = c7_figure(tree), c10_figure(tree)
+        assert c7["layout"]["xaxis"] == axis
+        assert c10["layout"]["xaxis"] == axis
+        assert table_years(tree) == years
+        assert [int(r["year"]) for r in download(tree, ELECTORS).rows] == years
+        assert xs_of(c7) <= set(years) and xs_of(c10) <= set(years)
+        # Each chart still equals its table's cells over the years shown (D091). C10
+        # draws no bar before the popular-vote window, so its bars may be none.
+        cells = {int(r["year"]): r for r in download(tree, ELECTORS).rows}
+        drawn = [
+            (field, dict(zip(t["x"], t["y"], strict=True)))
+            for field, figure in (
+                ("state_electoral_votes", c7),
+                ("state_popular_total", c10),
+            )
+            for t in figure["data"]
+            if t["type"] == "bar"
+        ]
+        assert drawn
+        for field, bars in drawn:
+            for year, value in bars.items():
+                assert cells[year][field] == str(value), (field, year)
+        # The slider shows the range applied, over the state's span.
+        slider = slider_of(tree)
+        assert (slider.min, slider.max) == (first, 2024)
+        assert slider.value == [low, high]
+
+    def test_georgia_s_narrowed_figures_are_the_default_s_with_a_note(self) -> None:
+        """AC3 (#620; the owner's ruling at the plan gate): the figures read C7's whole
+        collapse, so a narrowed range leaves them as the default render's, and
+        :data:`labels.METRIC_ALL_YEARS_NOTE` follows them; under the default it does
+        not."""
+        plain, tree = render(), render("year_from=1900&year_to=1990")
+        for key in ST_FIGURE_IDS:
+            assert st_figure(tree, key) == st_figure(plain, key), key
+        assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
+        note = find(tree, ALL_YEARS)
+        assert note is not None and note.className == "note"
+        assert note.children == labels.METRIC_ALL_YEARS_NOTE
+        assert labels.METRIC_ALL_YEARS_NOTE == (
+            "These figures cover this state's whole history in this dataset. The "
+            "Years filter does not change them."
+        )
+        # In the figures' block, after the zero-allotment note.
+        block = find(tree, ST_FIGURES)
+        assert [getattr(k, "id", None) for k in block.children][-2:] == [
+            MOD["METRICS_NOTE_ID"],
+            ALL_YEARS,
+        ]
+        assert find(plain, ALL_YEARS) is None
+        assert labels.METRIC_ALL_YEARS_NOTE not in texts(plain)
+
+    @pytest.mark.parametrize(
+        ("usps", "query", "zeros"),
+        [
+            ("GA", "", [1864]),
+            ("GA", "year_from=1860&year_to=1868", [1864]),
+            ("TX", "", [1864, 1868]),
+            ("TX", "year_from=1860&year_to=1872", [1864, 1868]),
+            ("TX", "year_from=1864&year_to=1864", [1864]),
+        ],
+    )
+    def test_a_zero_allotment_keeps_its_marker_and_row(
+        self, usps: str, query: str, zeros: list[int]
+    ) -> None:
+        """AC1: a mid-history zero allotment stays its labeled marker and its table
+        row under the default view and under a range that covers it."""
+        tree = render(query, usps=usps)
+        c7 = c7_figure(tree)
+        assert traces(c7)[labels.C4_NO_ELECTORS_TOOK_NO_PART] == zeros
+        bars = [t for t in c7["data"] if t["type"] == "bar"]
+        assert not set(zeros) & {x for t in bars for x in t["x"]}
+        assert labels.C4_ZERO_NOTE in c7_caption(tree)
+        assert traces(c10_figure(tree))[labels.C5_TOOK_NO_PART] == zeros
+        rows = {y: appointed for y, appointed, _ in body_cells(tree)}
+        for year in zeros:
+            assert rows[str(year)] == "0", year
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "year_to=1844",
+            "year_from=1824&year_to=1844",
+            "year_from=1700&year_to=1800",
+            "year_from=1844",
+        ],
+    )
+    def test_a_range_wholly_before_texas_s_first_election_is_the_default(
+        self, query: str
+    ) -> None:
+        """#620 (D119): each bound outside the state's span falls back to its end, so
+        a range before Texas's 1848 opens its whole history (replacing #279's honest
+        empty result on this page)."""
+        plain, tree = render(usps="TX"), render(query, usps="TX")
+        assert c7_figure(tree) == c7_figure(plain)
+        assert c10_figure(tree) == c10_figure(plain)
+        assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
+        assert slider_of(tree).value == slider_of(plain).value == [1848, 2024]
+        assert find(tree, NO_MATCH) is None and find(tree, ALL_YEARS) is None
+        assert texts(find(tree, ST_FIGURES)) == texts(find(plain, ST_FIGURES))
+        _, results, per_capita = section_entries(tree)
+        assert (results.href, per_capita.href) == (
+            "/state/TX/elections",
+            "/state/TX/per-capita",
+        )
+
+    def test_a_range_holding_no_election_shows_the_note(self) -> None:
+        """I1 (#620's architect review): the slider steps by one year, so a range can
+        hold no election. The slider, C7's heading and the figures with the all-years
+        note stay, then :data:`labels.STATE_NO_ELECTIONS_IN_RANGE` in place of both
+        charts and the table; the success marker and section links stay."""
+        query = "year_from=1850&year_to=1850"
+        tree = render(query, usps="TX")
+        assert tree.id == PAGE_ID
+        note = find(tree, NO_MATCH)
+        assert note is not None and note.className == "empty"
+        assert note.children == labels.STATE_NO_ELECTIONS_IN_RANGE
+        assert labels.STATE_NO_ELECTIONS_IN_RANGE == (
+            "No election for this state falls in the years chosen."
+        )
+        slider = slider_of(tree)
+        assert (slider.min, slider.max, slider.value) == (1848, 2024, [1850, 1850])
+        assert of_type(tree, "Figure") == []
+        assert c7_figure(tree) is None and c10_figure(tree) is None
+        assert find(tree, ELECTORS) is None
+        for unavailable in (
+            MOD["C7_UNAVAILABLE_ID"],
+            MOD["C10_UNAVAILABLE_ID"],
+            MOD["ELECTORS_TABLE_UNAVAILABLE_ID"],
+        ):
+            assert find(tree, unavailable) is None, unavailable
+        # The figures read the whole history (AC3), with the note that says so.
+        plain = render(usps="TX")
+        for key in ST_FIGURE_IDS:
+            assert st_figure(tree, key) == st_figure(plain, key), key
+        assert find(tree, ALL_YEARS) is not None
+        # The one card: the slider, C7's heading, the figures, then the note.
+        card = in_one_card(tree, NO_MATCH, total=1)
+        held = list(card.children)
+        assert [type(k).__name__ for k in held] == ["Div", "H2", "Div", "P"]
+        assert find(held[0], YEARS) is slider
+        assert held[1].children == MOD["C7_HEADING"]
+        assert held[2].id == ST_FIGURES
+        assert held[3] is note
+        _, results, per_capita = section_entries(tree)
+        assert results.href == f"/state/TX/elections?{query}"
+        assert per_capita.href == f"/state/TX/per-capita?{query}"
+
+    def test_the_empty_range_through_the_layout_keeps_the_lede_and_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        heading, lede, content = MOD["layout"](
+            usps="TX", year_from="1850", year_to="1850"
+        ).children
+        assert heading.children == "Texas"
+        assert lede.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        assert content.id == PAGE_ID and find(content, NO_MATCH) is not None
+        ids = routed_ids(route("/state/TX", "?year_from=1850&year_to=1850"))
+        assert PAGE_ID in ids and NO_MATCH in ids and ELECTORS not in ids
+        assert "c7" not in ids and "c10" not in ids
+
+    def test_both_collapses_failed_shows_no_slider(self) -> None:
+        """I2: with neither collapse read there is nothing to narrow, so no slider,
+        the three sentences in place of both charts and the table, no figures, and
+        ``render`` says so, so the layout adds no filter sentence."""
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["pv_status"] = "legislature_chosen"
+        for search in ("", "year_from=1900&year_to=1990"):
+            tree, _, filtered = render_all(search, body=copy.deepcopy(body))
+            assert filtered is False
+            assert tree.id == PAGE_ID
+            assert of_type(tree, "RangeSlider") == []
+            assert find(tree, ST_FIGURES) is None
+            assert find(tree, NO_MATCH) is None
+            for unavailable in (
+                MOD["C7_UNAVAILABLE_ID"],
+                MOD["C10_UNAVAILABLE_ID"],
+                MOD["ELECTORS_TABLE_UNAVAILABLE_ID"],
+            ):
+                assert find(tree, unavailable) is not None, unavailable
+
+    def test_a_c7_collapse_fault_starts_the_span_at_the_first_row(self) -> None:
+        """B1 (#620's architect review): the span's start reads data only. Georgia
+        doctored to appoint no electors in 1824 and 1828 starts at 1832; with C7's
+        collapse also unreadable (two allotments in 1900), its first election cannot
+        be told, so the span falls back to the first served row, where C10's collapse
+        starts, and C10 renders over it with no start sentence."""
+        body = zeroed(ga_body(), 1824, 1828)
+        tree = render(body=copy.deepcopy(body))
+        assert slider_of(tree).min == 1832
+        years = [y for y in SERVED if y >= 1832]
+        assert c10_figure(tree)["layout"]["xaxis"] == components.year_axis(years)
+        start = labels.FIRST_ELECTION_START_NOTE.format(state="Georgia", year=1832)
+        assert start in c7_caption(tree) and start in c10_caption(tree)
+        (fault, *_) = [r for r in body["data"] if r["year"] == 1900]
+        fault["state_electoral_votes"] = 99
+        tree = render(body=copy.deepcopy(body))
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert find(tree, ST_FIGURES) is None
+        slider = slider_of(tree)
+        assert (slider.min, slider.value) == (1824, [1824, 2024])
+        assert c10_figure(tree)["layout"]["xaxis"] == components.year_axis(SERVED)
+        assert "This chart starts at" not in c10_caption(tree)
+        assert table_years(tree) == SERVED
+        # A range still narrows C10 and the table from the fallback span.
+        tree = render("year_to=1900", body=copy.deepcopy(body))
+        narrowed = [y for y in SERVED if y <= 1900]
+        assert c10_figure(tree)["layout"]["xaxis"] == components.year_axis(narrowed)
+        assert table_years(tree) == narrowed
+
+    @pytest.mark.parametrize("name", ["", "   ", None])
+    def test_a_drawing_fault_does_not_move_the_span(self, name: Any) -> None:
+        """A served name with no text fails both charts' drawing, never their
+        collapses, so the span still starts at the first election (1832, as doctored),
+        and the slider and the filter sentence stay."""
+        body = zeroed(ga_body(), 1824, 1828)
+        for row in body["data"]:
+            row["state"] = name
+        tree, _, filtered = render_all(body=body)
+        assert filtered is True
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
+        slider = slider_of(tree)
+        assert (slider.min, slider.max, slider.value) == (1832, 2024, [1832, 2024])
+
+    @pytest.mark.parametrize(
+        ("usps", "query", "shown"),
+        [
+            ("TX", "", True),
+            ("TX", "year_to=1900", True),
+            # Falls back to the first election, so the chart starts there.
+            ("TX", "year_from=1840", True),
+            ("TX", "year_from=1900", False),
+            ("TX", "year_from=1852&year_to=1900", False),
+            ("GA", "", False),
+            ("GA", "year_to=1900", False),
+        ],
+    )
+    def test_the_start_sentence_shows_only_where_the_chart_starts_there(
+        self, usps: str, query: str, shown: bool
+    ) -> None:
+        """#620's ba spec: only when the years shown start at the state's first
+        election and that is after the dataset's first year."""
+        tree = render(query, usps=usps)
+        sentence = labels.FIRST_ELECTION_START_NOTE.format(
+            state=HISTORIES[usps].name, year=HISTORIES[usps].first
+        )
+        assert (sentence in c7_caption(tree)) is shown
+        assert (sentence in c10_caption(tree)) is shown
+        assert labels.FIRST_ELECTION_START_NOTE == (
+            "This chart starts at {year}, the first election in this dataset in which "
+            "{state} appointed electors."
+        )
+        assert labels.FIRST_ELECTION_START_NOTE_THIS_STATE == (
+            "This chart starts at {year}, the first election in this dataset in which "
+            "this state appointed electors."
+        )
+
+
+class TestCallback:
+    """The history page's one filter callback (#620, D119): the slider's value as the
+    normalized query, judged against the slider's own span, the state's."""
+
+    @pytest.mark.parametrize(
+        ("years", "first", "last", "current", "search"),
+        [
+            ([1900, 1990], 1824, 2024, "", "?year_from=1900&year_to=1990"),
+            ([1900.0, 2024], 1824, 2024, None, "?year_from=1900"),
+            ([1824, 1990], 1824, 2024, "", "?year_to=1990"),
+            # Texas's span: its first election is the slider's start, so the default.
+            ([1848, 1900], 1848, 2024, "", "?year_to=1900"),
+            ([1848, 2024], 1848, 2024, "?year_from=1900", ""),
+            # A hostile payload passes through the page's parser: inverted, dropped.
+            ([1990, 1900], 1824, 2024, "?year_to=1990", ""),
+            ("x", 1824, 2024, "?year_to=1990", ""),
+        ],
+    )
+    def test_a_change_writes_the_normalized_search(
+        self, years: Any, first: Any, last: Any, current: Any, search: str
+    ) -> None:
+        assert MOD["on_filter_change"](years, first, last, current) == search
+
+    @pytest.mark.parametrize(
+        ("years", "first", "last", "current"),
+        [
+            ([1824, 2024], 1824, 2024, ""),
+            ([1824, 2024], 1824, 2024, None),
+            ([1848, 2024], 1848, 2024, ""),
+            ([1900, 1990], 1824, 2024, "?year_from=1900&year_to=1990"),
+        ],
+    )
+    def test_an_unchanged_search_is_left_alone(
+        self, years: Any, first: Any, last: Any, current: Any
+    ) -> None:
+        assert MOD["on_filter_change"](years, first, last, current) is no_update
+
+    def test_it_is_registered_on_the_slider_and_the_page_s_location(self) -> None:
+        assert appmod.server.test_client().get("/").status_code == 200
+        spec = appmod.app.callback_map[f"{MOD['URL_ID']}.search"]
+        assert spec["inputs"] == [{"id": YEARS, "property": "value"}]
+        assert spec["state"] == [
+            {"id": YEARS, "property": "min"},
+            {"id": YEARS, "property": "max"},
+            {"id": MOD["URL_ID"], "property": "search"},
+        ]
+        # Dash keeps no initial-call flag in its map: read it from the decorator.
+        decorator = ast.parse(inspect.getsource(MOD["on_filter_change"])).body[0]
+        assert isinstance(decorator, ast.FunctionDef)
+        (call,) = decorator.decorator_list
+        assert isinstance(call, ast.Call)
+        keywords = {k.arg: ast.literal_eval(k.value) for k in call.keywords}
+        assert keywords == {"prevent_initial_call": True}
+
+    def test_a_filter_change_makes_no_api_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, calls, bucket = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        route("/state/GA")
+        route("/state/TX")
+        calls.clear()
+        waits = len(bucket.waits)
+        search = MOD["on_filter_change"]([1900, 1990], 1824, 2024, "")
+        assert search == "?year_from=1900&year_to=1990"
+        for path, shown in (
+            ("/state/GA", search),
+            ("/state/GA", "?year_to=1872"),
+            ("/state/TX", "?year_from=1850&year_to=1850"),
+            ("/state/GA", ""),
+        ):
+            assert PAGE_ID in routed_ids(route(path, shown)), (path, shown)
+        assert calls == []
+        assert len(bucket.waits) == waits

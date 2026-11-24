@@ -127,7 +127,8 @@ FILENAME_RE = re.compile(r"[A-Za-z0-9-]+\.csv")
 #: Every callback output once Dash has registered them all, before and after #309: the
 #: Pages router's two, each filtered page's URL (the election per-capita page's since
 #: #465, the state per-capita page's since #559, T4's results page's in place of the
-#: state history's since #619), the theme callback's store and its
+#: state history's since #619, and the state history's own again since #620, under a
+#: new id, ``state-history-url``), the theme callback's store and its
 #: three buttons' pressed states (#359, #447), the site navigation's marker (#448), and
 #: every chart's figure and visibility (#432, one MATCH callback). A download adds none.
 CALLBACK_OUTPUTS = {
@@ -144,6 +145,7 @@ CALLBACK_OUTPUTS = {
     "election-per-capita-url.search",
     "state-results-url.search",
     "state-per-capita-url.search",
+    "state-history-url.search",
     "candidate-url.search",
 }
 
@@ -509,12 +511,15 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({}, "year_to=1972", "filtered"),
         ({}, "year_from=1700", "absent"),
     ],
-    # #560, D106; #619, D118: the state history reads no filter since T4 left it, so
-    # as the overview's, its entry checks a client-side route carrying one of T4's
-    # moved keys and the year range: C7, C10 (#582) and their one table (#618) are
-    # the unfiltered render's.
+    # #620 (D119): the state history's one filter, the year range, judged against the
+    # state's own span, narrows C7, C10 and their one table (NARROWED_CHARTS). A range
+    # inside Georgia's span; an out-of-span year, which falls back to the state's
+    # whole history; and a Texas range starting before its first election, 1848,
+    # whose start falls back to it while its end narrows.
     "/state/<usps>": [
-        ({"usps": "GA"}, "candidate=andrew-jackson&year_from=1900", "filtered"),
+        ({"usps": "GA"}, "year_from=1900&year_to=1990", "filtered"),
+        ({"usps": "GA"}, "year_from=1700", "absent"),
+        ({"usps": "TX"}, "year_from=1840&year_to=1870", "filtered"),
     ],
 }
 
@@ -538,9 +543,9 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
     "/elections/over-time": {
         "elections-over-time-table": ("year_from", "year_to", "pv"),
     },
-    # The state history (#560, #582) is not listed since #619 (D118): it reads no
-    # filter, so C7's and C10's one companion table equals the unfiltered render
-    # under every query.
+    # The state history (#560, #582, #618): its year range narrows C7's and C10's one
+    # companion table since #620 (D119), as it narrows the two charts.
+    "/state/<usps>": {"state-electors": ("year_from", "year_to")},
 }
 
 #: The query keys that choose a chart's series, by the chart's DOM id (#436, D100): a
@@ -556,16 +561,18 @@ SERIES_KEYS: dict[str, tuple[str, ...]] = {
 
 
 #: The charts a filter narrows, by DOM id, and the query keys that narrow each (#596,
-#: D110, amending D093(a) for the elections pages): under a ``filtered`` query keeping
-#: one, the chart differs from the unfiltered render, its year axis is the one
-#: ``components.year_axis`` builds over the years its companion table shows, and every
-#: point sits inside that axis; under any other query it equals the unfiltered render.
-#: Hand-written.
+#: D110, amending D093(a) for the elections pages; #620, D119, for the state
+#: history's C7 and C10): under a ``filtered`` query keeping one, the chart differs
+#: from the unfiltered render, its year axis is the one ``components.year_axis`` builds
+#: over the years its companion table shows, and every point sits inside that axis;
+#: under any other query it equals the unfiltered render. Hand-written.
 NARROWED_CHARTS: dict[str, tuple[str, ...]] = {
     charts.dom_id("C2"): ("year_from", "year_to", "pv"),
     charts.dom_id("C4"): ("year_from", "year_to", "pv"),
     charts.dom_id("C5"): ("year_from", "year_to", "pv"),
     charts.dom_id("C9"): ("year_from", "year_to", "pv"),
+    charts.dom_id("C7"): ("year_from", "year_to"),
+    charts.dom_id("C10"): ("year_from", "year_to"),
 }
 
 #: Each chart's selected-item trace, by the chart's DOM id and the trace's name (#435,
@@ -795,8 +802,8 @@ class TestEveryChart:
             assert shown > 0, (key, query, row.table)
             assert shown == table_row_count(plain, row.table), (key, query, row.table)
             if parser is None:
-                # A page that reads no filter (the overview, the state history since
-                # #619): the whole file, view URL included, is the unfiltered one.
+                # A page that reads no filter (the overview): the whole file, view
+                # URL included, is the unfiltered one.
                 assert table_csv(tree, row.table) == table_csv(plain, row.table), (
                     key,
                     query,
@@ -2406,6 +2413,20 @@ def _state_history(body: dict[str, Any]) -> None:
             row["state_popular_total"] = SENTINEL
 
 
+def _state_history_page(body: dict[str, Any]) -> None:
+    """:func:`_state_history` on the state's second election rather than its first,
+    for the history page (#620, D119): its default view starts at the first year whose
+    allotment is a number above 0, so a sentinel allotment in the first election
+    would move that start past the doctored year, which the page would then not
+    show."""
+    second = sorted({row["year"] for row in body["data"]})[1]
+    at = next(i for i, row in enumerate(body["data"]) if row["year"] == second)
+    rows = body["data"]
+    body["data"] = [rows[at], *rows[:at], *rows[at + 1 :]]
+    _state_history(body)
+    body["data"] = [*body["data"][1 : at + 1], body["data"][0], *body["data"][at + 1 :]]
+
+
 #: Per page: the responses to doctor, each with every field a ``labels`` function
 #: words in one row of each table (and the panel) set to a value no cell has wording
 #: for, so every such cell is exercised.
@@ -2489,8 +2510,10 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {"year": "2016"},
         {"/v1/elections/2016/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
-    # One doctored body, read by the history page and T4's results page (#619).
-    "/state/<usps>": ({"usps": "GA"}, {"/v1/states/GA": _state_history}),
+    # The doctored body T4's results page reads (#619), on the state's second
+    # election for the history page, whose default view starts at its first election
+    # with a number of electors (#620, D119).
+    "/state/<usps>": ({"usps": "GA"}, {"/v1/states/GA": _state_history_page}),
     "/state/<usps>/elections": ({"usps": "GA"}, {"/v1/states/GA": _state_history}),
     "/state/<usps>/per-capita": (
         {"usps": "GA"},
