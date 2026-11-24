@@ -81,13 +81,13 @@ CHARTS: Mapping[str, Chart] = {
     "C5": Chart(
         "/elections/over-time", "elections-over-time-table", short_value_ticks=True
     ),
-    # One state's electors appointed in each election, never narrowed by the page's
-    # filters, on the state's history page (#560, D106), above C10 and the one
-    # companion table the two share (#618, D117).
+    # One state's electors appointed in each election, on the state's history page
+    # (#560, D106), above C10 and the one companion table the two share (#618, D117);
+    # the page's Years filter narrows all three together (#620, D119).
     "C7": Chart("/state/<usps>", "state-electors"),
     # The same state's total popular vote in each election, directly below C7 on its
-    # page, never narrowed by the page's filters, sharing C7's companion table (#618,
-    # D117); its value axis writes its numbers short, as C5's does (#582, D113).
+    # page, sharing C7's companion table (#618, D117) and narrowed with it (#620,
+    # D119); its value axis writes its numbers short, as C5's does (#582, D113).
     "C10": Chart("/state/<usps>", "state-electors", short_value_ticks=True),
     # How many candidates received electoral votes in each election, on the list of
     # elections, narrowed by its year filters (D110), above T1, its companion table

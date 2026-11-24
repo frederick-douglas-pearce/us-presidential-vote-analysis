@@ -300,8 +300,8 @@ def first_election(records: list[dict[str, Any]]) -> int | None:
     """The state's first election (#620, D119): the first year of C7's collapse
     (:func:`electors`, ``records``) whose allotment is an ``int`` (never a ``bool``)
     above 0, the rule the election count uses (D115(c), :func:`_allotment`); ``None``
-    if no year has one, which served data never has. Pure; #621's figure reads it
-    too."""
+    if no year has one, which served data never has. Pure; #621's figure is to read
+    it (D119, Action required)."""
     years = [
         r["year"]
         for r in records
@@ -354,10 +354,11 @@ def state_range(
     year_max: int,
 ) -> Range:
     """The range to apply (#620, D119): ``pairs`` judged against the state's own span,
-    per bound, as ``og:url`` is, so a bound outside it falls back to that end (a range
-    wholly before the state's first election opens its whole history). The span's start
-    reads data only, never whether a chart could be drawn: C7's collapse's first
-    election, else the state's first served row, where both collapses start."""
+    per bound, as the shared year range is, so a bound outside it falls back to that
+    end (a range wholly before the state's first election opens its whole history).
+    The span's start reads data only, never whether a chart could be drawn: C7's
+    collapse's first election, else the state's first served row, where both
+    collapses start."""
     first = None if electors_records is None else first_election(electors_records)
     start = first if first is not None else min(r["year"] for r in rows)
     span = (start, year_max)
@@ -743,7 +744,7 @@ def _charts_section(
     full: tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None],
     chosen: Range,
     year_min: int,
-) -> list[Any]:
+) -> tuple[list[Any], bool]:
     """C7 and C10's one section (#560, #582, #618, #620; D106, D113, D117, D119): the
     Years slider, C7's heading, the headline figures (#601, D115), C7, C10's heading,
     C10, then the table the two share and its column-name list, for the state's rows
@@ -756,10 +757,14 @@ def _charts_section(
     its own; one that cannot be built shows its sentence in its place (D096(d)'s rule)
     and its column of the table reads :data:`explore.labels.UNAVAILABLE_CELL`, with a
     note first among the table's, while the other chart, its column and the page stay.
-    The figures read C7's whole collapse, never the range. Where the range holds no
-    election, :data:`explore.labels.STATE_NO_ELECTIONS_IN_RANGE` stands in place of
-    both charts and the table, under the slider and the figures. ``components.chart``
-    and the table are built after both ``try`` blocks (D095(f))."""
+    What shows outside each chart's place follows the collapses, never whether a chart
+    was drawn (a drawing reads the narrowed records, so it could depend on the range;
+    D119(c), (d)): the slider, and the figures, which read C7's whole collapse and show
+    under C7's heading wherever it was read, whether or not C7 was drawn. Where the
+    range holds no election, :data:`explore.labels.STATE_NO_ELECTIONS_IN_RANGE` stands
+    in place of both charts and the table. ``components.chart`` and the table are built
+    after both ``try`` blocks (D095(f)). Returns the content and whether the slider
+    rendered, the one source :func:`render` passes on for the filter sentence."""
     electors_full, totals_full = full
     if electors_full is None and totals_full is None:
         return [
@@ -773,7 +778,7 @@ def _charts_section(
                 id=ELECTORS_TABLE_UNAVAILABLE_ID,
                 className="note",
             ),
-        ]
+        ], False
     # The caption names the first election only where the chart starts there and it
     # is after the dataset's first year (ba spec for #620).
     start = (
@@ -788,19 +793,15 @@ def _charts_section(
         for records in (electors_full, totals_full)
     ]
     content: list[Any] = [_controls(chosen), html.H2(C7_HEADING)]
-    figures = (
-        []
-        if electors_full is None
-        else [_figures(electors_full, rows, chosen.narrowed)]
-    )
-    if not any(shown_records for shown_records in shown):
-        return [
-            *content,
-            *figures,
+    if electors_full is not None:
+        content.append(_figures(electors_full, rows, chosen.narrowed))
+    if not any(shown):
+        content.append(
             html.P(
                 labels.STATE_NO_ELECTIONS_IN_RANGE, id=NO_MATCH_ID, className="empty"
-            ),
-        ]
+            )
+        )
+        return content, True
     electors_shown, totals_shown = shown
     c7 = (
         None
@@ -815,10 +816,9 @@ def _charts_section(
     if c7 is None:
         content.append(html.P(C7_UNAVAILABLE, id=C7_UNAVAILABLE_ID, className="note"))
     else:
-        content += [
-            *figures,
-            components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, c7.caption),
-        ]
+        content.append(
+            components.chart(C7_ID, c7.figure, ELECTORS_TABLE_ID, c7.caption)
+        )
     content.append(html.H2(C10_HEADING))
     if c10 is None:
         content.append(html.P(C10_UNAVAILABLE, id=C10_UNAVAILABLE_ID, className="note"))
@@ -835,7 +835,7 @@ def _charts_section(
                 className="note",
             )
         )
-        return content
+        return content, True
     merged = merge(c7, c10)
     by_row = {id(m.record): m for m in merged}
     content += [
@@ -863,7 +863,7 @@ def _charts_section(
         ),
         labels.glossary(ELECTORS_FIELDS, ident=ELECTORS_GLOSSARY_ID),
     ]
-    return content
+    return content, True
 
 
 def applied_search(chosen: Range) -> str:
@@ -898,21 +898,28 @@ def render(
     rows = state_view.rows(body, usps, served, source)
     # Each collapse once, over the whole history (#620, D119): the span, the figures
     # and each chart's half read the same result.
-    full = (
-        collapsed(electors, rows, served, usps, source),
-        collapsed(popular_totals, rows, served, usps, source),
+    # A served name with nothing in it names no state, and both charts would refuse it
+    # whatever the range, so it counts as neither collapse read: no slider, as before
+    # #620 (D119(d)).
+    full: tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None] = (
+        (
+            collapsed(electors, rows, served, usps, source),
+            collapsed(popular_totals, rows, served, usps, source),
+        )
+        if labels.has_text(rows[0]["state"])
+        else (None, None)
     )
     chosen = state_range(pairs or [], full[0], rows, year_max)
-    filtered = full != (None, None)
+    section, filtered = _charts_section(
+        rows, usps, body, source, full, chosen, year_min
+    )
     content = html.Div(
         [
             state_view.section_nav(usps, state_view.HISTORY, applied_search(chosen)),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
             # The page's one section (#567, D111; #618, D117): C7 and C10 with the
             # table they share, under the Years slider (#620, D119).
-            components.card(
-                _charts_section(rows, usps, body, source, full, chosen, year_min)
-            ),
+            components.card(section),
             components.provenance_footer(provenance),
         ],
         id=PAGE_ID,

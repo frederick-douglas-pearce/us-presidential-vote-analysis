@@ -361,7 +361,8 @@ def page_move(page: Mapping[str, Any], registry: Mapping[str, Any]) -> Move | No
 
 
 #: Values a moved key's probe tries (#620, D119): a USPS code, a slug and every closed
-#: value a filter keeps, so each moved key has a value its target's parser keeps.
+#: ``pv_status`` and count-status value, so each key a page moves today has a value its
+#: target's parser keeps (a key kept under none fails the import).
 MOVE_WITNESSES: tuple[str, ...] = (
     "GA",
     "andrew-jackson",

@@ -876,8 +876,8 @@ METRIC_COUNT_ELECTIONS = "{n} elections ({first}–{last})"
 #: A count of one election: the one year, never "1828–1828".
 METRIC_COUNT_ELECTIONS_ONE = "1 election ({year})"
 #: Both state history figures when no year's allotment is above 0 (#601). It never
-#: says "elections shown", since the history page reads no filter (D112(g), D118), and
-#: never "0", which would read as a measurement.
+#: says "elections shown", since the history page's figures are unfiltered (D112(g),
+#: D115(g), D119), and never "0", which would read as a measurement.
 METRIC_NO_FIGURE_NO_ELECTORS = (
     "No figure: this dataset has no election in which this state appointed electors"
 )

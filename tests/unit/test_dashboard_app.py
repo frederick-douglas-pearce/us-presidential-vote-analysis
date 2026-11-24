@@ -5441,6 +5441,32 @@ class TestMoveContract:
         # The control: the same source dropping the key passes.
         assert appmod.page_move(self.page(query=self.keeping("b")), registry)
 
+    def test_every_witness_the_target_keeps_is_probed_not_only_the_first(
+        self,
+    ) -> None:
+        """#620's review (ge.2): the target keeps the key under every witness, the
+        source only under a late one, ``popular_vote``; a probe of the first kept
+        witness alone ("GA") would pass it."""
+        registry = self.registry(query=self.keeping("a"))
+        page = self.page(query=self.keeping("a", witnesses=("popular_vote",)))
+        assert appmod.MOVE_WITNESSES.index("popular_vote") > 0
+        with pytest.raises(RuntimeError, match="still reads 'a'"):
+            appmod.page_move(page, registry)
+
+    def test_a_source_keeping_the_key_under_another_value_fails_the_import(
+        self,
+    ) -> None:
+        """#620's review (ge.2): the check is on the key, never the exact pair, so a
+        source that keeps a moved key under a normalized value is refused too."""
+
+        def renaming(params: Any) -> list[tuple[str, str]]:
+            value = params.get("a")
+            return [("a", f"{value}-x")] if isinstance(value, str) else []
+
+        registry = self.registry(query=self.keeping("a"))
+        with pytest.raises(RuntimeError, match="still reads 'a'"):
+            appmod.page_move(self.page(query=renaming), registry)
+
     def test_the_witnesses_cover_every_closed_value_a_moved_key_may_take(self) -> None:
         assert appmod.MOVE_WITNESSES[:2] == ("GA", "andrew-jackson")
         assert set(labels.PV_STATUS) <= set(appmod.MOVE_WITNESSES)

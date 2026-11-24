@@ -3711,19 +3711,67 @@ class TestYearsFilter:
         assert table_years(tree) == narrowed
 
     @pytest.mark.parametrize("name", ["", "   ", None])
-    def test_a_drawing_fault_does_not_move_the_span(self, name: Any) -> None:
-        """A served name with no text fails both charts' drawing, never their
-        collapses, so the span still starts at the first election (1832, as doctored),
-        and the slider and the filter sentence stay."""
-        body = zeroed(ga_body(), 1824, 1828)
+    def test_a_blank_name_counts_as_neither_collapse_read(self, name: Any) -> None:
+        """#620's scope ruling (D119(d)): a served name with no text fails both charts
+        whatever the range, so it counts as neither collapse read: no slider, no
+        filter sentence, no figures, and the three unavailable sentences, as before
+        #620."""
+        body = ga_body()
         for row in body["data"]:
             row["state"] = name
-        tree, _, filtered = render_all(body=body)
+        tree, _, filtered = render_all("year_from=1900", body=body)
+        assert filtered is False
+        assert find(tree, MOD["YEARS_ID"]) is None
+        assert find(tree, ST_FIGURES) is None
+        for ident in (
+            MOD["C7_UNAVAILABLE_ID"],
+            MOD["C10_UNAVAILABLE_ID"],
+            MOD["ELECTORS_TABLE_UNAVAILABLE_ID"],
+        ):
+            assert find(tree, ident) is not None
+
+    @pytest.mark.parametrize(
+        "query", ["", "year_to=1900", "year_from=1850&year_to=1850"]
+    )
+    def test_a_drawing_fault_moves_neither_the_span_nor_the_figures(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        """#620's scope ruling (cr.6, ge.3): what shows outside a chart's place follows
+        the collapses, never the drawing. With C7's figure refusing to draw, the span
+        still starts at the first election (1832, as doctored), and the slider, the
+        filter sentence and the figures stay in every range, the empty one (1850, no
+        election) included."""
+
+        def refuse(*_args: Any, **_kwargs: Any) -> Any:
+            raise TypeError("C7 cannot be drawn")
+
+        monkeypatch.setattr(over_time, "c4_figure", refuse)
+        body = zeroed(ga_body(), 1824, 1828)
+        tree, _, filtered = render_all(query, body=body)
         assert filtered is True
+        assert slider_of(tree).min == 1832
+        assert find(tree, ST_FIGURES) is not None
+        if query.endswith("1850"):
+            assert find(tree, MOD["NO_MATCH_ID"]) is not None
+        else:
+            assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+            # C10 still draws: the fault is C7's drawing alone.
+            assert c10_caption(tree)
+
+    def test_texas_with_c7_s_collapse_unreadable_names_no_first_election(
+        self,
+    ) -> None:
+        """#620's review (ge.1): with C7's collapse unreadable (two allotments in
+        1900) the span falls back to Texas's first served row, 1848, after the
+        dataset's first year, yet no caption names a first election, since none was
+        read (``start_known``)."""
+        body = copy.deepcopy(RECORDED["/v1/states/TX"])
+        (fault, *_) = [r for r in body["data"] if r["year"] == 1900]
+        fault["state_electoral_votes"] = 99
+        tree = render(body=body, usps="TX")
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
-        assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
-        slider = slider_of(tree)
-        assert (slider.min, slider.max, slider.value) == (1832, 2024, [1832, 2024])
+        assert slider_of(tree).min == 1848
+        assert "This chart starts at" not in c10_caption(tree)
 
     @pytest.mark.parametrize(
         ("usps", "query", "shown"),
