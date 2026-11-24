@@ -350,14 +350,19 @@ SECTION_OVERVIEW = "Overview"
 SECTION_STATES = "Results by state"
 SECTION_PER_CAPITA = "People per electoral vote"
 
-#: The links between a state's two pages (#559; ba spec, approved at #559's plan gate,
-#: 2026-11-18), in page order, and their landmark's accessible name, on the election
-#: pages' pattern: the state history, then its people per electoral vote, whose link
-#: text is :data:`SECTION_PER_CAPITA`, the same measure as on an election's pages.
-#: "State history" is already the history page's heading on the degraded state and its
-#: title before a code is checked (``title()`` in ``pages/state.py``).
+#: The links between a state's three pages (#559, #619; ba specs, approved at their
+#: plan gates, 2026-11-18 and 2026-11-23), in page order, and their landmark's
+#: accessible name, on the election pages' pattern: the state history, its results by
+#: election, then its people per electoral vote, whose link text is
+#: :data:`SECTION_PER_CAPITA`, the same measure as on an election's pages. "State
+#: history" is already the history page's heading on the degraded state and its title
+#: before a code is checked (``title()`` in ``pages/state.py``). "Results by election"
+#: is the state's form of an election's :data:`SECTION_STATES`, whose table has the
+#: same columns with the year in place of the state; never "electoral votes" alone,
+#: which on a state's pages also means its electors appointed (C7).
 STATE_SECTIONS_LABEL = "Pages for this state"
 SECTION_STATE_HISTORY = "State history"
+SECTION_RESULTS_BY_ELECTION = "Results by election"
 
 #: The links between the three elections pages (#562; ba spec, approved at #562's plan
 #: gate, 2026-11-19), in page order, and their landmark's accessible name, on the
@@ -368,11 +373,11 @@ SECTION_ELECTIONS_LIST = "List of elections"
 SECTION_MAJORITY = "Electoral College majority"
 SECTION_OVER_TIME = "Electors appointed and total popular vote"
 
-#: The not-found state's heading, sentence and link, shared by a state's two pages
+#: The not-found state's heading, sentence and link, shared by a state's three pages
 #: (#325; moved here and the sentence reworded by #559, ba spec, approved at its plan
-#: gate, 2026-11-18): what is not found is the link, a code the dataset does not serve
-#: or a section the site does not have, which reaches the history page
-#: (``/state/GA/x``), so both pages say the same. "Not found" is about the link:
+#: gate, 2026-11-18; #619): what is not found is the link, a code the dataset does not
+#: serve or a section the site does not have, which reaches the history page
+#: (``/state/GA/x``), so every page says the same. "Not found" is about the link:
 #: ``/state/ga`` is refused though Georgia is served. The heading also leads the page's
 #: title on a not-found link (``api.NotFound.title``, D083). The raw path value is
 #: never echoed. The link leads back to the state picker.
@@ -871,8 +876,8 @@ METRIC_COUNT_ELECTIONS = "{n} elections ({first}–{last})"
 #: A count of one election: the one year, never "1828–1828".
 METRIC_COUNT_ELECTIONS_ONE = "1 election ({year})"
 #: Both state history figures when no year's allotment is above 0 (#601). It never
-#: says "elections shown", since the figures ignore T4's filters (D112(g)), and never
-#: "0", which would read as a measurement.
+#: says "elections shown", since the history page reads no filter (D112(g), D118), and
+#: never "0", which would read as a measurement.
 METRIC_NO_FIGURE_NO_ELECTORS = (
     "No figure: this dataset has no election in which this state appointed electors"
 )
@@ -1034,17 +1039,14 @@ FIRST_ELECTION_NOTE = (
 )
 
 #: Chart C7 (#560): one state's electors appointed, on its history page. Its title,
-#: axis, hover, key and most of its caption are C4's one-state wording. Two of these are
-#: the forms for a state its page names by address, never by a choice; the third says
-#: what the page's filters reach (ba spec, approved at #560's plan gate, 2026-11-18).
+#: axis, hover, key and most of its caption are C4's one-state wording. The two below
+#: are the forms for a state its page names by address, never by a choice (ba spec,
+#: approved at #560's plan gate, 2026-11-18). A third, the note on what the page's
+#: filters reached, ``C7_FILTERS_NOTE``, is retired with the filters (#619, D118).
 C7_TITLE_THIS_STATE = "Electors appointed by this state in each election"
 FIRST_ELECTION_NOTE_THIS_STATE = (
     "The first election in this dataset for this state is {year}, so nothing is drawn "
     "for the years before it."
-)
-C7_FILTERS_NOTE = (
-    "The year, candidate and popular-vote filters on this page narrow only the table "
-    "of each candidate's electoral votes, not this chart or its table."
 )
 
 #: Chart C10 (#582): one state's total popular vote, on its history page, below C7. Its

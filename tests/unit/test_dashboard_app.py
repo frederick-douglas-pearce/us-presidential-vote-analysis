@@ -5156,6 +5156,176 @@ class TestMovedFilters:
         assert "election-states" not in ids
 
 
+class TestStatePages:
+    """The state history's greedy ``<usps>`` would capture its subpages' paths; their
+    ``order=`` puts them first in the registry Dash's router walks (#559, #619), as
+    :class:`TestElectionPages` checks for the election pages."""
+
+    @pytest.mark.parametrize(
+        ("path", "module", "usps"),
+        [
+            ("state/GA/elections", "pages.state_results", "GA"),
+            ("state/GA/per-capita", "pages.state_per_capita", "GA"),
+            ("state/GA", "pages.state", "GA"),
+            # An unknown section reaches the history page, whose validate refuses it.
+            ("state/GA/x", "pages.state", "GA/x"),
+            ("state/GA/elections/x", "pages.state", "GA/elections/x"),
+        ],
+    )
+    def test_each_path_reaches_its_page(self, path: str, module: str, usps: str) -> None:
+        assert _module(path) == (module, {"usps": usps})
+
+    def test_the_precedence_comes_from_order_not_module_names(self) -> None:
+        modules = list(dash.page_registry)
+        assert dash.page_registry["pages.state"]["supplied_order"] is None
+        history = modules.index("pages.state")
+        for name in ("pages.state_results", "pages.state_per_capita"):
+            assert isinstance(dash.page_registry[name]["supplied_order"], int), name
+            assert modules.index(name) < history, name
+
+    def test_no_two_callbacks_write_one_output(self) -> None:
+        # The results page's controls and Location have ids of their own (#619), and
+        # the history page's are retired with T4 (D118).
+        graph = appmod.server.test_client().get("/_dash-dependencies").get_json()
+        outputs = [c["output"] for c in graph]
+        assert len(outputs) == len(set(outputs))
+        assert "state-results-url.search" in outputs
+        assert "state-per-capita-url.search" in outputs
+        assert "state-url.search" not in outputs
+
+
+class TestMovedStateFilters:
+    """A link to the state history carrying one of T4's keys, shared before #619, is
+    redirected (302) to the results page with them, normalized by its parser, the
+    year range riding along (D092's ``moved=``, D118); only once the roster in memory
+    accepted the code."""
+
+    @staticmethod
+    def warm(monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], Any]:
+        _, calls, bucket = cached_client(monkeypatch, source=api.ROSTER_PATH)
+        return calls, bucket
+
+    @pytest.mark.parametrize(
+        ("query", "location"),
+        [
+            ("candidate=andrew-jackson", "/state/GA/elections?candidate=andrew-jackson"),
+            ("pv_status=popular_vote", "/state/GA/elections?pv_status=popular_vote"),
+            (
+                "candidate=andrew-jackson&pv_status=popular_vote",
+                "/state/GA/elections?candidate=andrew-jackson&pv_status=popular_vote",
+            ),
+            # The year range rides along, through the target's parser.
+            (
+                "year_from=1860&year_to=1872&candidate=horatio-seymour",
+                "/state/GA/elections?candidate=horatio-seymour&year_from=1860"
+                "&year_to=1872",
+            ),
+            ("year_to=1900&pv_status=popular_vote",
+             "/state/GA/elections?pv_status=popular_vote&year_to=1900"),
+            # A repeated key: kept when it agrees, dropped when it does not.
+            (
+                "candidate=andrew-jackson&candidate=andrew-jackson",
+                "/state/GA/elections?candidate=andrew-jackson",
+            ),
+            ("candidate=andrew-jackson&candidate=henry-clay", "/state/GA/elections"),
+            # The path's code wins (D081); unknown keys are dropped.
+            (
+                "usps=TX&state=TX&junk=1&candidate=andrew-jackson",
+                "/state/GA/elections?candidate=andrew-jackson",
+            ),
+            # Read as the router reads the query: an escaped key, a blank value, a
+            # value the target's parser drops.
+            ("c%61ndidate=andrew-jackson", "/state/GA/elections?candidate=andrew-jackson"),
+            ("candidate=", "/state/GA/elections"),
+            ("pv_status=", "/state/GA/elections"),
+            ("candidate=Andrew%20Jackson", "/state/GA/elections"),
+            ("pv_status=held", "/state/GA/elections"),
+        ],
+    )
+    def test_a_moved_key_redirects_to_the_results_page(
+        self, monkeypatch: pytest.MonkeyPatch, query: str, location: str
+    ) -> None:
+        calls, bucket = self.warm(monkeypatch)
+        # The raw header: relative, never naming a host (D090).
+        assert _location(f"/state/GA?{query}") == (302, location)
+        # Judged from the snapshot in memory: the redirect reads and fills nothing.
+        assert (calls, bucket.waits) == ([], [])
+
+    def test_the_location_is_built_from_the_accepted_code_not_the_request_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.warm(monkeypatch)
+        assert _location("/state/%47A?candidate=andrew-jackson") == (
+            302,
+            "/state/GA/elections?candidate=andrew-jackson",
+        )
+
+    @pytest.mark.parametrize(
+        "query",
+        ["", "junk=1", "year_from=1900", "year_from=1900&year_to=1960", "candidatex=a"],
+    )
+    def test_no_moved_key_serves_the_history(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        """The year range is not moved (D118): the section links write it on every
+        state page's URL, and the history page is to read it (#620)."""
+        calls, _ = self.warm(monkeypatch)
+        assert _location(f"/state/GA?{query}") == (200, None)
+        assert calls == []
+
+    @pytest.mark.parametrize(
+        "path", ["/state/ZZ", "/state/ga", "/state/G1", "/state/GA/x"]
+    )
+    def test_a_refused_code_answers_the_history_s_404(
+        self, monkeypatch: pytest.MonkeyPatch, path: str
+    ) -> None:
+        calls, _ = self.warm(monkeypatch)
+        assert _location(f"{path}?candidate=x") == (404, None)
+        assert calls == []
+
+    def test_before_the_first_snapshot_the_history_is_served_unfiltered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only a code the snapshot in memory accepted builds a Location; an unchecked
+        one is served as the history, which reads no filter."""
+
+        def no_fetch(path: str, timeout: float = 0) -> api.Response:
+            raise AssertionError(f"the index fetched {path}")
+
+        client = offline_client(no_fetch)
+        client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+        monkeypatch.setattr(api, "CLIENT", client)
+        assert _location("/state/GA?candidate=andrew-jackson") == (200, None)
+        assert _location("/state/ZZ?pv_status=popular_vote") == (200, None)
+
+    def test_a_cold_roster_serves_the_history_with_the_key_ignored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The residual (D118): a snapshot serving but the roster not yet cached, so
+        the code is unchecked and the index serves the history (D073: it never waits
+        on the API), reading and filling nothing. The routed render then fills the
+        roster and the state's rows, never a path built from the moved key, and shows
+        the history unfiltered."""
+        _, calls, bucket = cached_client(monkeypatch)
+        status, head, _ = get("/state/GA?candidate=andrew-jackson&pv_status=held")
+        assert status == 200
+        assert head.canonical == url("/state/GA")
+        assert head.og_url == url("/state/GA")
+        assert (calls, bucket.waits) == ([], [])
+        ids = routed_ids(route("/state/GA", "?candidate=andrew-jackson"))
+        assert "state" in ids and "state-results" not in ids
+        assert calls == [api.ROSTER_PATH.format(year_max=2024), "/v1/states/GA"]
+        assert not [c for c in calls if "andrew-jackson" in c or "candidate" in c]
+
+    def test_a_client_side_route_renders_the_history_unfiltered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.warm(monkeypatch)
+        ids = routed_ids(route("/state/GA", "?candidate=andrew-jackson"))
+        assert "state" in ids
+        assert "state-results-page" not in ids and "state-results" not in ids
+
+
 class TestMoveContract:
     """``moved=`` is checked as the registry is read (:func:`explore.app.page_move`), so
     a redirect never leads to a page that would refuse the value just accepted."""
@@ -5241,12 +5411,19 @@ class TestMoveContract:
         with pytest.raises(RuntimeError, match="both"):
             appmod.page_path_move(page, self.registry())
 
-    def test_the_registry_s_moves_are_the_overview_s_alone(self) -> None:
-        assert set(appmod.MOVES) == {"pages.election"}
+    def test_the_registry_s_moves_are_the_overview_s_and_the_state_history_s(
+        self,
+    ) -> None:
+        assert set(appmod.MOVES) == {"pages.election", "pages.state"}
         move = appmod.MOVES["pages.election"]
         assert move.keys == ("state", "candidate", "pv_status", "electoral_count_status")
         assert move.template == "/election/<year>/states"
         assert move.parser is dash.page_registry["pages.election_states"]["query"]
+        # T4's two keys, to its own page (#619, D118); never the year range.
+        state = appmod.MOVES["pages.state"]
+        assert state.keys == ("candidate", "pv_status")
+        assert state.template == "/state/<usps>/elections"
+        assert state.parser is dash.page_registry["pages.state_results"]["query"]
 
 
 class TestPathMoveContract:

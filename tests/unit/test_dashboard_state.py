@@ -1,6 +1,8 @@
-"""The state history, T4, and the state picker (#279), and the state's people per
-electoral vote page, T7 (#280; its own page since #559), with the section links
-between a state's two pages (#559, D105).
+"""The state history, charts C7 and C10 and the table they share, and the state
+picker (#279), and the state's people per electoral vote page, T7 (#280; its own page
+since #559), with the section links between a state's three pages (#559, #619; D105,
+D118). T4, the state's results by election, is a page of its own since #619, tested in
+``test_dashboard_state_results.py``, which imports this module's shared helpers.
 
 Offline, against the recorded ``/v1/states/GA`` and ``/v1/states/TX`` (C7 and C10
 run over both, #575) and the roster ``/v1/elections/2024``,
@@ -10,8 +12,9 @@ snapshot``), through the helpers and the autouse offline process client of
 ``test_dashboard_app.py``. The registry-wide checks there pick the pages up
 (``TestRegistryCoverage``, ``TestValidateBeforeFill`` with ``ZZ`` as the unserved code,
 ``TestRegistryContracts``), and the D070(b) guard renders ``/state/GA``,
-``/state/GA/per-capita``, ``/states``, ``/state/ZZ`` and ``/state/ZZ/per-capita``.
-These tests cover what is particular to the three pages.
+``/state/GA/elections``, ``/state/GA/per-capita``, ``/states``, ``/state/ZZ``,
+``/state/ZZ/elections`` and ``/state/ZZ/per-capita``. These tests cover what is
+particular to the pages.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from explore import (
     query,
     state_view,
 )
+from explore import app as appmod
 from tests.dashboard_cards import card_children, cards, every_card, in_one_card
 from tests.unit.test_dashboard_app import (
     RECORDED,
@@ -78,41 +82,15 @@ ROSTER: dict[str, Any] = RECORDED[ROSTER_PATH]
 GA_PATH = "/v1/states/GA"
 GA_PER_CAPITA_PATH = "/v1/states/GA/per-capita"
 PAGE_ID = MOD["PAGE_ID"]
-TABLE = MOD["TABLE_ID"]
+#: The results page (#619), read through the registry: importing its test module here
+#: would collect its tests twice, and it imports this one.
+RS_PAGE: dict[str, Any] = dash.page_registry["pages.state_results"]
+RS_MOD: dict[str, Any] = RS_PAGE["layout"].__globals__
+RS_PAGE_ID = RS_MOD["PAGE_ID"]
+#: T4, on the results page since #619.
+RESULTS = RS_MOD["TABLE_ID"]
 PC_PAGE_ID = PC_MOD["PAGE_ID"]
 PER_CAPITA = PC_MOD["PER_CAPITA_TABLE_ID"]
-
-
-#: Georgia's noted candidate-years (#575's re-record), in T4's order.
-GA_NOTED = (
-    (1824, "Henry Clay"),
-    (1832, "John Floyd"),
-    (1832, "William Wirt"),
-    (1836, "Daniel Webster"),
-    (1836, "Hugh L. White"),
-    (1856, "Millard Fillmore"),
-    (1860, "John Bell"),
-    (1872, "Benjamin Gratz Brown"),
-    (1872, "Charles J. Jenkins"),
-    (1872, "Horace Greeley"),
-    (1872, "Thomas A. Hendricks"),
-    (1892, "James B. Weaver"),
-    (1912, "William H. Taft"),
-    (1924, "Robert M. La Follette"),
-    (1948, "J. Strom Thurmond"),
-    (1956, "Walter B. Jones"),
-    (1960, "Harry F. Byrd"),
-    (1968, "George C. Wallace"),
-    (1972, "John Hospers"),
-    (1976, "Ronald Reagan"),
-    (1988, "Lloyd Bentsen"),
-    (2004, "John Edwards"),
-    (2016, "Bernie Sanders"),
-    (2016, "Colin Powell"),
-    (2016, "Faith Spotted Eagle"),
-    (2016, "John Kasich"),
-    (2016, "Ron Paul"),
-)
 
 
 def ga_body() -> dict[str, Any]:
@@ -123,17 +101,34 @@ def ga_per_capita() -> dict[str, Any]:
     return copy.deepcopy(RECORDED[GA_PER_CAPITA_PATH])
 
 
-def render(
-    query: str = "", body: Any = None, index: Any = None, usps: str = "GA"
-) -> Any:
-    """The history page's body for ``query``, as the layout builds it: ``usps``'s
-    recorded history unless ``body`` is given."""
+def render(*, body: Any = None, index: Any = None, usps: str = "GA") -> Any:
+    """The history page's body, as the layout builds it: ``usps``'s recorded history
+    unless ``body`` is given. The page reads no query (D118), so there is none to pass:
+    a filtered URL goes through :func:`history_layout`."""
     content, _ = MOD["render"](
         copy.deepcopy(RECORDED[f"/v1/states/{usps}"]) if body is None else body,
         copy.deepcopy(INDEX) if index is None else index,
         usps,
-        MOD["parse_filters"](parse(query)),
     )
+    return content
+
+
+def serve_history(monkeypatch: pytest.MonkeyPatch, body: dict[str, Any]) -> None:
+    """A process client serving the recordings with ``body`` as Georgia's history,
+    the index and the roster cached."""
+    fetch, _ = fake_fetch({**RECORDED, GA_PATH: body})
+    client = offline_client(
+        fetch, prefetch_paths=lambda: [api.ELECTIONS_PATH, ROSTER_PATH]
+    )
+    client.ensure_refresher = lambda: None  # type: ignore[method-assign]
+    client.refresh()
+    monkeypatch.setattr(api, "CLIENT", client)
+
+
+def history_layout(query: str = "", usps: str = "GA") -> Any:
+    """The history page's body through its layout, as the router calls it with the
+    query's keys as keyword arguments; the caller installs the process client."""
+    _, _, content = MOD["layout"](usps=usps, **parse(query)).children
     return content
 
 
@@ -154,21 +149,6 @@ def pc_render(
     return content
 
 
-def table_rows(tree: Any) -> list[list[Any]]:
-    table = find(tree, TABLE)
-    if table is None:
-        return []
-    return [list(tr.children) for tr in of_type(of_type(table, "Tbody"), "Tr")]
-
-
-def row_texts(tree: Any) -> list[list[str]]:
-    return [[" ".join(texts(td)) for td in row] for row in table_rows(tree)]
-
-
-def years_shown(tree: Any) -> list[int]:
-    return [int(row[0]) for row in row_texts(tree)]
-
-
 # --- registration and validation ------------------------------------------------------
 
 
@@ -182,8 +162,26 @@ def test_the_page_is_registered_as_planned() -> None:
     # page's not-found state decide alike.
     assert PAGE["validate"] is MOD["VALIDATE"]
     assert PAGE["validate"] == (api.ROSTER_PATH, state_view.on_roster)
-    assert PAGE["query"] is MOD["parse_filters"]
     assert PAGE.get("order") is None
+    # It reads no filter (D118): T4's two keys moved with it to the results page, so
+    # an old link naming either answers 302 there; the year range is not moved.
+    assert PAGE.get("query") is None
+    assert PAGE["moved"] == (("candidate", "pv_status"), "/state/<usps>/elections")
+    assert PAGE["moved"] == (
+        state_view.MOVED_KEYS,
+        state_view.template(state_view.RESULTS),
+    )
+    for name in (
+        "parse_filters",
+        "on_filter_change",
+        "FILTER_SENTENCE",
+        "TABLE_ID",
+        "URL_ID",
+        "YEARS_ID",
+        "HISTORY_TABLE_HEADING",
+    ):
+        assert name not in MOD, name
+    assert not hasattr(labels, "C7_FILTERS_NOTE")
 
 
 def test_the_per_capita_page_is_registered_as_planned() -> None:
@@ -200,9 +198,10 @@ def test_the_per_capita_page_is_registered_as_planned() -> None:
     assert PC_PAGE["query"] is PC_MOD["parse_filters"]
     assert PC_PAGE["nav"] == PAGE["nav"] == "states"
     assert PC_MOD["NOT_FOUND"] == MOD["NOT_FOUND"]
-    # Its own ids: Dash keys callbacks by output, app-wide.
-    assert PC_MOD["URL_ID"] != MOD["URL_ID"]
-    assert PC_MOD["YEARS_ID"] != MOD["YEARS_ID"]
+    # Its own ids: Dash keys callbacks by output, app-wide (the results page's are
+    # pinned in test_dashboard_state_results.py).
+    assert PC_MOD["URL_ID"] != RS_MOD["URL_ID"]
+    assert PC_MOD["YEARS_ID"] != RS_MOD["YEARS_ID"]
 
 
 @pytest.mark.parametrize(
@@ -320,99 +319,10 @@ class TestOnRoster:
 
 
 class TestGeorgia:
-    def test_1864_shows_the_not_participating_label(self) -> None:
-        rows = [r for r in row_texts(render()) if r[0] == "1864"]
-        assert len(rows) == 2
-        for row in rows:
-            assert row[7] == labels.PV_STATUS["not_participating"]
-            assert row[8] == labels.TOOK_NO_PART
-
-    def test_1868_shows_disputed_with_the_archives_reason_verbatim(self) -> None:
-        reason = next(
-            r["electoral_count_status_reason"]
-            for r in ga_body()["data"]
-            if r["year"] == 1868 and r["candidate"] == "Horatio Seymour"
-        )
-        assert reason  # the Archives' sentence, read from the response
-        (row,) = [
-            r
-            for r in table_rows(render())
-            if texts(r[0]) == ["1868"] and texts(r[1]) == ["Horatio Seymour"]
-        ]
-        count = row[6]
-        assert of_type(count, "Strong")[0].children == "Disputed"
-        assert of_type(count, "Span")[0].children == reason
-
-    def test_every_served_row_is_shown_unfiltered(self) -> None:
-        tree = render()
-        assert len(table_rows(tree)) == len(ga_body()["data"])
-        assert f"Showing {len(ga_body()['data'])} of" in " ".join(texts(tree))
-
-    def test_the_party_cell_and_the_party_notes_list(self) -> None:
-        """T4 (#389): a pre-1976 party from the nominating-party field (MIT's
-        ``party`` is null then, so a page reading it would fail here), a null with its
-        one-cause note, a row note as help text, and the Party notes list."""
-        index = MOD["FIELDS"].index("nominating_party")
-        cells = {
-            (texts(r[0])[0], texts(r[1])[0]): r[index] for r in table_rows(render())
-        }
-        assert texts(cells[("1824", "Andrew Jackson")]) == ["Democratic-Republican"]
-        # Clay's party comes from the USGOV catalog since #575's re-record (#388).
-        assert texts(cells[("1824", "Henry Clay")]) == ["Democratic-Republican"]
-        notes = {
-            (r["year"], r["candidate"]): r["nominating_party_note"]
-            for r in ga_body()["data"]
-            if r["nominating_party_note"]
-        }
-        # A null with its one-cause note, on a doctored row: the USGOV catalog (#388)
-        # keeps filling the recorded nulls (#575).
-        body = ga_body()
-        target = [r for r in body["data"] if r["year"] == 1900]
-        assert target and all(r["nominating_party"] for r in target)  # the premise
-        for row in target:
-            row.update(
-                nominating_party=None,
-                nominating_party_source=None,
-                nominating_party_note=None,
-            )
-        doctored = {
-            (texts(r[0])[0], texts(r[1])[0]): r[index]
-            for r in table_rows(render(body=body))
-        }
-        for row in target:
-            null = doctored[("1900", row["candidate"])]
-            assert texts(null) == [labels.NOT_IN_DATASET]
-            assert null.title == labels.PARTY_NULL_NOTE
-        note = notes[(1872, "Horace Greeley")]
-        assert cells[("1872", "Horace Greeley")].title == note
-        (block,) = [
-            d
-            for d in of_type(render(), "Div")
-            if getattr(d, "className", None) == "party-notes"
-        ]
-        # Every noted candidate-year once, in the table's year order.
-        assert [li.children for li in of_type(block, "Li")] == [
-            labels.PARTY_NOTE_ITEM.format(
-                candidate=name, year=year, note=notes[(year, name)]
-            )
-            for year, name in GA_NOTED
-        ]
-
-    def test_t4_s_column_name_list_names_the_count_reason_and_the_party_note(
-        self,
-    ) -> None:
-        named = [
-            [texts(dd.children)[0] for dd in of_type(g, "Dd")]
-            for g in of_type(render(), "Details")
-        ]
-        assert [
-            *MOD["FIELDS"],
-            "electoral_count_status_reason",
-            "nominating_party_note",
-        ] in named
+    """The history page's heading and what it does not show (#279, #559, #619)."""
 
     def test_the_heading_names_the_state_from_the_rows(self) -> None:
-        _, name = MOD["render"](ga_body(), copy.deepcopy(INDEX), "GA", [])
+        _, name = MOD["render"](ga_body(), copy.deepcopy(INDEX), "GA")
         assert name == "Georgia"
 
     @pytest.mark.parametrize("name", ["", "  ", "\u200b"], ids=repr)
@@ -439,6 +349,23 @@ class TestGeorgia:
         assert "People per electoral vote" not in [
             h.children for h in of_type(tree, "H2")
         ]
+
+    def test_the_history_page_shows_no_t4_and_no_filter(self) -> None:
+        """T4 and its filters left with #619 (D118): no T4, no control, no page-local
+        Location, and none of T4's retired ids."""
+        tree = render()
+        assert find(tree, RESULTS) is None
+        assert of_type(tree, "RangeSlider") == []
+        assert of_type(tree, "Dropdown") == []
+        assert of_type(tree, "Location") == []
+        assert classed(tree, "filters") == []
+        assert not {
+            "state-history",
+            "state-url",
+            "state-years",
+            "state-candidate",
+            "state-pv-status",
+        } & component_ids(tree)
 
 
 # --- malformed bodies degrade --------------------------------------------------------
@@ -485,172 +412,6 @@ def test_an_index_serving_no_year_is_malformed() -> None:
     index["data"] = [{"year": "1868"}]
     with pytest.raises(TypeError, match="serves no year"):
         render(index=index)
-
-
-def test_rows_are_sorted_by_the_page_not_trusted_in_api_order() -> None:
-    body = ga_body()
-    random.Random(279).shuffle(body["data"])
-    shown = [(int(row[0]), row[1]) for row in row_texts(render(body=body))]
-    # By year, then by candidate within a year.
-    assert shown == sorted(shown)
-    assert shown[0][0] == 1824 and shown[-1][0] == 2024
-    assert len({year for year, _ in shown}) < len(shown)  # some year has several
-
-
-# --- filters --------------------------------------------------------------------------
-
-
-class TestFilters:
-    def test_the_parser_keeps_only_its_own_keys_and_never_the_path_variable(
-        self,
-    ) -> None:
-        pairs = MOD["parse_filters"](
-            parse(
-                "year_from=1860&year_to=1880&candidate=horatio-seymour"
-                "&pv_status=popular_vote&usps=TX&state=GA&junk=1"
-            )
-        )
-        assert pairs == [
-            ("candidate", "horatio-seymour"),
-            ("pv_status", "popular_vote"),
-            ("year_from", "1860"),
-            ("year_to", "1880"),
-        ]
-
-    @pytest.mark.parametrize(
-        "query",
-        [
-            "candidate=Horatio",
-            "candidate=" + "a" * 65,
-            "pv_status=held",
-            "year_from=186",
-            "year_from=1880&year_to=1860",  # inverted: both bounds dropped
-            "candidate=a&candidate=b",
-        ],
-    )
-    def test_a_bad_parameter_is_dropped(self, query: str) -> None:
-        assert MOD["parse_filters"](parse(query)) == []
-
-    def test_the_year_range_narrows_the_rows(self) -> None:
-        shown = years_shown(render("year_from=1860&year_to=1872"))
-        assert sorted(set(shown)) == [1860, 1864, 1868, 1872]
-
-    def test_a_bound_outside_the_datasets_span_falls_back_per_parameter(self) -> None:
-        shown = years_shown(render("year_from=1700&year_to=1832"))
-        assert sorted(set(shown)) == [1824, 1828, 1832]
-
-    @staticmethod
-    def admitted_1912() -> dict[str, Any]:
-        """Georgia's body cut to 1912 on: a state admitted that year, as Arizona was."""
-        body = ga_body()
-        body["data"] = [r for r in body["data"] if r["year"] >= 1912]
-        return body
-
-    def test_a_range_before_the_states_first_election_is_an_honest_empty_result(
-        self,
-    ) -> None:
-        # The dataset's span judges the bound (Fred, option (i)): 1900 is a year the
-        # dataset holds, so it is kept, and the state has no election in range.
-        for search in ("year_to=1900", "year_from=1824&year_to=1900"):
-            tree = render(search, body=self.admitted_1912())
-            assert table_rows(tree) == [], search
-            assert "No rows match these filters." in texts(tree)
-            (slider,) = of_type(tree, "RangeSlider")
-            assert slider.value == [1824, 1900]
-
-    def test_the_slider_spans_the_dataset_and_shows_the_selection(self) -> None:
-        tree = render("year_from=1900", body=self.admitted_1912())
-        (slider,) = of_type(tree, "RangeSlider")
-        assert (slider.min, slider.max) == (1824, 2024)
-        assert slider.value == [1900, 2024]
-        assert min(years_shown(tree)) == 1912
-        # So the callback writes back exactly what the URL said.
-        assert (
-            MOD["on_filter_change"](
-                slider.value, None, None, slider.min, slider.max, "?year_from=1900"
-            )
-            is no_update
-        )
-
-    def test_the_span_is_read_from_the_bodys_coverage(self) -> None:
-        # Not a constant: a snapshot whose coverage starts in 1860 moves the slider's
-        # floor and the fallback of a bound before it.
-        body = ga_body()
-        body["meta"]["provenance"]["coverage"]["year_min"] = 1860
-        tree = render("year_from=1840", body=body)
-        (slider,) = of_type(tree, "RangeSlider")
-        assert (slider.min, slider.max) == (1860, 2024)
-        assert slider.value == [1860, 2024]
-        assert min(years_shown(tree)) == 1860
-
-    def test_the_spans_ceiling_is_read_from_the_bodys_coverage_too(self) -> None:
-        # The ceiling, not only the floor: a hardcoded 2024 would go stale when a
-        # later election lands, and this coverage ending in 2020 would show it.
-        body = ga_body()
-        body["meta"]["provenance"]["coverage"]["year_max"] = 2020
-        tree = render("year_to=2030", body=body)
-        (slider,) = of_type(tree, "RangeSlider")
-        assert (slider.min, slider.max) == (1824, 2020)
-        assert slider.value == [1824, 2020]
-        assert max(years_shown(tree)) == 2020
-
-    def test_a_candidate_narrows_and_one_absent_falls_back_to_all(self) -> None:
-        shown = row_texts(render("candidate=horatio-seymour"))
-        assert {row[1] for row in shown} == {"Horatio Seymour"}
-        everyone = render("candidate=barack-obamaa")
-        assert len(table_rows(everyone)) == len(ga_body()["data"])
-
-    def test_a_status_is_kept_when_nothing_matches(self) -> None:
-        body = ga_body()
-        body["data"] = [r for r in body["data"] if r["pv_status"] == "popular_vote"]
-        tree = render("pv_status=legislature_chosen", body=body)
-        assert table_rows(tree) == []
-        assert "No rows match these filters." in texts(tree)
-
-    def test_a_status_narrows(self) -> None:
-        shown = years_shown(render("pv_status=not_participating"))
-        assert set(shown) == {1864}
-
-
-class TestCallback:
-    def test_a_filter_change_writes_the_normal_form(self) -> None:
-        search = MOD["on_filter_change"](
-            [1860.0, 2024], "horatio-seymour", None, 1824, 2024, ""
-        )
-        assert search == "?candidate=horatio-seymour&year_from=1860"
-
-    def test_the_full_span_and_cleared_controls_are_no_query(self) -> None:
-        assert MOD["on_filter_change"]([1824, 2024], None, "", 1824, 2024, "?x") == ""
-
-    def test_hostile_control_values_are_written_in_the_normal_form(self) -> None:
-        # A callback payload is client-controlled: an inverted range, a non-slug
-        # candidate and an unknown status all pass through the page's one parser.
-        assert (
-            MOD["on_filter_change"]([1880, 1860], "Horatio", "held", 1824, 2024, "?x")
-            == ""
-        )
-        assert (
-            MOD["on_filter_change"]([1824, 1860], "a b", "popular_vote", 1824, 2024, "")
-            == "?pv_status=popular_vote&year_to=1860"
-        )
-
-    def test_an_unchanged_search_is_left_alone(self) -> None:
-        current = "?pv_status=popular_vote"
-        assert (
-            MOD["on_filter_change"](
-                [1824, 2024], None, "popular_vote", 1824, 2024, current
-            )
-            is no_update
-        )
-
-
-# --- links ----------------------------------------------------------------------------
-
-
-def test_each_year_links_to_its_election() -> None:
-    for row in table_rows(render()):
-        (link,) = of_type(row[0], "Link")
-        assert link.href == f"/election/{link.children}"
 
 
 def test_the_one_election_view_links_each_state_to_its_history(
@@ -725,7 +486,7 @@ class TestRoster:
         _, calls, bucket = cached_client(monkeypatch, source=api.ROSTER_PATH)
         ids = routed_ids(route("/state/GA/per-capita"))
         assert PC_PAGE_ID in ids and PER_CAPITA in ids
-        assert PAGE_ID not in ids and TABLE not in ids
+        assert PAGE_ID not in ids and RESULTS not in ids
         assert calls == [GA_PER_CAPITA_PATH]
         assert len(bucket.waits) == 1
         calls.clear()
@@ -753,7 +514,10 @@ class TestRoster:
         assert PC_PAGE_ID not in ids and "unavailable" not in ids
         assert calls == [] and bucket.waits == []
 
-    @pytest.mark.parametrize("path", ["/state/GA/x", "/state/GA/per-capita/x"])
+    @pytest.mark.parametrize(
+        "path",
+        ["/state/GA/x", "/state/GA/per-capita/x", "/state/GA/elections/x"],
+    )
     def test_an_unknown_section_reaches_the_history_page_and_is_not_found(
         self, monkeypatch: pytest.MonkeyPatch, path: str
     ) -> None:
@@ -761,18 +525,24 @@ class TestRoster:
         _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
         ids = routed_ids(route(path))
         assert MOD["NOT_FOUND_ID"] in ids
-        assert PAGE_ID not in ids and PC_PAGE_ID not in ids
+        assert PAGE_ID not in ids and PC_PAGE_ID not in ids and RS_PAGE_ID not in ids
         assert calls == []
 
-    def test_filter_changes_make_no_api_request(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "search", ["?year_from=1860", "?candidate=horatio-seymour", "?pv_status=x", ""]
+    )
+    def test_a_client_side_route_with_a_query_renders_the_history_unfiltered(
+        self, monkeypatch: pytest.MonkeyPatch, search: str
     ) -> None:
+        """A routing request never reaches the index, so a moved key is not
+        redirected there (D092): the history renders, reads no filter, makes no
+        request, and shows no T4."""
         _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
         route("/state/GA")
         calls.clear()
-        for search in ("?year_from=1860", "?candidate=horatio-seymour", ""):
-            assert PAGE_ID in routed_ids(route("/state/GA", search))
-        MOD["on_filter_change"]([1860, 2024], None, None, 1824, 2024, "")
+        ids = routed_ids(route("/state/GA", search))
+        assert PAGE_ID in ids
+        assert RS_PAGE_ID not in ids and RESULTS not in ids
         assert calls == []
 
     def test_an_unserved_code_is_not_found_and_fills_nothing(
@@ -907,40 +677,38 @@ class TestMalformedBodies:
 
 
 class TestLede:
-    """The lede shows on success and on the degraded state, and the sentence naming
-    the filters only on success, where the filters show (#392); the not-found state
-    shows neither (#325)."""
+    """The history page's lede shows on success and on the degraded state, and the
+    not-found state shows none (#325). The page has no filters since #619 (D118), so
+    no state of it shows a filter sentence, its own or another state page's."""
 
-    def test_the_two_sentences_are_todays_lede(self) -> None:
-        # The split falls at the sentence boundary, so the degraded state offers no part
-        # of the filter sentence; people per electoral vote left the lede with T7
-        # (#559), and the electors appointed came in with C7, which the filters do not
-        # reach, so the filter sentence names the table they narrow (#560); C10's total
-        # popular vote came in after it (#582; ba spec, approved at its plan gate).
-        assert MOD["FILTER_SENTENCE"] == (
-            "Narrow the table of each candidate's electoral votes by year, candidate "
-            "or popular-vote status."
-        )
-        assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" == (
-            "This state's electors appointed, its total popular vote and its "
-            "electoral votes for each candidate in every election this dataset holds "
-            "for it, with popular-vote figures where the dataset has them. Narrow the "
-            "table of each candidate's electoral votes by year, candidate or "
-            "popular-vote status."
-        )
+    #: Every state page's filter sentence, and the word each one opens with.
+    SENTENCES = (RS_MOD["FILTER_SENTENCE"], PC_MOD["FILTER_SENTENCE"], "Narrow ")
 
-    def test_success_shows_the_lede_then_the_filter_sentence(
+    def test_the_lede_is_today_s_and_the_page_has_no_filter_sentence(self) -> None:
+        # People per electoral vote left the lede with T7 (#559), and each
+        # candidate's electoral votes with T4 (#619; ba spec, approved at its plan
+        # gate, 2026-11-23).
+        assert MOD["LEDE"] == (
+            "This state's electors appointed in every election this dataset holds for "
+            "it, and its total popular vote where the dataset has it."
+        )
+        assert not [k for k in MOD if k.startswith("FILTER_SENTENCE")]
+
+    def test_success_shows_the_lede_alone(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
         response = route("/state/GA")
         assert PAGE_ID in routed_ids(response)
         body = response.get_data(as_text=True)
-        assert f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}" in body
-        # Once, and only in the lede.
-        assert body.count(MOD["FILTER_SENTENCE"]) == 1
+        assert MOD["LEDE"] in body
+        for sentence in self.SENTENCES:
+            assert sentence not in body
+        heading, lede, content = MOD["layout"](usps="GA").children
+        assert lede.children == MOD["LEDE"]
+        assert content.id == PAGE_ID
 
-    def test_the_degraded_state_shows_the_lede_and_offers_no_filter(
+    def test_the_degraded_state_shows_the_lede(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # A malformed state body: render raises after validation, so the page degrades.
@@ -950,9 +718,10 @@ class TestLede:
         assert "unavailable" in ids and PAGE_ID not in ids
         body = response.get_data(as_text=True)
         assert MOD["LEDE"] in body
-        assert MOD["FILTER_SENTENCE"] not in body
+        for sentence in self.SENTENCES:
+            assert sentence not in body
 
-    def test_the_unreachable_api_shows_the_lede_and_offers_no_filter(
+    def test_the_unreachable_api_shows_the_lede(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         client = offline_client(failing_fetch, prefetch_paths=lambda: [])
@@ -962,9 +731,10 @@ class TestLede:
         assert "unavailable" in routed_ids(response)
         body = response.get_data(as_text=True)
         assert MOD["LEDE"] in body
-        assert MOD["FILTER_SENTENCE"] not in body
+        for sentence in self.SENTENCES:
+            assert sentence not in body
 
-    def test_the_not_found_state_shows_neither(
+    def test_the_not_found_state_shows_no_lede(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cached_client(monkeypatch)
@@ -972,7 +742,8 @@ class TestLede:
         assert MOD["NOT_FOUND_ID"] in routed_ids(response)
         body = response.get_data(as_text=True)
         assert MOD["LEDE"] not in body
-        assert MOD["FILTER_SENTENCE"] not in body
+        for sentence in self.SENTENCES:
+            assert sentence not in body
 
 
 class TestPerCapitaLede:
@@ -1043,7 +814,9 @@ class TestIndex:
         status, head, _ = get("/state/GA?year_from=1860&usps=TX&junk=1")
         assert status == 200
         assert head.canonical == url("/state/GA")
-        assert head.og_url == url("/state/GA?year_from=1860")
+        # The page registers no query= (D118), so og:url names no query: not even the
+        # year range, which lands here unread until #620.
+        assert head.og_url == url("/state/GA")
 
     @pytest.mark.parametrize("path", ["/state/ZZ", "/state/ga", "/state/G1"])
     def test_with_the_roster_cached_an_unserved_code_is_a_404(
@@ -1079,23 +852,35 @@ class TestIndex:
         assert head.noindex and head.canonical is None
         assert calls == []
 
-    def test_an_old_filtered_link_still_lands_on_the_history_page(
+    def test_an_old_filtered_link_answers_302_to_the_results_page(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No query key reached T7 alone, so an old link is not redirected (D105): it
-        answers 200 on the history page, with its year range applied to T4."""
-        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        """T4 left the history page (#619), so an old link naming its candidate or
+        status is moved there (D092's ``moved=``, D118), the year range riding along
+        through the results page's parser; and the page it lands on applies it. A
+        link with the year range alone is not moved. The full contract is
+        ``test_dashboard_app.TestMovedStateFilters``."""
+        _, calls, _ = cached_client(monkeypatch, source=api.ROSTER_PATH)
         search = "?year_from=1860&year_to=1872&candidate=horatio-seymour"
-        status, head, _ = get(f"/state/GA{search}")
+        response = appmod.server.test_client().get(f"/state/GA{search}")
+        assert response.status_code == 302
+        target = response.headers["Location"]
+        assert target == (
+            "/state/GA/elections?candidate=horatio-seymour&year_from=1860&year_to=1872"
+        )
+        assert calls == []
+        # The target, through the layout as the router calls it, applies the filters.
+        path, query = target.split("?")
+        assert path == state_view.path("GA", state_view.RESULTS)
+        tree = RS_MOD["layout"](usps="GA", **parse(query))
+        years = [
+            int(texts(tr.children[0])[0])
+            for tr in of_type(of_type(find(tree, RESULTS), "Tbody"), "Tr")
+        ]
+        assert years == [1868]
+        status, head, _ = get("/state/GA?year_from=1860&year_to=1872")
         assert status == 200
         assert head.canonical == url("/state/GA")
-        response = route("/state/GA", search)
-        assert PAGE_ID in routed_ids(response)
-        # Through the layout, as the router calls it, so the query reaches the render.
-        tree = MOD["layout"](usps="GA", **parse(search[1:]))
-        assert years_shown(tree) == [1868]
-        shown = years_shown(MOD["layout"](usps="GA", year_from="1860", year_to="1872"))
-        assert set(shown) == {1860, 1864, 1868, 1872}
 
     def test_with_the_roster_cold_the_index_counts_it_matched_and_reads_nothing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1128,6 +913,7 @@ def test_the_title_is_total_and_names_only_a_usps_code(usps: Any, named: bool) -
     assert isinstance(title, str)
     assert (f"{usps} — state history" in title) is named
     assert "<" not in title
+    assert title != RS_MOD["title"](usps=usps)
 
 
 @pytest.mark.parametrize(
@@ -1194,6 +980,8 @@ class TestPicker:
         # The state pages read the same roster: no second fill of it.
         assert PAGE_ID in routed_ids(route("/state/GA"))
         assert PC_PAGE_ID in routed_ids(route("/state/GA/per-capita"))
+        # The results page reads the history's response, already cached (#619).
+        assert RS_PAGE_ID in routed_ids(route("/state/GA/elections"))
         assert calls == [GA_PATH, GA_PER_CAPITA_PATH]
 
 
@@ -1315,7 +1103,7 @@ class TestT7Filters:
     @pytest.mark.parametrize(
         "search", ["candidate=horatio-seymour", "pv_status=not_participating"]
     )
-    def test_the_history_page_s_filters_do_not_reach_t7(self, search: str) -> None:
+    def test_the_results_page_s_filters_do_not_reach_t7(self, search: str) -> None:
         assert len(per_capita_rows(pc_render(search))) == len(ga_per_capita()["data"])
 
     def test_t7_counts_its_rows(self) -> None:
@@ -1456,7 +1244,7 @@ def test_the_routed_per_capita_page_shows_t7_and_the_history_page_does_not(
     assert PAGE_ID in history and PER_CAPITA not in history
 
 
-# --- the section links (#559, D105) ----------------------------------------------------
+# --- the section links (#559, #619; D105, D118) ------------------------------------------
 
 
 def section_entries(tree: Any) -> list[Any]:
@@ -1465,16 +1253,21 @@ def section_entries(tree: Any) -> list[Any]:
 
 
 class TestSectionLinks:
-    """A state's two pages link each other on success only, in page order: the page
-    being read is text with ``aria-current="page"``, the other a link carrying the year
-    range the render applied and nothing else (#559, D105; the election pages' links
-    carry no filter, D092)."""
+    """A state's three pages link each other on success only, in page order: the page
+    being read is text with ``aria-current="page"``, the others links. The history
+    page applies no year range (until #620), so its links carry no query; the results
+    and per-capita pages' links carry the year range the render applied and nothing
+    else (#559, #619; D105, D118; the election pages' links carry no filter, D092).
+    The results page's own entries are in
+    ``test_dashboard_state_results.TestSectionLinks``."""
 
     def test_the_link_texts_are_the_spec_s_and_name_each_page_apart(self) -> None:
-        # ba's spec, approved at #559's plan gate: the two entries must differ, or a
-        # reader could not tell which page a link opens.
+        # ba's specs, approved at #559's and #619's plan gates: the entries must
+        # differ, or a reader could not tell which page a link opens.
+        assert state_view.SECTIONS == ("", "/elections", "/per-capita")
         assert [state_view.SECTION_TEXT[s] for s in state_view.SECTIONS] == [
             "State history",
+            "Results by election",
             "People per electoral vote",
         ]
 
@@ -1484,69 +1277,88 @@ class TestSectionLinks:
         assert nav.className == election_view.SECTIONS_CLASS == "section-links"
 
     def test_on_the_history_page_the_history_is_marked(self) -> None:
-        current, other = section_entries(render())
+        current, results, per_capita = section_entries(render())
         assert type(current).__name__ == "Span"
         assert current.children == labels.SECTION_STATE_HISTORY
         assert getattr(current, "aria-current") == "page"
-        assert type(other).__name__ == "Link"
-        assert other.children == labels.SECTION_PER_CAPITA
-        assert other.href == "/state/GA/per-capita"
+        assert [type(e).__name__ for e in (results, per_capita)] == ["Link", "Link"]
+        assert results.children == labels.SECTION_RESULTS_BY_ELECTION
+        assert per_capita.children == labels.SECTION_PER_CAPITA
+        assert (results.href, per_capita.href) == (
+            "/state/GA/elections",
+            "/state/GA/per-capita",
+        )
+        for link in (results, per_capita):
+            assert not hasattr(link, "aria-current")
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "year_from=1860&year_to=1900",
+            "year_to=1900&candidate=horatio-seymour&pv_status=popular_vote",
+            "candidate=horatio-seymour",
+        ],
+    )
+    def test_the_history_s_links_carry_no_query(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        # Through the layout, as the router calls it with the URL's keys: the page
+        # reads none of them, so its links carry none.
+        cached_client(monkeypatch)
+        _, results, per_capita = section_entries(history_layout(query))
+        assert (results.href, per_capita.href) == (
+            "/state/GA/elections",
+            "/state/GA/per-capita",
+        )
 
     def test_on_the_per_capita_page_t7_is_marked(self) -> None:
-        other, current = section_entries(pc_render())
+        history, results, current = section_entries(pc_render())
         assert type(current).__name__ == "Span"
         assert current.children == labels.SECTION_PER_CAPITA
         assert getattr(current, "aria-current") == "page"
-        assert type(other).__name__ == "Link"
-        assert other.children == labels.SECTION_STATE_HISTORY
-        assert other.href == "/state/GA"
+        assert [type(e).__name__ for e in (history, results)] == ["Link", "Link"]
+        assert history.children == labels.SECTION_STATE_HISTORY
+        assert results.children == labels.SECTION_RESULTS_BY_ELECTION
+        assert (history.href, results.href) == ("/state/GA", "/state/GA/elections")
 
     @pytest.mark.parametrize(
         ("query", "carried"),
         [
             ("year_from=1860&year_to=1900", "?year_from=1860&year_to=1900"),
-            ("year_to=1900&candidate=horatio-seymour&pv_status=popular_vote",
-             "?year_to=1900"),
-            ("candidate=horatio-seymour", ""),
-            # A bound outside the span falls back, so it is not carried.
-            ("year_from=1700&year_to=1900", "?year_to=1900"),
-            ("year_from=1824&year_to=2024", ""),
-        ],
-    )
-    def test_the_history_link_carries_the_range_applied_only(
-        self, query: str, carried: str
-    ) -> None:
-        _, link = section_entries(render(query))
-        assert link.href == f"/state/GA/per-capita{carried}"
-
-    @pytest.mark.parametrize(
-        ("query", "carried"),
-        [
-            ("year_from=1860&year_to=1900", "?year_from=1860&year_to=1900"),
+            ("year_to=1900&candidate=horatio-seymour", "?year_to=1900"),
             ("year_from=1700", ""),
             ("", ""),
         ],
     )
-    def test_the_per_capita_link_carries_the_range_applied(
+    def test_the_per_capita_links_carry_the_range_applied_only(
         self, query: str, carried: str
     ) -> None:
-        link, _ = section_entries(pc_render(query))
-        assert link.href == f"/state/GA{carried}"
+        history, results, _ = section_entries(pc_render(query))
+        assert history.href == f"/state/GA{carried}"
+        assert results.href == f"/state/GA/elections{carried}"
 
     def test_the_links_come_first_in_each_page_s_body(self) -> None:
         for tree in (render(), pc_render()):
             assert tree.children[0].id == state_view.SECTIONS_ID
 
-    @pytest.mark.parametrize("path", ["/state/ZZ", "/state/ZZ/per-capita"])
+    @pytest.mark.parametrize(
+        "path", ["/state/ZZ", "/state/ZZ/elections", "/state/ZZ/per-capita"]
+    )
     def test_the_not_found_state_has_no_section_links(
         self, monkeypatch: pytest.MonkeyPatch, path: str
     ) -> None:
         cached_client(monkeypatch, source=api.ROSTER_PATH)
-        assert state_view.SECTIONS_ID not in routed_ids(route(path))
+        ids = routed_ids(route(path))
+        assert any(i.endswith("not-found") for i in ids)
+        assert state_view.SECTIONS_ID not in ids
 
     @pytest.mark.parametrize(
         ("path", "broken"),
-        [("/state/GA", GA_PATH), ("/state/GA/per-capita", GA_PER_CAPITA_PATH)],
+        [
+            ("/state/GA", GA_PATH),
+            ("/state/GA/elections", GA_PATH),
+            ("/state/GA/per-capita", GA_PER_CAPITA_PATH),
+        ],
     )
     def test_the_degraded_state_has_no_section_links(
         self, monkeypatch: pytest.MonkeyPatch, path: str, broken: str
@@ -1556,94 +1368,33 @@ class TestSectionLinks:
         assert "unavailable" in ids
         assert state_view.SECTIONS_ID not in ids
 
-
-# --- the dropdown filters (#475) ------------------------------------------------------
-
-
-def _by_label(pairs: set[tuple[str, str]]) -> list[dict[str, str]]:
-    """``{"label", "value"}`` options sorted by label, written out here rather than
-    taken from the page."""
-    return [
-        {"label": label, "value": value}
-        for value, label in sorted(pairs, key=lambda pair: pair[1])
-    ]
-
-
-def test_the_candidate_and_popular_vote_filters_show_their_options_and_value() -> None:
-    """The two dropdown filters #475 moved onto ``components.dropdown_filter``, which
-    no test named before: present by id, unset by default, set by their query keys,
-    and their options GA's own candidates by name and every popular-vote status."""
-    candidates = {(r["candidate_slug"], str(r["candidate"])) for r in ga_body()["data"]}
-    tree = render()
-    candidate = find(tree, "state-candidate")
-    pv_status = find(tree, "state-pv-status")
-    assert candidate is not None and pv_status is not None
-    assert (candidate.value, pv_status.value) == (None, None)
-    assert candidate.options == _by_label(candidates)
-    # Labels and values, in the table's order (#540, AC3).
-    assert pv_status.options == [
-        {"label": labels.PV_STATUS[k], "value": k} for k in labels.PV_STATUS
-    ]
-    filtered = render("candidate=abraham-lincoln&pv_status=popular_vote")
-    assert find(filtered, "state-candidate").value == "abraham-lincoln"
-    assert find(filtered, "state-pv-status").value == "popular_vote"
-    # Each label names its field, and the placeholder is another string: the page
-    # passes them to the helper in that order (#475's acceptance gate).
-    shown = {
-        label.htmlFor: label.children
-        for label in of_type(tree, "Label")
-        if label.htmlFor in ("state-candidate", "state-pv-status")
-    }
-    assert shown == {
-        "state-candidate": labels.LABELS["candidate"],
-        "state-pv-status": labels.LABELS["pv_status"],
-    }
-    assert candidate.placeholder != shown["state-candidate"]
-    assert pv_status.placeholder != shown["state-pv-status"]
+    def test_the_success_state_has_them_on_every_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch, source=api.ROSTER_PATH)
+        for path in ("/state/GA", "/state/GA/elections", "/state/GA/per-capita"):
+            assert state_view.SECTIONS_ID in routed_ids(route(path)), path
 
 
 # --- the wide layout (#545, D102) -------------------------------------------------------
 
 
 class TestWideLayout:
-    """The state history's filters at desktop width (#545): one ``.filters`` box that
-    is a filter row, the slider's box first on a row of its own, then the two dropdown
-    filters in source order. The rules are pinned in ``TestLayoutRules``
-    (``test_dashboard_theme.py``) and what a browser draws in
+    """The state pages' layout at desktop width (#545). T4's filter row moved with T4
+    to the results page (#619), whose ``TestWideLayout`` pins it; the rules are pinned
+    in ``TestLayoutRules`` (``test_dashboard_theme.py``) and what a browser draws in
     ``tests/e2e/test_dashboard_e2e_history.py``."""
 
-    @pytest.mark.parametrize("query", ["", "candidate=abraham-lincoln&year_from=1860"])
-    def test_the_slider_has_its_own_row_and_the_dropdowns_share_one(
-        self, query: str
-    ) -> None:
-        tree = render(query)
-        (box,) = classed(tree, "filters")
-        assert box.className.split() == ["filters", "filter-row"]
-        kids = list(box.children)
-        assert [k.className.split() for k in kids] == [
-            ["filter", "filter-own-row"],
-            ["filter"],
-            ["filter"],
-        ]
-        assert find(kids[0], MOD["YEARS_ID"]) is not None
-        assert [d.id for d in of_type(kids[1:], "Dropdown")] == [
-            MOD["CANDIDATE_ID"],
-            MOD["PV_STATUS_ID"],
-        ]
-        # Only the slider's box keeps its own row.
-        assert classed(tree, "filter-own-row") == [kids[0]]
-
-    def test_c7_and_c10_s_section_comes_after_the_section_links_and_before_t4_s(
+    def test_the_history_is_the_section_links_then_c7_and_c10_s_one_card(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # #560, D106; #618, D117: the lede is added by layout(), so the whole page is
-        # checked there: the heading, the lede and the page body, nothing between. In
-        # the body, the section links first (#559, D105); then one card holding C7's
-        # heading, its headline figures (#601, D115), C7, C10's heading, C10, the
-        # heading of the table the two share, the table in its scroll box, its
-        # download, its notes and its column-name list; then T4's, under its own
-        # heading, with the page's Location and the filters that narrow it. Two
-        # charts, C7 and C10.
+        # #560, D106; #618, D117; #619, D118: the lede is added by layout(), so the
+        # whole page is checked there: the heading, the lede and the page body,
+        # nothing between. In the body, the section links first (#559, D105); then one
+        # card holding C7's heading, its headline figures (#601, D115), C7, C10's
+        # heading, C10, the heading of the table the two share, the table in its
+        # scroll box, its download, its notes and its column-name list; then the
+        # footer. Two charts, C7 and C10; no T4, no filter and no Location.
         cached_client(monkeypatch)
         page = MOD["layout"](usps="GA")
         heading, lede, content = page.children
@@ -1652,8 +1403,9 @@ class TestWideLayout:
         assert getattr(content, "id", None) == PAGE_ID
         kids = list(content.children)
         assert kids[0].id == state_view.SECTIONS_ID
-        # Two cards (#567, D111; #618, D117): C7 and C10 with their table, then T4's.
-        assert cards(content) == kids[1:3]
+        # One card (#567, D111; #618, D117; #619): C7 and C10 with their table.
+        assert cards(content) == [kids[1]]
+        assert len(kids) == 3
         charts_card = card_children(content, 1)
         assert [type(k).__name__ for k in charts_card[:6]] == [
             "H2",
@@ -1672,17 +1424,22 @@ class TestWideLayout:
         # The one table and its column-name list follow both charts, in their card.
         assert find(charts_card, MOD["ELECTORS_TABLE_ID"]) is not None
         assert find(charts_card, MOD["ELECTORS_GLOSSARY_ID"]) is not None
-        assert find(charts_card, MOD["TABLE_ID"]) is None
-        # The retired table and its list are gone (D097(g): never reused).
-        assert find(content, "state-popular-total") is None
-        assert find(content, "state-popular-total-glossary") is None
-        t4 = card_children(content, 2)
-        assert type(t4[0]).__name__ == "H2"
-        assert t4[0].children == MOD["HISTORY_TABLE_HEADING"]
-        assert type(t4[1]).__name__ == "Location"
-        assert t4[2].className.split()[:1] == ["filters"]
-        assert find(t4, MOD["TABLE_ID"]) is not None
-        assert find(t4, MOD["ELECTORS_TABLE_ID"]) is None
+        # The retired tables and lists are gone (D097(g): never reused).
+        for retired in (
+            "state-popular-total",
+            "state-popular-total-glossary",
+            "state-history",
+            "state-history-glossary",
+        ):
+            assert find(content, retired) is None, retired
+        assert find(content, RESULTS) is None
+        assert of_type(content, "Location") == []
+        assert classed(content, "filters") == []
+        assert [h.children for h in of_type(charts_card, "H2")] == [
+            MOD["C7_HEADING"],
+            MOD["C10_HEADING"],
+            MOD["ELECTORS_TOTALS_TABLE_HEADING"],
+        ]
         assert [f.id for f in of_type(page, "Figure")] == [
             charts.dom_id("C7"),
             charts.dom_id("C10"),
@@ -1803,6 +1560,26 @@ def with_year(body: dict[str, Any], year: int, **fields: Any) -> dict[str, Any]:
         if row["year"] == year:
             row.update(copy.deepcopy(fields))
     return body
+
+
+#: URLs carrying every key the page read before #619 (D118): it reads none of them.
+FILTERED_URLS = [
+    "year_from=1900",
+    "year_to=1900",
+    "candidate=andrew-jackson",
+    "pv_status=not_participating",
+    "year_from=1700&year_to=1800",
+    "year_from=1860&year_to=1872&candidate=horatio-seymour&pv_status=popular_vote",
+]
+
+
+def assert_no_filter_sentence(caption: str) -> None:
+    """A chart caption on the history page names no filter (#619, D118): neither a
+    state page's filter sentence nor the note C7 and C10 carried before."""
+    for sentence in (RS_MOD["FILTER_SENTENCE"], PC_MOD["FILTER_SENTENCE"]):
+        assert sentence not in caption
+    assert "filter" not in caption.lower()
+    assert "Narrow" not in caption
 
 
 class TestC7:
@@ -1941,12 +1718,16 @@ class TestC7:
             )
 
     @pytest.mark.parametrize("query", ["", "year_from=1900&candidate=jimmy-carter"])
-    def test_the_table_s_links_view_and_note(self, query: str) -> None:
-        # The table C7 shares with C10 (#618), never T4: each year links to that
-        # election's page, its file names the history page with no filter whatever the
-        # render applied (D093(a)), and the allotment's basis is among its notes, under
-        # the table and in the file's preamble (#560's acceptance gate, Class B).
-        tree = render(query)
+    def test_the_table_s_links_view_and_note(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        # The table C7 shares with C10 (#618): each year links to that election's
+        # page, its file names the history page with no filter whatever the URL
+        # carried (D093(a); the page reads none, D118), and the allotment's basis is
+        # among its notes, under the table and in the file's preamble (#560's
+        # acceptance gate, Class B).
+        cached_client(monkeypatch)
+        tree = history_layout(query)
         rows = body_rows(tree, ELECTORS)
         assert rows
         for tr in rows:
@@ -2021,20 +1802,14 @@ class TestC7:
         ]
         assert hovers and cell in hovers[0]
 
-    @pytest.mark.parametrize(
-        "query",
-        [
-            "",
-            "year_from=1900",
-            "year_to=1900",
-            "candidate=andrew-jackson",
-            "pv_status=not_participating",
-            "year_from=1700&year_to=1800",
-        ],
-    )
-    def test_no_filter_changes_the_chart_or_its_table(self, query: str) -> None:
-        plain = render()
-        tree = render(query)
+    @pytest.mark.parametrize("query", FILTERED_URLS)
+    def test_no_query_changes_the_chart_or_its_table(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        # The page reads no query (D118): through the layout, as the router calls it
+        # with the URL's keys, a filtered URL renders exactly the unfiltered C7.
+        cached_client(monkeypatch)
+        plain, tree = history_layout(), history_layout(query)
         assert c7_figure(tree) == c7_figure(plain)
         assert download(tree, ELECTORS).raw == download(plain, ELECTORS).raw
         assert c7_caption(tree) == c7_caption(plain)
@@ -2042,7 +1817,8 @@ class TestC7:
     def test_the_caption_describes_the_series(self) -> None:
         caption = c7_caption(render())
         assert caption.startswith(labels.C4_BASIS)
-        assert labels.C7_FILTERS_NOTE in caption
+        # No filter sentence since #619: the page has no filters to name (D118).
+        assert_no_filter_sentence(caption)
         # Georgia's first election is the dataset's, so no first-election sentence.
         assert "The first election in this dataset" not in caption
         assert labels.C4_NO_FIGURE_NOTE not in caption
@@ -2146,8 +1922,9 @@ class TestC7Degraded:
     (#582, D113(c) as amended; #618, D117): a fault in the allotment C7 alone, when the
     shared table stays with its electors column unavailable and C10 and its column as
     they were; one in what both read (the years, the state's name, ``pv_status``) both,
-    when the table gives way to :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE`. T4, its
-    filters and the page's success marker stay either way."""
+    when the table gives way to :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE`. The page's
+    success marker and section links stay either way (T4 is on its own page since
+    #619)."""
 
     def assert_degraded(self, body: dict[str, Any], *, both: bool) -> None:
         tree = render(body=body)
@@ -2158,14 +1935,13 @@ class TestC7Degraded:
         assert c7_figure(tree) is None
         # The figures are built from C7's collapse, so they go with it (D115(g)).
         assert find(tree, MOD["METRICS_ID"]) is None
-        assert find(tree, TABLE) is not None
-        assert find(tree, MOD["YEARS_ID"]) is not None
-        headings = [h.children for h in of_type(tree, "H2")]
-        assert headings[:4] == [
+        assert find(tree, state_view.SECTIONS_ID) is not None
+        # The page's one card holds these three headings and no other.
+        headings = [h.children for h in of_type(every_card(tree), "H2")]
+        assert headings == [
             MOD["C7_HEADING"],
             MOD["C10_HEADING"],
             MOD["ELECTORS_TOTALS_TABLE_HEADING"],
-            MOD["HISTORY_TABLE_HEADING"],
         ]
         if both:
             assert find(tree, ELECTORS) is None
@@ -2180,11 +1956,9 @@ class TestC7Degraded:
                 MOD["ELECTORS_UNAVAILABLE_NOTE"],
             )
             assert c10_figure(tree) == c10_figure(plain)
-        # C7's note is in the page's first card, with C10 and the table (#618), and T4
-        # in the second (#567).
-        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=2)
-        assert in_one_card(tree, TABLE, total=2) is not c7
-        assert every_card(tree)[0] is c7
+        # C7's note is in the page's one card, with C10 and the table (#618, #619).
+        c7 = in_one_card(tree, MOD["C7_UNAVAILABLE_ID"], total=1)
+        assert every_card(tree) == [c7]
 
     def test_two_allotments_in_one_election(self) -> None:
         body = ga_body()
@@ -2208,8 +1982,7 @@ class TestC7Degraded:
     def test_two_allotments_leave_c10_exactly_as_it_was(self) -> None:
         """#582 (D113(c)), AC5's converse, kept inside one table by #618 (D117): an
         allotment C7 cannot read leaves C10, its column and the status column the
-        undoctored render's (T4 shows the allotment, so its file changes, and T4
-        stays)."""
+        undoctored render's, and the page stays."""
         plain = render()
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
@@ -2222,7 +1995,7 @@ class TestC7Degraded:
         assert [t for _, t, _ in totals_cells(tree)] == [
             t for _, t, _ in totals_cells(plain)
         ]
-        assert find(tree, TABLE) is not None
+        assert getattr(tree, "id", None) == PAGE_ID
 
     def test_a_gap_after_the_first_election(self) -> None:
         body = ga_body()
@@ -2243,10 +2016,13 @@ class TestC7Degraded:
         for row in body["data"]:
             if row["year"] == 1900:
                 del row["state_electoral_votes"]
-        # T4 reads the field too, so this degrades the page rather than C7 alone: a
-        # fault in what T4 shows is never swallowed by C7's section.
+        # On the history page only C7 reads the field since T4 left it (#619, D118),
+        # so the fault degrades C7 alone, with its column unavailable in the table.
+        self.assert_degraded(copy.deepcopy(body), both=False)
+        # T4 reads it too, so on the results page the same body degrades the page: a
+        # fault in what T4 shows is never swallowed.
         with pytest.raises(KeyError):
-            render(body=body)
+            RS_MOD["render"](body, copy.deepcopy(INDEX), "GA", [])
 
     def test_the_page_s_degraded_layout_keeps_its_success_marker(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2264,10 +2040,10 @@ class TestC7Degraded:
         page = MOD["layout"](usps="GA")
         _, lede, content = page.children
         assert content.id == PAGE_ID
-        assert lede.children == f"{MOD['LEDE']} {MOD['FILTER_SENTENCE']}"
+        assert lede.children == MOD["LEDE"]
         assert find(content, MOD["C7_UNAVAILABLE_ID"]) is not None
         assert find(content, C7_DOM) is None
-        assert find(content, TABLE) is not None
+        assert find(content, ELECTORS) is not None
 
 
 # --- chart C10: the state's total popular vote in each election (#582, D113) ----------
@@ -2369,7 +2145,7 @@ class TestC10:
         totals, read straight from the recording and never through C10's collapse or
         figure builder, against the bars and hovers C10 draws from its history."""
         body = copy.deepcopy(RECORDED[f"/v1/states/{usps}"])
-        content, _ = MOD["render"](body, copy.deepcopy(INDEX), usps, [])
+        content, _ = MOD["render"](body, copy.deepcopy(INDEX), usps)
         figure = c10_figure(content)
         bars = bars_of(figure)
         hovers = hovers_by_year(figure)
@@ -2496,20 +2272,12 @@ class TestC10:
         symbols = {t["name"]: t["marker"]["symbol"] for t in figure["data"][1:]}
         assert symbols[label] == over_time.C10_SYMBOLS[label]
 
-    @pytest.mark.parametrize(
-        "query",
-        [
-            "",
-            "year_from=1900",
-            "year_to=1900",
-            "candidate=jimmy-carter",
-            "pv_status=not_participating",
-            "year_from=1700&year_to=1800",
-        ],
-    )
-    def test_no_filter_changes_the_chart_or_its_table(self, query: str) -> None:
-        plain = render()
-        tree = render(query)
+    @pytest.mark.parametrize("query", FILTERED_URLS)
+    def test_no_query_changes_the_chart_or_its_table(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        cached_client(monkeypatch)
+        plain, tree = history_layout(), history_layout(query)
         assert c10_figure(tree) == c10_figure(plain)
         assert download(tree, TOTALS).raw == download(plain, TOTALS).raw
         assert c10_caption(tree) == c10_caption(plain)
@@ -2520,9 +2288,8 @@ class TestC10:
         assert labels.C10_SHORT_TICKS_NOTE in caption
         assert labels.C5_BEFORE_NOTE.format(pv_year_min=WINDOW[0]) in caption
         assert labels.C5_MARKER_NOTE in caption
-        assert caption.index(labels.C7_FILTERS_NOTE) > caption.index(
-            labels.C5_MARKER_NOTE
-        )
+        # No filter sentence since #619 (D118), after the marker note or anywhere.
+        assert_no_filter_sentence(caption)
         assert "The first election in this dataset" not in caption
 
     def test_a_later_first_election_and_a_name_that_is_not_plain_text(self) -> None:
@@ -2544,8 +2311,11 @@ class TestC10:
         hovers = hovers_by_year(c10_figure(tree)).values()
         assert all(charts.escaped("<b>Georgia") in h for h in hovers)
 
-    def test_the_table_s_links_view_and_notes(self) -> None:
-        tree = render("year_from=1900&candidate=jimmy-carter")
+    def test_the_table_s_links_view_and_notes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        tree = history_layout("year_from=1900&candidate=jimmy-carter")
         for tr in body_rows(tree, TOTALS):
             (link,) = of_type(tr.children[0], "Link")
             assert link.href == f"/election/{link.children}"
@@ -2554,10 +2324,10 @@ class TestC10:
             lines
         )
         assert labels.C5_BASIS in lines
-        # C7, C10 and their one table share the page's first card (#567, #618).
-        card = in_one_card(tree, TOTALS, total=2)
-        assert in_one_card(tree, C10_DOM, total=2) is card
-        assert in_one_card(tree, C7_DOM, total=2) is card
+        # C7, C10 and their one table share the page's one card (#567, #618, #619).
+        card = in_one_card(tree, TOTALS, total=1)
+        assert in_one_card(tree, C10_DOM, total=1) is card
+        assert in_one_card(tree, C7_DOM, total=1) is card
         assert every_card(tree)[0] is card
 
 
@@ -2629,7 +2399,6 @@ class TestSharedTable:
         body = with_year(ga_body(), 2016, **{field: SERVED_KINDS[kind]})
         tree = render(body=body)
         assert getattr(tree, "id", None) == PAGE_ID
-        assert find(tree, TABLE) is not None
         assert find(tree, ELECTORS) is not None
         assert len(download(tree, ELECTORS).rows) == len(body_rows(tree, ELECTORS))
 
@@ -2730,16 +2499,16 @@ class TestPopularTotals:
 
 
 class TestC10Degraded:
-    """AC5 as #618 keeps it (owner's ruling, D117): a body T4 accepts whose total
-    popular vote C10 cannot read as one per election puts :data:`C10_UNAVAILABLE` in
-    C10's place, with no chart and no ``c10`` id, and the shared table's total column
-    reads unavailable with :data:`TOTALS_UNAVAILABLE_NOTE` first among its notes and no
-    window note, while C7 (exactly as it was), the headline figures, the electors and
-    status columns, T4, its filters and the page's success marker stay (D113(c))."""
+    """AC5 as #618 keeps it (owner's ruling, D117): a body whose total popular vote C10
+    cannot read as one per election puts :data:`C10_UNAVAILABLE` in C10's place, with
+    no chart and no ``c10`` id, and the shared table's total column reads unavailable
+    with :data:`TOTALS_UNAVAILABLE_NOTE` first among its notes and no window note,
+    while C7 (exactly as it was), the headline figures, the electors and status
+    columns, the section links and the page's success marker stay (D113(c)). Since
+    T4 left the page (#619, D118), a missing popular-vote bound still degrades the
+    whole history page, and a present malformed one C10 alone."""
 
-    def assert_degraded(self, body: dict[str, Any], *, t4_file: bool = True) -> None:
-        """``t4_file``: T4's CSV equals the undoctored render's; false only where the
-        doctoring is in the provenance its preamble writes (the window)."""
+    def assert_degraded(self, body: dict[str, Any]) -> None:
         plain = render()
         tree = render(body=body)
         assert getattr(tree, "id", None) == PAGE_ID
@@ -2765,16 +2534,12 @@ class TestC10Degraded:
         assert window_note in download(plain, ELECTORS).lines
         assert window_note not in download(tree, ELECTORS).lines
         assert window_note not in texts(tree)
-        if t4_file:
-            assert download(tree, TABLE).raw == download(plain, TABLE).raw
-        else:
-            assert download(tree, TABLE).rows == download(plain, TABLE).rows
-        assert find(tree, MOD["YEARS_ID"]) is not None
+        assert find(tree, state_view.SECTIONS_ID) is not None
         assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is None
         headings = [h.children for h in of_type(tree, "H2")]
         assert MOD["C10_HEADING"] in headings
-        card = in_one_card(tree, MOD["C10_UNAVAILABLE_ID"], total=2)
-        assert every_card(tree)[0] is card
+        card = in_one_card(tree, MOD["C10_UNAVAILABLE_ID"], total=1)
+        assert every_card(tree) == [card]
 
     def test_two_totals_in_one_election(self) -> None:
         body = ga_body()
@@ -2793,81 +2558,86 @@ class TestC10Degraded:
     @pytest.mark.parametrize("window", [(2000, 1990), (True, 2024), (1976, 1976.5)])
     def test_a_malformed_popular_vote_window(self, window: tuple[Any, Any]) -> None:
         """cr.1: C10 checks the window as C2 and C5 do (``query.year_span``), so an
-        inverted or mistyped one that T4 can still compare degrades C10 alone, never
-        a self-contradicting caption."""
+        inverted or mistyped one degrades C10 alone, never a self-contradicting
+        caption."""
         body = ga_body()
         coverage = body["meta"]["provenance"]["coverage"]
         coverage["pv_year_min"], coverage["pv_year_max"] = window
-        self.assert_degraded(body, t4_file=False)
+        self.assert_degraded(body)
         # Accepted leftover (#618's architect review, m-1; D117): the file still
         # carries a popular-vote field, so its preamble writes the window as served.
         lines = download(render(body=body), ELECTORS).lines
         assert f"Popular votes cover {window[0]}–{window[1]}" in lines
 
     @pytest.mark.parametrize("window", [(1976, "2024"), (None, 2024)])
-    def test_a_window_t4_cannot_compare_degrades_the_page(
+    def test_a_window_t4_cannot_compare_degrades_c10_here_and_t4_s_page(
         self, window: tuple[Any, Any]
     ) -> None:
-        # T4's popular-vote cells compare each year with the window first, so a fault
-        # in what T4 shows is never swallowed by C10's section (as C7's
-        # ``test_a_row_without_the_allotment``).
+        """Before #619 T4's popular-vote cells compared each year with the window on
+        this page, so such a window degraded it. T4 has left (D118): here it is a
+        present malformed bound, C10's alone; the results page, which checks the
+        window before any cell, degrades whole."""
         body = ga_body()
         coverage = body["meta"]["provenance"]["coverage"]
         coverage["pv_year_min"], coverage["pv_year_max"] = window
+        self.assert_degraded(copy.deepcopy(body))
         with pytest.raises(TypeError):
-            render(body=body)
+            RS_MOD["render"](body, copy.deepcopy(INDEX), "GA", [])
 
     @pytest.mark.parametrize("bound", ["pv_year_min", "pv_year_max"])
-    @pytest.mark.parametrize(
-        "query", ["", "year_from=1824&year_to=1824&pv_status=popular_vote"]
-    )
-    def test_a_missing_window_bound_degrades_the_page_in_every_view(
-        self, bound: str, query: str
+    def test_a_missing_window_bound_degrades_the_whole_page(
+        self, monkeypatch: pytest.MonkeyPatch, bound: str
     ) -> None:
-        """#629's review, cr.1 (D117 as amended): ``render`` reads both bounds before
-        either half, so a missing one is the page's in every view, T4's empty result
-        included, where the shared table's download preamble would read it anyway."""
+        """#629's review, cr.1 (D117 as amended, D118): ``render`` reads both bounds
+        before either half, so a missing one is the page's, whatever URL reached it:
+        the routed page shows the degraded state, with or without the keys it read
+        before #619."""
         body = ga_body()
         del body["meta"]["provenance"]["coverage"][bound]
-        if query:
-            # The view leaves T4 empty (no table, no download), so only the shared
-            # table's preamble would read the window: the case main kept the page in.
-            assert find(render(query), TABLE) is None
         with pytest.raises(KeyError):
-            render(query, body=body)
+            render(body=copy.deepcopy(body))
+        serve_history(monkeypatch, body)
+        for search in ("", "?year_from=1824&year_to=1824"):
+            ids = routed_ids(route("/state/GA", search))
+            assert "unavailable" in ids and PAGE_ID not in ids, search
 
     @pytest.mark.parametrize("bound", ["pv_year_min", "pv_year_max"])
     def test_a_missing_bound_degrades_the_page_where_nothing_else_reads_it(
         self, bound: str
     ) -> None:
         """The mechanism, not only the outcome: with both halves failed (two statuses in
-        1900) there is no shared table, and T4's view is empty, so no download
-        preamble reads the window; only ``render``'s own read makes a missing bound the
-        page's (D117 as amended)."""
-        query = "year_from=1824&year_to=1824&pv_status=popular_vote"
+        1900) there is no shared table, so no download preamble reads the window; only
+        ``render``'s own read makes a missing bound the page's (D117 as amended)."""
         body = ga_body()
         (first, *_) = [r for r in body["data"] if r["year"] == 1900]
         first["pv_status"] = "legislature_chosen"
-        kept = render(query, body=copy.deepcopy(body))
+        kept = render(body=copy.deepcopy(body))
         assert getattr(kept, "id", None) == PAGE_ID
-        assert find(kept, ELECTORS) is None and find(kept, TABLE) is None
+        assert find(kept, ELECTORS) is None
         del body["meta"]["provenance"]["coverage"][bound]
         with pytest.raises(KeyError):
-            render(query, body=body)
+            render(body=body)
 
-    def test_a_malformed_window_with_t4_empty_degrades_c10_alone(self) -> None:
+    def test_a_present_malformed_bound_degrades_c10_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """#629's review, cr.1: a bound that is present and malformed stays C10's half's
-        to refuse, so the page, C7 and the shared table stay in a view T4 shows
-        nothing in."""
+        to refuse, so the page, C7 and the shared table stay, whatever URL reached
+        it."""
         body = ga_body()
         coverage = body["meta"]["provenance"]["coverage"]
         coverage["pv_year_min"], coverage["pv_year_max"] = (2000, 1990)
-        tree = render("year_from=1824&year_to=1824&pv_status=popular_vote", body=body)
+        tree = render(body=copy.deepcopy(body))
         assert getattr(tree, "id", None) == PAGE_ID
         assert find(tree, MOD["C10_UNAVAILABLE_ID"]) is not None
         assert c7_figure(tree) is not None
         assert find(tree, ELECTORS) is not None
         assert set(column(tree, "state_popular_total")) == {""}
+        serve_history(monkeypatch, body)
+        content = history_layout("year_from=1824&year_to=1824&pv_status=popular_vote")
+        assert content.id == PAGE_ID
+        assert find(content, MOD["C10_UNAVAILABLE_ID"]) is not None
+        assert find(content, ELECTORS) is not None
 
     def test_a_row_without_the_total(self) -> None:
         body = ga_body()
@@ -2889,7 +2659,8 @@ class TestC10Degraded:
         # Neither half was built, so the shared table gives way to its note (#618).
         assert find(tree, ELECTORS) is None
         assert find(tree, MOD["ELECTORS_TABLE_UNAVAILABLE_ID"]) is not None
-        assert find(tree, TABLE) is not None
+        # The page stays, with its section links.
+        assert find(tree, state_view.SECTIONS_ID) is not None
 
     def test_the_try_never_wraps_the_chart_call(self) -> None:
         """D095(f): ``components.chart`` is called after both halves' ``try`` blocks,
@@ -3219,11 +2990,21 @@ class TestStateFigures:
             "pv_status=popular_vote",
         ],
     )
-    def test_t4_s_filters_never_reach_them(self, query: str) -> None:
-        plain, filtered = render(), render(query)
-        assert texts(find(filtered, TABLE)) != texts(find(plain, TABLE))
+    def test_a_filtered_url_renders_the_same_figures(
+        self, monkeypatch: pytest.MonkeyPatch, query: str
+    ) -> None:
+        """The figures were never narrowed by T4's filters; since #619 the page reads
+        no query at all (D118), so a filtered URL, through the layout as the router
+        calls it, renders the unfiltered page's figures. The same query does narrow
+        T4 on the results page, so it is a real filter, not one the parser drops."""
+        cached_client(monkeypatch)
+        plain, filtered = history_layout(), history_layout(query)
         for key in ST_FIGURE_IDS:
             assert st_figure(filtered, key) == st_figure(plain, key), (query, key)
+        assert texts(find(filtered, ST_FIGURES)) == texts(find(plain, ST_FIGURES))
+        results = RS_MOD["layout"](usps="GA", **parse(query))
+        unfiltered = RS_MOD["layout"](usps="GA")
+        assert texts(find(results, RESULTS)) != texts(find(unfiltered, RESULTS))
 
     @pytest.mark.parametrize(
         "change",
@@ -3240,8 +3021,8 @@ class TestStateFigures:
     def test_a_took_office_fault_makes_that_figure_alone_unrecognized(
         self, change: str
     ) -> None:
-        # Architect I3 (D115): the flag figure alone reads it; the count, C7, T4 and
-        # the page stay, so nothing it reads reaches C7's section's except.
+        # Architect I3 (D115): the flag figure alone reads it; the count, C7, the
+        # shared table and the page stay, so nothing it reads reaches C7's section's except.
         body = ga_body()
         row = took_office_row(body, 1828)
         other = next(
@@ -3268,7 +3049,7 @@ class TestStateFigures:
         assert st_figure(tree, ELECTIONS_COUNT) == "50 elections (1824–2024)"
         assert c7_figure(tree) is not None
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is None
-        assert find(tree, TABLE) is not None and tree.id == PAGE_ID
+        assert tree.id == PAGE_ID and find(tree, ELECTORS) is not None
 
     @pytest.mark.parametrize("votes", [3.0, True, -1, "x"])
     def test_a_took_office_vote_no_count_can_read_is_unrecognized(
@@ -3314,7 +3095,8 @@ class TestStateFigures:
         self, value: Any
     ) -> None:
         # Architect I4 (D115): set on every row of 1828, so C7's collapse holds one
-        # value; C7 draws it as a marker and stays, as T4 and the page do.
+        # value; C7 draws it as a marker and stays, as the shared table and the page
+        # do.
         body = ga_body()
         for row in body["data"]:
             if row["year"] == 1828:
@@ -3324,18 +3106,20 @@ class TestStateFigures:
             assert st_figure(tree, key) == labels.UNRECOGNIZED, key
         assert find(tree, MOD["METRICS_NOTE_ID"]) is None
         assert c7_figure(tree) is not None
-        assert find(tree, TABLE) is not None and tree.id == PAGE_ID
+        assert tree.id == PAGE_ID and find(tree, ELECTORS) is not None
 
     def test_a_collapse_fault_removes_them_with_c7(self) -> None:
         # D112(c)'s precedent: C7's collapse is their input, so two allotments in one
-        # year degrade C7's section and the figures go with it; T4 stays.
+        # year degrade C7's section and the figures go with it; the shared table
+        # stays, its electors column unavailable.
         body = ga_body()
         rows_1828 = [r for r in body["data"] if r["year"] == 1828]
         rows_1828[0]["state_electoral_votes"] += 1
         tree = render(body=body)
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
         assert find(tree, ST_FIGURES) is None
-        assert find(tree, TABLE) is not None
+        assert find(tree, ELECTORS) is not None
+        assert set(column(tree, "state_electoral_votes")) == {""}
 
     def test_no_year_with_electors_says_so_for_both(self) -> None:
         body = ga_body()
@@ -3373,7 +3157,7 @@ class TestStateFigures:
         self,
     ) -> None:
         tree = render()
-        card = in_one_card(tree, ST_FIGURES, total=2)
+        card = in_one_card(tree, ST_FIGURES, total=1)
         assert find(card, charts.dom_id(MOD["C7_ID"])) is not None
         order = [getattr(n, "id", None) for n in components._within(card.children)]
         assert order.index(ST_FIGURES) < order.index(charts.dom_id(MOD["C7_ID"]))

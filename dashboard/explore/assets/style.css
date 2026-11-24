@@ -313,10 +313,10 @@ body {
 }
 .neighbor-earlier::before { transform: rotate(45deg); }
 .neighbor-later::after { transform: rotate(-135deg); }
-/* The section links (#465, #559), after the lede: an election's three pages (the overview,
-   results by state and people per electoral vote) or a state's two (its history and its
-   people per electoral vote), in one row that wraps rather than scrolling. No box, so it
-   never reads as a second earlier-and-later bar. The page being read is text, not a link,
+/* The section links (#465, #559, #619), after the lede: an election's three pages (the
+   overview, results by state and people per electoral vote) or a state's three (its
+   history, results by election and people per electoral vote), in one row that wraps
+   rather than scrolling. No box, so it never reads as a second earlier-and-later bar. The page being read is text, not a link,
    marked by weight and an underline drawn from its aria-current, never color alone: what
    is seen is what assistive technology hears, and forced colors keep both. Each entry is at least 24 px tall (WCAG 2.5.8). */
 .section-links {

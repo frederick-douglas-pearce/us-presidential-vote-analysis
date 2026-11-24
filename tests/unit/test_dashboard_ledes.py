@@ -80,7 +80,8 @@ BREAKS: dict[str, Break] = {
     ),
     "pages.election_states": Break("/v1/elections/1824"),
     "pages.election_per_capita": Break("/v1/elections/1824/per-capita"),
-    "pages.state": Break("/v1/states/GA"),
+    # T4 and its filters left the state history for this page (#619, D118).
+    "pages.state_results": Break("/v1/states/GA"),
     "pages.state_per_capita": Break("/v1/states/GA/per-capita"),
     "pages.candidate": Break("/v1/candidates/andrew-jackson"),
 }

@@ -498,7 +498,7 @@ def test_t2_and_t3_link_each_candidate_to_their_history() -> None:
 
 
 def test_t4_links_each_candidate_to_their_history() -> None:
-    state = dash.page_registry["pages.state"]["layout"].__globals__
+    state = dash.page_registry["pages.state_results"]["layout"].__globals__
     body = copy.deepcopy(RECORDED["/v1/states/GA"])
     tree, _ = state["render"](
         body,
@@ -537,7 +537,7 @@ def test_a_cell_without_a_slug_or_a_name_is_text_and_no_error_in_t2_t3_and_t4(
     )
     assert of_type(cell, "Link") == []
     # T4, which also builds its cells through components.candidate_cell.
-    state = dash.page_registry["pages.state"]["layout"].__globals__
+    state = dash.page_registry["pages.state_results"]["layout"].__globals__
     body = copy.deepcopy(RECORDED["/v1/states/GA"])
     for r in body["data"]:
         r.update(row)

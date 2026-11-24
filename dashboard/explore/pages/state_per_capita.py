@@ -5,11 +5,13 @@ Split out of the state history by #559 (the history is ``pages/state.py``; the s
 pieces are in :mod:`explore.state_view`), as an election's per-capita page was split
 from its overview (D092, D105). It reads one response, ``/v1/states/{usps}/per-capita``,
 filled on a miss, after the code is validated against the state roster
-(:func:`explore.state_view.on_roster`) as the history page validates it. Its one
+(:func:`explore.state_view.on_roster`) as the other state pages validate it. Its one
 filter is the shared year range (``year_from`` / ``year_to``), judged against the
-dataset's span as on the history page; any other key is dropped, so the candidate and
-popular-vote keys of a history link never reach ``og:url`` here (D081). The section
-links carry the year range applied, in both directions. The chart that will sit beside
+dataset's span as on the results by election page (``pages/state_results.py``); any
+other key is dropped, so the candidate and popular-vote keys of a results link never
+reach ``og:url`` here (D081). Its section links carry the year range applied, and so
+do the results page's; the history page applies none until #620, so its links carry
+none (D118(c)). The chart that will sit beside
 T7, C8, is #561; until then the page holds no chart slot (#545's rule).
 """
 
@@ -38,7 +40,7 @@ PER_CAPITA_FIELDS = ("year", *labels.PER_CAPITA_FIELDS)
 #: What T7's CSV adds after its columns (#309): the state's key.
 PER_CAPITA_EXTRA = ("state_usps",)
 
-#: The not-found state (#325), shared by the two state pages (#559).
+#: The not-found state (#325), shared by the three state pages (#559, #619).
 NOT_FOUND = api.NotFound(
     labels.STATE_NOT_FOUND_HEADING, labels.STATE_NOT_FOUND_SENTENCE
 )

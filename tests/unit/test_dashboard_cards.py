@@ -35,7 +35,8 @@ CARD_COUNTS = {
     "/election/<year>": 1,
     "/election/<year>/states": 1,
     "/election/<year>/per-capita": 1,
-    "/state/<usps>": 2,  # C7 and C10 with their one table (#618), and T4
+    "/state/<usps>": 1,  # C7 and C10 with their one table (#618); T4 left (#619)
+    "/state/<usps>/elections": 1,  # T4 with its filters (#619)
     "/state/<usps>/per-capita": 1,
     "/candidate/<slug>": 1,
     "/not-found-404": 0,
