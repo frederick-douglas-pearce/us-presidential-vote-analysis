@@ -356,7 +356,38 @@ def page_move(page: Mapping[str, Any], registry: Mapping[str, Any]) -> Move | No
         raise RuntimeError(f"{target['module']} validates otherwise than {own!r}")
     if not keys or not all(isinstance(key, str) and key for key in keys):
         raise RuntimeError(f"{page['module']} moves no keys")
+    _check_moved_keys_dropped(page, keys, target)
     return Move(tuple(keys), template, target["query"])
+
+
+#: Values a moved key's probe tries (#620, D119): a USPS code, a slug and every closed
+#: value a filter keeps, so each moved key has a value its target's parser keeps.
+MOVE_WITNESSES: tuple[str, ...] = (
+    "GA",
+    "andrew-jackson",
+    *labels.PV_STATUS,
+    *labels.COUNT_STATUS,
+)
+
+
+def _check_moved_keys_dropped(
+    page: Mapping[str, Any], keys: tuple[str, ...], target: Mapping[str, Any]
+) -> None:
+    """``RuntimeError`` unless a source page with its own ``query=`` drops every key it
+    moves (D118's action, #620, D119), mirroring :func:`page_path_move`'s check. Each
+    key is probed with the :data:`MOVE_WITNESSES` its target's parser keeps, so a key
+    kept only as a slug or a closed value is probed with one; a key the target keeps
+    under no witness cannot be probed, and that raises too, so the check is never
+    vacuous."""
+    for key in keys:
+        kept = [w for w in MOVE_WITNESSES if (key, w) in target["query"]({key: w})]
+        if not kept:
+            raise RuntimeError(f"{target['module']} keeps no witness of {key!r}")
+        parser = page.get("query")
+        if parser is not None and any(
+            k == key for w in kept for k, _ in parser({key: w})
+        ):
+            raise RuntimeError(f"{page['module']} still reads {key!r}, which it moves")
 
 
 def moved_location(resolution: Resolution, move: Move | None, query: str) -> str | None:

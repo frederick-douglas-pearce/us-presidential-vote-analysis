@@ -898,6 +898,13 @@ METRIC_ZERO_ALLOTMENT_NOTE = (
 METRIC_ALL_STATES_NOTE = (
     "These figures cover every state. The State filter narrows only the rows below."
 )
+#: Under the state history figures while the Years filter applies a narrower range than
+#: the state's span, the empty view included (#620, D119; ba spec, approved at #620's
+#: plan gate): the figures read the whole history (D112(g), D115(g)).
+METRIC_ALL_YEARS_NOTE = (
+    "These figures cover this state's whole history in this dataset. The Years filter "
+    "does not change them."
+)
 #: A select over two or more elections (#600, D112(d); ba spec, approved at #600's plan
 #: gate): ``{value}`` is the companion table's own cell, ``{years}`` the year or tied
 #: years (:func:`metric_years`), ``{first}``–``{last}`` the earliest and latest years
@@ -1033,9 +1040,18 @@ C4_NO_FIGURE_NOTE = (
     "A marker in place of a bar means this dataset has no number of electors to draw "
     "for that election, and the chart's key says why. It is not a zero."
 )
-FIRST_ELECTION_NOTE = (
-    "The first election in this dataset for {state} is {year}, so nothing is drawn "
-    "for the years before it."
+#: C7's and C10's start, on the state history (#620, D119; ba spec, approved at #620's
+#: plan gate, 2026-11-23): shown only when the years shown start at the state's first
+#: election and that is after the dataset's first year. It replaces the four
+#: first-election notes (``FIRST_ELECTION_NOTE``, ``C10_FIRST_ELECTION_NOTE`` and their
+#: ``_THIS_STATE`` forms), retired since the axis no longer starts before that election.
+FIRST_ELECTION_START_NOTE = (
+    "This chart starts at {year}, the first election in this dataset in which "
+    "{state} appointed electors."
+)
+FIRST_ELECTION_START_NOTE_THIS_STATE = (
+    "This chart starts at {year}, the first election in this dataset in which this "
+    "state appointed electors."
 )
 
 #: Chart C7 (#560): one state's electors appointed, on its history page. Its title,
@@ -1044,16 +1060,12 @@ FIRST_ELECTION_NOTE = (
 #: approved at #560's plan gate, 2026-11-18). A third, the note on what the page's
 #: filters reached, ``C7_FILTERS_NOTE``, is retired with the filters (#619, D118).
 C7_TITLE_THIS_STATE = "Electors appointed by this state in each election"
-FIRST_ELECTION_NOTE_THIS_STATE = (
-    "The first election in this dataset for this state is {year}, so nothing is drawn "
-    "for the years before it."
-)
 
 #: Chart C10 (#582): one state's total popular vote, on its history page, below C7. Its
 #: axis, bands, key and most of its caption are C5's; its title and hover are C5's
 #: one-state wording from #436 (retired by #562, restored), and the rest is the ba
-#: spec approved at #582's plan gate, 2026-11-21. The first-election sentence is its
-#: own, since C10's before band shades the years before a state's first election.
+#: spec approved at #582's plan gate, 2026-11-21. Its first-election sentence is C7's
+#: since #620 (:data:`FIRST_ELECTION_START_NOTE`).
 C10_TITLE_STATE = "Total popular vote in {state} in each election"
 C10_TITLE_THIS_STATE = "Total popular vote in this state in each election"
 C10_HOVER = (
@@ -1063,14 +1075,6 @@ C10_HOVER = (
 C10_SHORT_TICKS_NOTE = (
     "The numbers up the side are written short: 500k is 500,000 and 2M is 2,000,000. "
     "Each bar's hover and the table give the total in full."
-)
-C10_FIRST_ELECTION_NOTE = (
-    "The first election in this dataset for {state} is {year}, so the chart has no "
-    "bar or marker for the years before it."
-)
-C10_FIRST_ELECTION_NOTE_THIS_STATE = (
-    "The first election in this dataset for this state is {year}, so the chart has no "
-    "bar or marker for the years before it."
 )
 
 C5_TITLE = "Total popular vote in each election, all states"
@@ -1857,3 +1861,7 @@ def share_cell(value: object) -> str:
 YEARS_FILTER = "Years"
 PV_ONLY_FILTER = "Only years with a popular vote in this dataset"
 NO_ELECTIONS_MATCH = "No elections match these filters."
+#: The state history's form, in place of C7, C10 and their table when its one filter,
+#: the Years slider, leaves no election (#620, D119; ba spec, approved at #620's plan
+#: gate).
+STATE_NO_ELECTIONS_IN_RANGE = "No election for this state falls in the years chosen."
