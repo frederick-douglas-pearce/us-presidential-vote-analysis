@@ -11,8 +11,9 @@ select (#600, D114) its second, the sum (#601, D115) its third, and the change (
 D120) its fourth.
 
 Numbers only: the wording is :mod:`explore.labels`' (``METRIC_LABELS``,
-``metric_mean``), except that a select carries each value's companion-table cell, so
-the figure shows exactly what the table shows (D114, widening D097(f)). Pure and
+``metric_mean``), except that a select and a change (#621, D120) carry each value's
+companion-table cell, so the figure shows exactly what the table shows (D114, widening
+D097(f)). Pure and
 shared: it reads no API and imports only ``labels``, whose
 :func:`explore.labels.finite` and :func:`explore.labels.is_blank` are the one rule of
 what is a figure and what is null, the same the margin cells use.
@@ -129,18 +130,21 @@ METRICS: dict[str, Metric] = {
     "candidate_ev_counted_total": Metric(
         "sum", Source("EcPvRow", "national_electoral_votes_counted")
     ),
-    # The further figures on /state/<usps> (#621, D120), read by
-    # ``state_view.history_figures`` over the years the state appointed electors in:
-    # its first election, picked from the allotment; in how many of those elections
-    # it held a popular vote to choose its electors (a flag derived from the closed
-    # ``pv_status``, as D115(b) derives took-office's); and the signed change in its
-    # electors from its first election to its latest.
+    # The further figures on /state/<usps> (#621, D120). These three rows are
+    # descriptive (owner, #635's review): ``state_view.history_figures`` computes the
+    # figures, shared with the /states map (#623), and reads none of their fields;
+    # ``TestMetricLabels.test_the_state_history_rows_are_pinned`` pins them exactly.
+    # They are, over the years the state appointed electors in: its first election,
+    # picked from the allotment; in how many of those elections it held a popular
+    # vote to choose its electors (a flag derived from the closed ``pv_status``, as
+    # D115(b) derives took-office's); and the signed change in its electors from its
+    # first election to its latest. ``reads_pv_window`` stays False below on purpose
+    # as a description: ``pv_status`` is served for every year, and the count is of
+    # how electors were chosen, never the popular-vote totals the window bounds
+    # (#621's plan gate, Q2(i); D120).
     "state_first_election": Metric(
         "select", Source("EcPvRow", "state_electoral_votes"), pick="first"
     ),
-    # ``reads_pv_window`` stays False on purpose: ``pv_status`` is served for every
-    # year, and this counts how electors were chosen, never the popular-vote totals
-    # the window bounds (#621's plan gate, Q2(i); D120).
     "state_pv_elections_count": Metric(
         "flag_count", Source("EcPvRow", "pv_status"), counted=True
     ),
@@ -534,8 +538,9 @@ def change(triples: Iterable[tuple[int, object, str]]) -> Change:
     not an ``int`` (a ``bool``, a float) makes the whole change
     :data:`UNRECOGNIZED_CHANGE`, so the value is exact. Fewer than two years with a
     value is :data:`NO_CHANGE`. Each triple is one election; the caller passes each
-    year once, and a repeated year at either end makes :class:`Change` raise
-    ``ValueError``.
+    year once. A repeated year is **not** detected: the stable year sort keeps the
+    first of two rows at either end (``state_view.history_figures`` refuses it before
+    calling), and only rows all in one year make :class:`Change` raise ``ValueError``.
     """
     rows = _kept(triples)
     if rows is None:

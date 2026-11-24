@@ -208,25 +208,27 @@ def not_found(content_id: str) -> html.Div:
 
 
 def allotment(value: object) -> int | None:
-    """An allotment the figures can read: an ``int`` (never a ``bool``) at or above 0,
-    else ``None`` (#601, D115; moved here by #621). C7 draws a null or a malformed
-    allotment as a marker; the figures cannot count such a year either way, so all of
-    them read unrecognized (D120)."""
-    return value if type(value) is int and value >= 0 else None
+    """An allotment the figures can read: an ``int`` (never a ``bool``) at or above 0
+    that :func:`explore.labels.finite` accepts (so not too large for a float, which a
+    select and a change refuse), else ``None`` (#601, D115; moved here and the finite
+    check added by #621, D120). C7 draws a null or a malformed allotment as a marker;
+    the figures cannot count such a year either way, so all of them read
+    unrecognized. The one rule of an election with electors appointed: an allotment
+    this reads as above 0 (:func:`first_election`, :func:`history_figures`)."""
+    if type(value) is int and value >= 0 and labels.finite(value) is not None:
+        return value
+    return None
 
 
 def first_election(records: list[dict[str, Any]]) -> int | None:
     """The state's first election (#620, D119; moved here by #621, D120): the first
-    year of its per-year ``records`` (C7's collapse) whose allotment is an ``int``
-    (never a ``bool``) above 0, the rule the election count uses (D115(c)); ``None``
-    if no year has one, which served data never has. Pure. The history page's year span
-    starts here, and :func:`history_figures`' first-election figure picks the same
-    year."""
-    years = [
-        r["year"]
-        for r in records
-        if type(r["state_electoral_votes"]) is int and r["state_electoral_votes"] > 0
-    ]
+    year of its per-year ``records`` (C7's collapse) whose :func:`allotment` is above
+    0, the one rule the election count and :func:`history_figures` use (D115(c));
+    ``None`` if no year has one, which served data never has. Pure. The history page's
+    year span starts here; :func:`history_figures`' first-election figure is a select
+    over the same rule, so the two agree on readable data, and where an allotment no
+    figure can read is present this skips it while the figures read unrecognized."""
+    years = [r["year"] for r in records if allotment(r["state_electoral_votes"])]
     return min(years) if years else None
 
 
@@ -248,7 +250,12 @@ def popular_vote_flags(
 
     ``None`` (the figure reads unrecognized) for a code outside the closed set, or
     :data:`NOT_PARTICIPATING` in a year with electors appointed, which contradicts
-    itself. Total: it reads ``records`` with ``.get`` and raises nothing."""
+    itself. A status in a year outside ``years`` (an allotment of 0) is never read, so
+    an unknown code there leaves the count as it is; that year's table cell words it
+    (owner, #635's review, ge.5; D120). Raises nothing on the records
+    :func:`history_figures` has accepted (mappings with an ``int`` year, one per
+    year); a missing ``pv_status`` reads as null there, where C7's collapse refuses
+    it, which the shared collapse #623 is to move here settles (D120)."""
     by_year = {r.get("year"): r.get("pv_status") for r in records}
     pairs: list[tuple[int, object]] = []
     for year in years:
@@ -298,15 +305,16 @@ def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
     ``state_electoral_votes``, ``pv_status``), the one computation the history page
     (#621) and the ``/states`` map (#623) share, so the two cannot disagree (D120).
 
-    **Precondition: one record per year.** The page passes C7's collapse
-    (``pages/state.py`` ``electors``), which guarantees it; a caller with other rows
-    (N2's, one per state-year) runs them through the same per-year check first
-    (``over_time.state_series``). A repeated year at an extreme makes
-    :class:`explore.metrics.Selection` or :class:`explore.metrics.Change` raise
-    ``ValueError``; on one record per year this raises nothing.
+    **One record per year.** The page passes C7's collapse (``pages/state.py``
+    ``electors``), which guarantees it and refuses a year whose rows disagree. This
+    function refuses a year named twice itself: every figure then reads unrecognized
+    (:data:`UNRECOGNIZED_HISTORY`), since :mod:`explore.metrics`' select and change do
+    not detect a repeated year. That is the backstop; the ``/states`` map (#623) is to
+    share the page's collapse, moved here, so the two refuse the same rows (D120).
 
-    An allotment that is not an ``int`` at or above 0, or a year that is not an
-    ``int``, makes every figure unrecognized (:data:`UNRECOGNIZED_HISTORY`). The figures
+    An allotment :func:`allotment` cannot read, a year that is not an ``int``, or a
+    year named twice makes every figure unrecognized (:data:`UNRECOGNIZED_HISTORY`).
+    Total on a list of mappings. The figures
     are over the years with an allotment above 0 (D115(c)); a ``pv_status`` fault makes
     the popular-vote count alone unrecognized (:func:`popular_vote_flags`). Each value's
     cell is :func:`explore.labels.number`'s, the function C7's table cell uses."""
@@ -316,6 +324,8 @@ def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
         if type(year) is not int or value is None:
             return UNRECOGNIZED_HISTORY
         allotments.append((year, value))
+    if len({year for year, _ in allotments}) != len(allotments):
+        return UNRECOGNIZED_HISTORY
     years = sorted(year for year, value in allotments if value)
     zeros = sorted(year for year, value in allotments if value == 0)
     triples: list[tuple[int, object, str]] = [

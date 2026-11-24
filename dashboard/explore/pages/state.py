@@ -413,8 +413,9 @@ def _figures(
     ``dl``: the elections in which it appointed electors (an allotment above 0, from
     C7's collapse, ``records``), its first election, in how many of them it held a
     popular vote to choose its electors, the change in its electors from its first
-    election to its latest (all four computed by :func:`explore.state_view.
-    history_figures`, the computation the ``/states`` map shares), and in how many its
+    election to its latest (all four computed by
+    :func:`explore.state_view.history_figures`, the computation the ``/states`` map
+    shares), and in how many its
     electors cast a vote for the candidate who took office (this page's alone: it needs
     the candidate rows). Unfiltered: ``records`` is C7's whole collapse, so the Years
     filter never reaches them (D112(g), D115(g), D119), and while it applies a narrower
@@ -428,6 +429,10 @@ def _figures(
     figures = state_view.history_figures(records)
     years = list(figures.years)
     entries: list[Any] = []
+    # By key, not by kind (D120, amended at #635's review): two figures here are flag
+    # counts (popular vote, took office). ``TestFurtherStateFigures.
+    # test_the_figures_show_in_the_approved_order`` renders every ``METRIC_IDS`` id, so
+    # the ``TypeError`` below is reachable only by a code change a test catches.
     for key, ident in METRIC_IDS.items():
         # A plain count words its own case (D115(i)); every other figure's, keyed.
         no_figure = (
@@ -448,11 +453,13 @@ def _figures(
         elif key == "state_electors_change":
             value, rest = labels.metric_change(figures.change, no_figure)
         elif key == "state_took_office_count":
-            flags = _took_office_flags(rows, years)
             counted = metrics.METRICS[key].counted
+            if counted is None:  # a code fault in METRICS, never a data fault
+                raise TypeError(f"{key} has no counted value")
+            flags = _took_office_flags(rows, years)
             result = (
                 metrics.UNRECOGNIZED_COUNT
-                if flags is None or counted is None
+                if flags is None
                 else metrics.flag_count(flags, counted)
             )
             value, rest = labels.metric_count(result, years, no_figure)

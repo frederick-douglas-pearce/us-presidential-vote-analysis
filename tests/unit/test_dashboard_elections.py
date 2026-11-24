@@ -2247,7 +2247,7 @@ class TestMetricLabels:
             "pv_total_latest",
         }
 
-    def test_no_figure_wording_is_keyed_by_exactly_the_counts_selects_and_sums(
+    def test_no_figure_wording_is_keyed_by_exactly_the_counts_selects_sums_and_changes(
         self,
     ) -> None:
         # A mean words its own in ``metric_mean`` (#600, architect S2), and a plain
@@ -2266,6 +2266,37 @@ class TestMetricLabels:
         # ``test_each_page_reads_the_window_from_the_metric``.
         for names in (MOD, *(page_globals(p) for p in METRIC_PAGES)):
             assert "METRIC_NO_FIGURE" not in names and "PV_METRIC" not in names
+
+    def test_the_state_history_rows_are_pinned(self) -> None:
+        # Owner, #635's review (ge.2, cr.4): these rows are descriptive
+        # (``state_view.history_figures`` reads none of their fields), so their every
+        # field is pinned here, and flipping one fails.
+        assert {
+            key: metrics.METRICS[key]
+            for key in (
+                "state_first_election",
+                "state_pv_elections_count",
+                "state_electors_change",
+            )
+        } == {
+            "state_first_election": metrics.Metric(
+                "select",
+                metrics.Source("EcPvRow", "state_electoral_votes"),
+                None,
+                "first",
+                False,
+            ),
+            "state_pv_elections_count": metrics.Metric(
+                "flag_count", metrics.Source("EcPvRow", "pv_status"), True, None, False
+            ),
+            "state_electors_change": metrics.Metric(
+                "change",
+                metrics.Source("EcPvRow", "state_electoral_votes"),
+                None,
+                None,
+                False,
+            ),
+        }
 
     #: The kinds each page computes (#609's review, r1.cr.8): a page's ``METRIC_IDS``
     #: names only metrics of those kinds, so its kind check can never fire in shipped
@@ -3081,9 +3112,33 @@ class TestChange:
         assert metrics.change(triples) == metrics.UNRECOGNIZED_CHANGE
         assert metrics.select(triples) == metrics.UNRECOGNIZED_SELECTION
 
-    def test_a_repeated_year_at_an_end_raises(self) -> None:
+    def test_rows_all_in_one_year_raise(self) -> None:
         with pytest.raises(ValueError, match="not a change"):
             metrics.change(self.triples((2024, 9), (2024, 16)))
+
+    def test_a_repeated_year_at_an_end_is_not_detected(self) -> None:
+        # #635's review (cr.1): the stable sort keeps the first row of a repeated
+        # first year; ``state_view.history_figures`` refuses such input before calling.
+        triples = self.triples((1824, 9), (1824, 10), (2024, 16))
+        assert metrics.change(triples) == metrics.Change(7, (1824, "9"), (2024, "16"))
+
+    def test_select_and_change_share_one_rule_of_which_years_have_a_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #635's review (ge.1; D120(a)): both call ``metrics._kept``.
+        calls: list[str] = []
+        real = metrics._kept
+
+        def spy(triples: Any) -> Any:
+            calls.append("kept")
+            return real(triples)
+
+        monkeypatch.setattr(metrics, "_kept", spy)
+        triples = self.triples((1824, 9), (2024, 16))
+        metrics.select(triples)
+        assert calls == ["kept"]
+        metrics.change(triples)
+        assert calls == ["kept", "kept"]
 
     @pytest.mark.parametrize(
         "args",

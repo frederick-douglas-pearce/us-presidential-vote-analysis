@@ -831,9 +831,10 @@ METRIC_NO_FIGURE_PV_YEARS = (
 METRIC_NO_FIGURE_NO_ELECTORS = (
     "No figure: this dataset has no election in which this state appointed electors"
 )
-#: Each count's and select's wording when every value among the elections shown is
-#: null, by metric key (#569, #600, D114); a mean words its own in
-#: :func:`metric_mean`. The two counts' texts are #569's, unchanged.
+#: Each flag count's and select's wording when every value among the elections shown
+#: is null, a sum's when any is (#601, D115), and a change's when fewer than two
+#: elections have a value (#621, D120), by metric key (#569, #600, D114); a mean words
+#: its own in :func:`metric_mean`. The two counts' texts are #569's, unchanged.
 METRIC_NO_FIGURE: dict[str, str] = {
     # No served year reaches it.
     "ec_no_majority_count": (
@@ -884,8 +885,9 @@ METRIC_NO_FIGURE: dict[str, str] = {
         "candidate in one or more of the elections shown"
     ),
     # A state's further figures (#621, D120; ba). The first election's is the no-
-    # electors wording itself, by reference, so the two cannot drift apart; neither
-    # case is reachable on the page once an unreadable allotment reads unrecognized.
+    # electors wording itself, by reference, so the two cannot drift apart. The page
+    # words no year with electors (every allotment 0, reachable) by that constant
+    # first, so this key's own case (years, but no value) is unreachable there.
     "state_first_election": METRIC_NO_FIGURE_NO_ELECTORS,
     # Electors appointed in some year, but every pv_status among them null. Names no
     # cause; no served year reaches it.
@@ -1729,8 +1731,9 @@ def metric_count(
     pv_window: tuple[int, int] | None = None,
 ) -> tuple[str, str | None]:
     """A count of elections, as ``(value, rest)``, on ``/elections/majority`` (#569,
-    D112) and ``/state/<usps>`` (the took-office count, #601, D115, whose ``no_figure``
-    the page chooses and whose N may be smaller than the elections count beside it): the
+    D112) and ``/state/<usps>`` (the took-office count, #601, D115, and the count of
+    elections with a popular vote held, #621, D120, whose ``no_figure`` the page chooses
+    and whose N may be smaller than the elections count beside it): the
     value text, and the text after it naming its N and years, or ``None`` where there is
     none to name. ``result`` is an ``explore.metrics.FlagCount`` (this module imports no
     ``metrics``, which imports it); ``years`` the distinct years shown; ``no_figure``
