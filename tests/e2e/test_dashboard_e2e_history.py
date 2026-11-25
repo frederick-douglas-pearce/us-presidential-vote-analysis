@@ -94,8 +94,9 @@ DROPDOWNS = {
 def open_at(page: Page, path: str, width: int) -> str:
     """``path`` rendered from data at ``width``; returns its success marker. On the
     state history it waits for C7 and C10 to be drawn too (#560, #582): the charts
-    mount after plotly.js loads, below the Years filter, so a measurement taken before
-    then can see them move by the charts' height."""
+    mount after plotly.js loads, below the figures and the Years filter, so a
+    measurement of what follows a chart (C10, the table) taken before then can see it
+    move by the chart's height."""
     page.set_viewport_size({"width": width, "height": 900})
     page.goto(path)
     success = PAGES[path][0]
