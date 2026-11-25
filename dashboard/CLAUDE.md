@@ -71,7 +71,7 @@ check is `tests/chart_log.py`, tested in `TestNotDrawnLogCheck`), and `tests/con
 refuses the marker anywhere else at collection, since the e2e server renders in a subprocess
 whose log no in-process handler sees. `TestEveryChart.test_every_rendered_page` renders every registered
 page's default view, so it is where a shipped chart that is not drawn fails the suite, and
-`TestChartNotDrawn` (`test_dashboard_export.py`) breaks each live chart alone on its page, three ways (`BREAKAGES`, #484).
+`TestChartNotDrawn` (`test_dashboard_export.py`) breaks each live chart alone on its page, once for each way in `BREAKAGES` (#484; a refused trace type since #638).
 
 **Browser tests (#321, D082).** `tests/e2e/` drives the app in Chromium through Playwright,
 at a 390 × 844 viewport: the home page, and the elections index's filter-to-URL chain, chart C9 (#563: its year ticks apart and every text inside 390 and 360 px with no sideways scroll, a hover naming its year, the filters narrowing it with T1, a theme switch redrawing it with no request, and a blocked CDN leaving its title, caption, pointer and T1), (since #562 also its section links' client-side

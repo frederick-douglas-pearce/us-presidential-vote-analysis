@@ -651,8 +651,9 @@ class TestTraceTypes:
     def test_every_live_chart_draws_only_scatter_and_bar(
         self, live_figures: dict[str, Any]
     ) -> None:
-        """Every registered live chart's default view draws only allowed types; the
-        filtered and degraded views are ``TestEveryChart``'s (``CHART_QUERIES``)."""
+        """Every registered live chart's default view draws only allowed types. The
+        filtered and absent views (``CHART_QUERIES``) are ``TestEveryChart``'s; any
+        other render that draws a refused type fails the conftest not-drawn check."""
         drawn = {
             each.get("type", "scatter")
             for figure in live_figures.values()
