@@ -7724,7 +7724,7 @@ The architect's review preferred a tile grid on cost and phone reach. The owner 
   - every trace's `type`, a string (for (b′)).
 
   It adds a number kind, a boolean kind, a colorbar anchor and a stop anchor where none exists, as `test_every_slot_read_by_name_is_declared` requires. How the totality tests run with the flag on is #623's.
-- **(b′) Trace types are an allow-list (owner, Q5 and D1).** Today `color_problems` refuses only a `colorscale` key. A `choropleth` that omits it, or names a `coloraxis`, passes `figure_problems` and is drawn in plotly's default colorscale, which is no token. So do several other plotly.js types that color by a number (`heatmap`, `histogram2d`, `densitymap`, `surface` and more; code review, reproduced). So every trace type other than `scatter` and `bar` is refused, on every chart. A `choropleth` is admitted only on a chart whose registry row sets `map_bins`, and only in (a)'s shape. The existing charts (C1–C10) draw only `scatter` and `bar` traces. A closed list fails closed as plotly.js adds types, where a list of refused types would go stale. Tests that feed an unknown type to `color_only_pairs` through `figure_problems` are adjusted in #623.
+- **(b′) Trace types are an allow-list (owner, Q5 and D1).** Today `color_problems` refuses only a `colorscale` key. A `choropleth` that omits it, or names a `coloraxis`, passes `figure_problems` and is drawn in plotly's default colorscale, which is no token. So do several other plotly.js types that color by a number (`heatmap`, `histogram2d`, `densitymap`, `surface` and more; code review, reproduced). So every trace type other than `scatter` and `bar` is refused, on every chart. A trace with no `type` is read as `scatter`, as `charts.py` already reads it. A `choropleth` is admitted only on a chart whose registry row sets `map_bins`, and only in (a)'s shape. The existing charts (C1–C10) draw only `scatter` and `bar` traces. A closed list fails closed as plotly.js adds types, where a list of refused types would go stale. Tests that feed an unknown type to `color_only_pairs` through `figure_problems` are adjusted in #623.
 - **(c) Template and fixed keys.** `TEMPLATE.layout` gains a `geo` section:
   - `scope: "usa"`, `projection.type: "albers usa"` and `resolution: 110`, so plotly requests exactly the shipped file (`usa_110m.json`). Plotly's default scope is `world`, which would request a file that is not shipped;
   - `bgcolor` `var(--page)` (plotly's default is white in either palette);
@@ -7762,7 +7762,7 @@ The architect's review preferred a tile grid on cost and phone reach. The owner 
 **Guards (to be written by #623).**
 - The registry flag pinned in `ISSUED`.
 - `map_problems` refusing each departure from (a) and (d), including a stop that is not a token.
-- `color_problems` still refusing a colorscale on every chart without the flag, and (b′)'s allow-list: a trace type other than `scatter` and `bar` refused on every chart, and `choropleth` admitted only under the flag.
+- `color_problems` still refusing a colorscale on every chart without the flag, and (b′)'s allow-list: a trace type other than `scatter` and `bar` refused on every chart, a trace with no `type` read as `scatter`, and `choropleth` admitted only under the flag.
 - `FIXED_GEO_KEYS` and the `geo2` refusal in `override_problems`.
 - `figure_texts` reading the colorbar's `title` and `ticktext`.
 - A no-figure state left out of `locations`.
