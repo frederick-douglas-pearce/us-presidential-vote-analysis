@@ -563,9 +563,11 @@ def _channels(trace: Mapping[str, Any], names: set[str]) -> dict[str, str]:
     text is the trace's name, or shown text that, with its placeholders removed, is the
     name, or that writes it with ``%{fullData.name}``. Shown text is read from
     :func:`_drawn_text`, so a ``text`` a ``texttemplate`` replaces names nothing, and
-    placeholders are not resolved (#433). A trace of any other type draws
-    none of these, so two traces of such a type are reported as differing by color
-    alone until this learns the type. A numeric symbol or dash is not read here:
+    placeholders are not resolved (#433). A trace of any other type draws none of
+    these, so two traces of such a type are reported as differing by color alone;
+    :func:`figure_problems` refuses any other type outright (:data:`TRACE_TYPES`,
+    #638), so that reading matters only to a caller of :func:`color_only_pairs`
+    itself. A numeric symbol or dash is not read here:
     :func:`figure_problems` refuses it, rather than copy plotly's number table."""
     kind = trace.get("type", "scatter")
     found_marker, found_line = trace.get("marker"), trace.get("line")
@@ -658,6 +660,32 @@ def number_problems(figure: Mapping[str, Any]) -> list[str]:
             trace.get("mode"), str
         ):
             problems.append(f"data[{index}].mode: a scatter trace names its mode")
+    return problems
+
+
+#: The trace types a chart may draw (D121(b′), #638): a closed allow-list, so it fails
+#: closed as plotly.js adds types. Any other type is refused on every chart, since
+#: several (a ``choropleth`` with no ``colorscale``, a trace naming a ``coloraxis``,
+#: ``heatmap``, ``histogram2d``, ``densitymap``, ``surface`` and more) color by a
+#: number in plotly's default colorscale, which is no token, with no key
+#: :func:`color_problems` would see. A trace with no ``type`` is a ``scatter``, as
+#: every check here reads it.
+TRACE_TYPES: frozenset[str] = frozenset({"scatter", "bar"})
+
+
+def trace_type_problems(figure: Mapping[str, Any]) -> list[str]:
+    """Each trace whose type is not in :data:`TRACE_TYPES` (D121(b′), #638): another
+    string, a case or spacing variant of an allowed one, or a value that is no string.
+    A trace that is not an object is :func:`hover_problems`'."""
+    problems = []
+    for index, trace in enumerate(figure.get("data") or []):
+        if not isinstance(trace, dict):
+            continue
+        kind = trace.get("type", "scatter")
+        if not (isinstance(kind, str) and kind in TRACE_TYPES):
+            problems.append(
+                f"data[{index}].type: {kind!r}, not a chart trace type (scatter or bar)"
+            )
     return problems
 
 
@@ -882,13 +910,14 @@ def slot_problems(figure: Mapping[str, Any]) -> list[str]:
 
 def figure_problems(figure: Any, *, short_value_ticks: bool = False) -> list[str]:
     """Everything that keeps ``figure`` from being a chart's (#432): it is a plain dict
-    with a list of traces, sets no template or config of its own and overrides none of
-    the template's fixed defaults, names colors only as token references, carries no
-    markup but ``<br>`` and ``<extra>``, names marker symbols and dashes rather than
-    numbering them and names every scatter trace's mode, writes its own hover text with
-    no number format, sets no bar's width or offset, and never tells two traces apart
-    by color alone. ``short_value_ticks`` is the chart's registry row's (#596, D110):
-    see :func:`override_problems`.
+    with a list of traces, each a ``scatter`` or a ``bar`` (:data:`TRACE_TYPES`, #638;
+    no ``type`` reads as ``scatter``), sets no template or config of its own and
+    overrides none of the template's fixed defaults, names colors only as token
+    references, carries no markup but ``<br>`` and ``<extra>``, names marker symbols
+    and dashes rather than numbering them and names every scatter trace's mode, writes
+    its own hover text with no number format, sets no bar's width or offset, and never
+    tells two traces apart by color alone. ``short_value_ticks`` is the chart's
+    registry row's (#596, D110): see :func:`override_problems`.
 
     Total (#484, D099): for any input it returns a list of strings and never raises. A
     figure that is not a JSON value of bounded depth gets :func:`json_problems`' alone,
@@ -906,6 +935,7 @@ def figure_problems(figure: Any, *, short_value_ticks: bool = False) -> list[str
         return structural
     problems = [
         *slot_problems(figure),
+        *trace_type_problems(figure),
         *color_problems(figure),
         *markup_problems(figure),
         *override_problems(figure, short_value_ticks=short_value_ticks),
