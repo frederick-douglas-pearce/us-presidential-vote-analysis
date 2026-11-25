@@ -548,14 +548,14 @@ fieldset.filter legend { padding: 0; }
    1.75rem (or a pair's margin-block from 76rem, so D102(b)'s pair spacing holds inside
    a card at every width), a .filters box's 1rem, or, for a chart first (.chart has no
    margin), its title paragraph's 1em collapsing through the figure. The States list
-   (ul, margin 0) would touch the rule, so it takes 1rem; so does a block of headline
-   figures that opens a card (the state history's, #634, D122), whose dl's 0.5rem
-   collapses through its unclassed wrapper and would leave the rule too close.
+   (ul, margin 0) would touch the rule, so it takes 1rem; so does the state history's
+   .figures block, which opens its card (#634, D122), and whose dl's 0.5rem alone
+   would leave the rule too close.
    No side edge or side padding (the owner's choice at #567's plan gate), so a card
    takes no width from a table or a chart. */
 .card { border-block: 1px solid var(--card-edge); padding-block: 0 1rem; margin-block: 2rem; }
 .card > .states:first-child { margin-top: 1rem; }
-.card > :first-child > .metrics:first-child { margin-top: 1rem; }
+.card > .figures:first-child { margin-top: 1rem; }
 .provenance-footer { margin-top: 2.5rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); }
 /* The readable measure. T1 and the States list are here too: at full width their few
    short columns would spread thin. A chart's caption and a table's party notes are

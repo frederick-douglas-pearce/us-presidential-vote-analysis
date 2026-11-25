@@ -1967,7 +1967,7 @@ class TestLayoutRules:
             (None, ".card"),
             (None, ".card > .states:first-child"),
             # The state history's figures open its card (#634, D122).
-            (None, ".card > :first-child > .metrics:first-child"),
+            (None, ".card > .figures:first-child"),
         ], found
 
     def test_the_header_comment_describes_the_layout(self) -> None:

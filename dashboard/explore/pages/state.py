@@ -484,7 +484,9 @@ def _figures(
                 labels.METRIC_ALL_YEARS_NOTE, id=METRICS_ALL_YEARS_ID, className="note"
             )
         )
-    return html.Div(block, id=METRICS_ID)
+    # The class the card's top-space rule names, where the figures open the card
+    # (#634, D122(e)); layout rules name classes, never ids (D111).
+    return html.Div(block, id=METRICS_ID, className="figures")
 
 
 class Part(NamedTuple):

@@ -1571,9 +1571,10 @@ class TestWideLayout:
         # #560, D106; #618, D117; #619, D118; #620, D119: the lede is added by
         # layout(), so the whole page is checked there: the heading, the lede and the
         # page body, nothing between. In the body, the section links first (#559,
-        # D105), then the page-local Location (#620); then one card holding the Years
-        # slider in a row of its own, C7's heading, its headline figures (#601, D115),
-        # C7, C10's heading, C10, the heading of the table the two share, the table in
+        # D105), then the page-local Location (#620); then one card holding the
+        # headline figures (#601, D115), the Years slider in a row of its own (#634,
+        # D122), C7's heading, C7, C10's heading, C10, the heading of the table the two
+        # share, the table in
         # its scroll box, its download, its notes and its column-name list; then the
         # footer. Two charts, C7 and C10; no T4 and no dropdown.
         cached_client(monkeypatch)
@@ -1607,12 +1608,13 @@ class TestWideLayout:
         assert type(label).__name__ == "Label"
         assert (label.children, label.htmlFor) == (labels.YEARS_FILTER, MOD["YEARS_ID"])
         assert slider.id == MOD["YEARS_ID"]
-        charts_card = charts_card[1:]
-        assert charts_card[1].children == MOD["C7_HEADING"]
-        assert charts_card[2].id == charts.dom_id(MOD["C7_ID"])
-        assert charts_card[3].children == MOD["C10_HEADING"]
-        assert charts_card[4].id == charts.dom_id(MOD["C10_ID"])
-        assert charts_card[5].children == MOD["ELECTORS_TOTALS_TABLE_HEADING"]
+        # What follows the figures and the slider's box.
+        charts_card = charts_card[2:]
+        assert charts_card[0].children == MOD["C7_HEADING"]
+        assert charts_card[1].id == charts.dom_id(MOD["C7_ID"])
+        assert charts_card[2].children == MOD["C10_HEADING"]
+        assert charts_card[3].id == charts.dom_id(MOD["C10_ID"])
+        assert charts_card[4].children == MOD["ELECTORS_TOTALS_TABLE_HEADING"]
         # The one table and its column-name list follow both charts, in their card.
         assert find(charts_card, MOD["ELECTORS_TABLE_ID"]) is not None
         assert find(charts_card, MOD["ELECTORS_GLOSSARY_ID"]) is not None
@@ -3437,14 +3439,16 @@ class TestStateFigures:
         assert st_figure(tree, ELECTIONS_COUNT) == "7 elections (1824–2024)"
         assert [len(s) for s in seen] == [50] and all(isinstance(s, set) for s in seen)
 
-    def test_they_sit_in_c7_s_card_after_its_heading_and_before_the_chart(
-        self,
-    ) -> None:
+    def test_they_open_c7_s_card_above_the_filter(self) -> None:
+        """#634 (D122): the figures are the card's first child, before the Years
+        filter's box and so before C7's heading and C7."""
         tree = render()
         card = in_one_card(tree, ST_FIGURES, total=1)
-        assert find(card, charts.dom_id(MOD["C7_ID"])) is not None
-        order = [getattr(n, "id", None) for n in components._within(card.children)]
-        assert order.index(ST_FIGURES) < order.index(charts.dom_id(MOD["C7_ID"]))
+        held = list(card.children)
+        assert held[0].id == ST_FIGURES
+        assert "filters" in held[1].className.split()
+        assert find(held[1], YEARS) is not None
+        assert find(held[2:], charts.dom_id(MOD["C7_ID"])) is not None
 
     def test_the_page_still_makes_the_same_requests(
         self, monkeypatch: pytest.MonkeyPatch
@@ -4220,7 +4224,9 @@ class TestCardOrder:
     above what it narrows and below what it does not. The state history's one card
     opens with the headline figures (unfiltered, no heading of their own), then the
     Years filter, then C7, C10 and their table. Each case pins the card's direct
-    children exactly and checks that its render took its branch."""
+    children in order through the table's heading (the empty range's whole card), checks
+    that no filter or heading follows the table's heading, and checks that its render
+    took its branch."""
 
     def keys(self, tree: Any) -> list[tuple[str, str]]:
         (card,) = every_card(tree)
@@ -4246,6 +4252,12 @@ class TestCardOrder:
         tail = list(card.children)[7:]
         assert find(tail, ELECTORS) is not None
         assert find(tail, MOD["ELECTORS_GLOSSARY_ID"]) is not None
+        # The block the card's top-space rule names (D122(e)): the wrapper's class,
+        # and the figures' dl first in it.
+        figures = list(card.children)[0]
+        assert figures.className == "figures"
+        first = list(figures.children)[0]
+        assert type(first).__name__ == "Dl" and first.className == "metrics"
 
     def test_a_narrowed_range(self) -> None:
         tree = render("year_from=1900&year_to=1990")
@@ -4272,7 +4284,8 @@ class TestCardOrder:
         assert find(tree, ST_FIGURES) is None
         assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
         assert c10_figure(tree) is not None
-        assert self.keys(tree)[:6] == [
+        keys = self.keys(tree)
+        assert keys[:6] == [
             FILTERS_KEY,
             C7_HEADING_KEY,
             ("P", MOD["C7_UNAVAILABLE_ID"]),
@@ -4280,6 +4293,12 @@ class TestCardOrder:
             ("Figure", C10_DOM),
             TABLE_HEADING_KEY,
         ]
+        assert FILTERS_KEY not in keys[6:]
+        assert all(kind != "H2" for kind, _ in keys[6:])
+        (card,) = every_card(tree)
+        tail = list(card.children)[6:]
+        assert find(tail, ELECTORS) is not None
+        assert find(tail, MOD["ELECTORS_GLOSSARY_ID"]) is not None
 
     @pytest.mark.parametrize(
         ("usps", "query"),
@@ -4289,12 +4308,13 @@ class TestCardOrder:
             ("TX", "year_from=1850&year_to=1850"),
         ],
     )
-    def test_nothing_above_the_filter_changes_with_it(
+    def test_nothing_the_card_shows_above_the_filter_changes_with_it(
         self, usps: str, query: str
     ) -> None:
-        """AC1, tied to the placement: what the card holds above the filter is the
+        """AC1, tied to the placement: the text the card shows above the filter is the
         same under the default and a narrowed range, but for the all-years note, which
-        names the filter and narrows nothing (D122)."""
+        names the filter and narrows nothing (D122(d)). The section links above the card
+        carry the range in their hrefs (D119(e)), which this does not read."""
 
         def above(tree: Any) -> list[str]:
             (card,) = every_card(tree)
