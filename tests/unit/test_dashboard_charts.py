@@ -651,14 +651,45 @@ class TestTraceTypes:
     def test_every_live_chart_draws_only_scatter_and_bar(
         self, live_figures: dict[str, Any]
     ) -> None:
-        """C1–C10 within the allow-list, so it refuses no shipped chart."""
+        """Every registered live chart's default view draws only allowed types; the
+        filtered and degraded views are ``TestEveryChart``'s (``CHART_QUERIES``)."""
         drawn = {
-            trace.get("type", "scatter")
+            each.get("type", "scatter")
             for figure in live_figures.values()
-            for trace in figure["data"]
+            for each in figure["data"]
         }
         assert drawn <= charts.TRACE_TYPES
         assert drawn  # the premise: the live charts draw traces
+
+    def test_frames_are_refused(self) -> None:
+        """``dcc.Graph`` passes ``frames`` to plotly, which can animate to a trace of
+        any type the figure's data does not hold."""
+        figure = {
+            "data": [trace("bar")],
+            "frames": [{"data": [{"type": "heatmap", "z": [[1, 2]]}]}],
+        }
+        assert charts.figure_problems(figure) == [
+            "frames: a chart draws only the traces in its data"
+        ]
+
+    @pytest.mark.parametrize("key", ["updatemenus", "sliders"])
+    def test_a_restyling_control_is_refused(self, key: str) -> None:
+        """A button's or step's ``restyle`` args can set a trace's ``type``."""
+        control = {"method": "restyle", "args": [{"type": "heatmap"}], "label": "m"}
+        items = "buttons" if key == "updatemenus" else "steps"
+        figure = {"data": [trace("bar")], "layout": {key: [{items: [control]}]}}
+        assert charts.figure_problems(figure) == [
+            f"layout.{key}: no control may restyle a chart"
+        ]
+
+    @pytest.mark.parametrize("value", [[], None, {}, "x"])
+    def test_frames_and_controls_are_refused_on_any_value(self, value: Any) -> None:
+        for figure in (
+            {"data": [], "frames": value},
+            {"data": [], "layout": {"updatemenus": value}},
+            {"data": [], "layout": {"sliders": value}},
+        ):
+            assert charts.trace_type_problems(figure) != [], figure
 
 
 class TestMarkupNumbersAndOverrides:
@@ -1874,12 +1905,16 @@ SAMPLES: dict[str, list[Any]] = {
 #: Slots a check reads by name that ``SLOT_KINDS`` does not list by anchor: ``data`` and
 #: ``layout``, the figure's own (``figure_problems`` checks both); slots whose own rule
 #: pins the value whatever its kind (a trace's ``legend``, refused unless exactly
-#: ``"legend"``; a bar's ``width`` and ``offset``, ``config`` and the layout's fixed
-#: keys, each refused on any value); and the template keys, declared under ``any``.
+#: ``"legend"``; a bar's ``width`` and ``offset``, ``config``, ``frames``, the layout's
+#: fixed keys and its ``updatemenus`` and ``sliders`` (#638), each refused on any
+#: value); and the template keys, declared under ``any``.
 OTHER_READS = {
     "data",
     "layout",
     "config",
+    "frames",
+    "layout.updatemenus",
+    "layout.sliders",
     "data[i].legend",
     "data[i].width",
     "data[i].offset",
