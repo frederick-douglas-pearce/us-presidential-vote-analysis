@@ -171,6 +171,32 @@ def test_wide_the_per_capita_page_s_year_control_has_its_own_row_above_t7(
     assert table["top"] >= own["bottom"]
 
 
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+def test_the_state_history_s_years_filter_sits_between_the_figures_and_c7(
+    page: Page, width: int
+) -> None:
+    """The state history's one filter (#620, D119) in the new order (#634, D122): at
+    every width its box sits below the headline figures and above C7's heading; at
+    1280 and 1850 px the slider's box takes its own row with the control at the
+    measure (#545's rule), and at 1100 and 390 px it fills the filters box as
+    before."""
+    success = open_at(page, STATE_PATH, width)
+    own = own_row(page, success)
+    box = rect(page, f"{success} .filters")
+    figures = rect(page, STATE_FIGURES)
+    heading = rect(page, f"{success} .card > h2:first-of-type")
+    assert figures["bottom"] <= box["top"] + 0.5, (width, figures, box)
+    assert box["bottom"] <= heading["top"] + 0.5, (width, box, heading)
+    assert abs(own["width"] - box["width"]) <= 0.5, (width, own, box)
+    held = rects(page, f"{success} .filters > .filter-own-row > *")
+    assert held and all(h["width"] <= MEASURE_PX + 0.5 for h in held), held
+    control = rect(page, f"{success} .filter-own-row {STATE_YEARS}")
+    if width in WIDE_WIDTHS:
+        assert abs(control["width"] - MEASURE_PX) <= 0.5, (width, control)
+    else:
+        assert control["width"] <= box["width"] + 0.5, (width, control, box)
+
+
 @pytest.mark.parametrize("width", [390, NARROW_DESKTOP])
 @pytest.mark.parametrize("path", [RESULTS_PATH, PER_CAPITA_PATH, CANDIDATE_PATH])
 def test_narrow_the_filters_stack_as_before(
