@@ -908,6 +908,7 @@ class TestTemplate:
             "scrollZoom": False,
             "displayModeBar": False,
             "responsive": True,
+            "topojsonURL": "/assets/",
         }
 
 

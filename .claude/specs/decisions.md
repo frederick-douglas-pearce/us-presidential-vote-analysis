@@ -7773,6 +7773,19 @@ The architect's review preferred a tile grid on cost and phone reach. The owner 
 - The deploy-root allow-list case for the topojson file.
 - The e2e phone checks and the no-CDN-request check.
 
+**Amendment (#637, 2026-11-25; architect review and owner approval at its plan gate).** (i) and (j) are resolved for the file and its guards; the map itself remains #623's.
+- **Build step.** `scripts/build_usa_topojson.py` (stdlib only, outside the deploy root) pins Natural Earth **5.1.2** (`ne_110m_admin_1_states_provinces_lakes.geojson` at the `v5.1.2` tag of `nvkelso/natural-earth-vector`, sha256 `8e048ee20587e124e74de5c6bfeea8132ab2313a8f7f4f97e043617f8f37f7f6`). It refuses any other bytes before writing. The source is committed, public domain, as `tests/fixtures/natural_earth/`, so a test rebuilds the shipped file byte for byte. The script is in mypy's `files`, and `.gitattributes` keeps both files' bytes.
+- **Encoding.** Quantized (10^5 steps per axis), delta-encoded, one arc per ring. Borders are not shared between neighbors: plotly.js 4.1.1 draws each feature's fill and outline from the feature, so sharing would change only the size.
+- **Winding.** d3-geo, which plotly.js draws with and which does not rewind, reads an exterior ring as clockwise. The build refuses an exterior that is not clockwise and a hole that is not counter-clockwise (planar, on the quantized points). The source's 60 exterior rings are clockwise and it has no holes.
+- **Alaska and Hawaii** are in the file at their true positions. The `albers usa` projection in (c) insets them.
+- **Size.** 27,406 bytes raw, 10,165 gzipped (level 6) (plotly's own file: 68,514 and 23,369). Dash's asset route serves it, as it serves `style.css`, uncompressed by the app (Flask-Compress passes a streamed file through), so the gzipped size is the file's, not the app's response.
+- **Guards.** `test_dashboard_topojson.py` checks:
+  - the roster (ids equal the recording's 51 `state_usps`, and each `properties` is `{"gu": "USA"}`);
+  - closed key sets at the top level, in `provenance` and on each geometry;
+  - winding, the served bytes at `CHART_CONFIG["topojsonURL"] + "usa_110m.json"`, and the rebuild.
+
+  `_deploy_root_file_allowed` admits `explore/assets/usa_110m.json` by exact path. `test_only_chart_config_names_topojson_url` is a tripwire: the key is set once, in `CHART_CONFIG`.
+
 ## D122: On a state's history page the headline figures open the card, above the Years filter; a filter sits directly above what it narrows
 
 **Date:** 2026-11-24

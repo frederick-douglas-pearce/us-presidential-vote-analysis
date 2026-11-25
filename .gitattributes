@@ -1,0 +1,5 @@
+# Byte-exact files (#637): the Natural Earth source's sha256 is pinned, and the shipped
+# outlines are checked byte for byte against a rebuild. A line-ending rewrite of either
+# would break both checks, so git leaves their bytes alone.
+tests/fixtures/natural_earth/*.geojson -text
+dashboard/explore/assets/usa_110m.json -text
