@@ -146,7 +146,17 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 # for the same reason: the budget kill-switch's tests load deploy/killswitch/main.py
 # by path, and it is the code authorized to pause the live API and dashboard.
 # `dashboard` joined in #277: the public dashboard's app package (`dashboard/explore/`).
-files = ["src", "tests", "tooling", "deploy", "dashboard"]
+# `scripts/build_usa_topojson.py` joined in #637, alone (the rest of `scripts/` is not
+# checked): it decides the bytes of the one geometry file the dashboard's deploy root
+# admits, and its tests load it by path, so mypy would otherwise check only the calls.
+files = [
+    "src",
+    "tests",
+    "tooling",
+    "deploy",
+    "dashboard",
+    "scripts/build_usa_topojson.py",
+]
 # Pragmatic strictness (issue #19): require annotations and surface the common
 # unsoundness (implicit Optional, unreachable code, silently-Any returns, stale
 # ignores). Not full `strict = true` yet — `disallow_any_*` would drown in the

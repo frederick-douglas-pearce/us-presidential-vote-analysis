@@ -7773,6 +7773,25 @@ The architect's review preferred a tile grid on cost and phone reach. The owner 
 - The deploy-root allow-list case for the topojson file.
 - The e2e phone checks and the no-CDN-request check.
 
+**Amendment (#637, 2026-11-25; architect review and owner approval at its plan gate; amended at its code review, round 1, on the architect's scope ruling and the owner's decisions).** (i) and (j) are resolved for the file and its guards; the map itself remains #623's.
+- **What plotly.js 4.1.1 reads, completed.** (i) lists `properties.gu` and `id`. Plotly also reads `properties.ct` for `USA-states`: it anchors a location's hover label and click point there (`h.ct = d.properties.ct`; the choropleth's hover returns `c2p(s.ct)`), and computes it itself only for `geojson-id`. Without it, hover and `plotly_click` (the only touch path, (g)) break. Plotly's own `usa_110m.json` carries it on all 51 subunits. So each geometry's `properties` is exactly `{"ct": [lon, lat], "gu": "USA"}`.
+- **`ct` is the area-weighted centroid of the state's largest polygon**, computed on the quantized points that ship and rounded to 2 decimals (about 1 km), as in plotly's own file. The plain mean of the vertices, which is plotly's own rule for `geojson-id` and the architect's first ruling, puts FL (in the Gulf), MD and NJ outside their states at this resolution. The area-weighted centroid keeps all 51 inside, within 0.13° of plotly's own values (owner, option 1).
+- **Build step.** `scripts/build_usa_topojson.py` (stdlib only, outside the deploy root) pins Natural Earth **5.1.2** (`ne_110m_admin_1_states_provinces_lakes.geojson` at the `v5.1.2` tag of `nvkelso/natural-earth-vector`, sha256 `8e048ee20587e124e74de5c6bfeea8132ab2313a8f7f4f97e043617f8f37f7f6`, matching a fetch of that URL on 2026-11-25). It refuses any other bytes before writing, and a source the build refuses (a `BuildError`, such as a null geometry) is a clean refusal that writes nothing. The source is committed, public domain, as `tests/fixtures/natural_earth/`, so a test rebuilds the shipped file byte for byte. The script is in mypy's `files`, and `.gitattributes` keeps both files' bytes.
+- **Encoding.** Quantized (10^5 steps per axis), delta-encoded, one arc per ring. Borders are not shared between neighbors: plotly.js draws each feature's fill and outline from the feature, so sharing would change only the size. A ring that is not closed, has fewer than 4 points counting its closing point, or has no area once quantized is refused.
+- **Winding.** d3-geo, which plotly.js draws with and which does not rewind, reads an exterior ring as clockwise. The build refuses an exterior that is not clockwise and a hole that is not counter-clockwise (planar, on the quantized points). The source's 60 exterior rings are clockwise and it has no holes, and plotly's own file follows the same convention (65 of 65 exterior rings, measured the same way).
+- **Alaska and Hawaii** are in the file at their true positions. The `albers usa` projection in (c) insets them.
+- **Size, measured 2026-11-25:** 28,426 bytes raw and 10,604 gzipped (`gzip -6 -n`). Plotly's own file is 68,514 and 23,369. From the app's test client, a request sending a browser's `Accept-Encoding: gzip, deflate, br, zstd` got the file back as zstd (10,702 bytes), as it got `style.css`, while one sending only `gzip` got it uncompressed: Flask-Compress compresses a streamed response only with zstd, br or deflate. What a browser receives through the front end is #623's measurement.
+- **Guards.** `test_dashboard_topojson.py` checks:
+  - the roster (ids equal the recording's 51 `state_usps`, and `properties` is `{ct, gu}` with `gu` "USA");
+  - each `ct` (two floats to 2 decimals, inside its own state);
+  - every key the file holds, with its shape (top level, `bbox`, `transform`, `provenance` (its `source` among them), each geometry);
+  - winding, the served bytes at `CHART_CONFIG["topojsonURL"] + "usa_110m.json"`, the rebuild, and the build's refusals.
+
+  `_deploy_root_file_allowed` admits `explore/assets/usa_110m.json` by exact path. No figure carries its own config because `charts.figure_problems` refuses a `config` key (`TestColorAllowlist.test_a_figure_that_is_not_a_plain_chart_figure_fails`), and graphs receive only `CHART_CONFIG` (`TestMountCallback`). `test_only_chart_config_names_topojson_url` is a tripwire on the key's one spelling.
+- **#623's Guards gain** two e2e checks:
+  - a hover and a `plotly_click` on a large state (TX, say) return that state's location and hover text, the click at phone width too;
+  - each drawn state path's bounding box is far smaller than the geo frame, which catches an inverted ring (it still draws a path).
+
 ## D122: On a state's history page the headline figures open the card, above the Years filter; a filter sits directly above what it narrows
 
 **Date:** 2026-11-24

@@ -248,11 +248,16 @@ TEMPLATE: dict[str, Any] = {
 #: The config every chart's graph takes, and no chart overrides: no plotly logo, no
 #: scroll zoom, and no toolbar (owner, #432's plan gate: the companion table's CSV is
 #: the data download), so no plotly.js text reaches a reader; resized with its box.
+#: ``topojsonURL`` points a map's outline fetch at the dashboard's own assets, where
+#: ``usa_110m.json`` (built from Natural Earth) is served, never at plotly's CDN
+#: (D121(i)). The path is absolute, since a relative one would resolve under the page's
+#: own path (``/state/TX/``); ``app.py`` refuses any prefix but ``/``.
 CHART_CONFIG: dict[str, Any] = {
     "displaylogo": False,
     "scrollZoom": False,
     "displayModeBar": False,
     "responsive": True,
+    "topojsonURL": "/assets/",
 }
 
 #: The template's defaults no figure may override (#432's review): plotly lets a
