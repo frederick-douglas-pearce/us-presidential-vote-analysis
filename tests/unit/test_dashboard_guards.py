@@ -1523,7 +1523,7 @@ def _deploy_root_file_allowed(relative: Path) -> bool:
     # The /states map's state outlines (D121(i)): geometry built from Natural Earth
     # (public domain), not election data, so D070(b)'s rule against bundling a copy of
     # the data stands. Admitted by its exact path only. What keeps it geometry is
-    # tests/unit/test_dashboard_topojson.py: closed key sets at every level, the
+    # tests/unit/test_dashboard_topojson.py: every key named with its shape, the
     # served roster, and a byte-exact rebuild from the pinned source.
     if relative == Path("explore/assets/usa_110m.json"):
         return True
@@ -1567,24 +1567,27 @@ def test_the_deploy_root_allow_list(relative: str, allowed: bool) -> None:
 
 def test_only_chart_config_names_topojson_url() -> None:
     """``topojsonURL`` is set once, as a key of the ``CHART_CONFIG`` literal in
-    ``charts.py``, and named nowhere else in the runtime (D121(i)).
+    ``explore/charts.py``, and named nowhere else under ``explore/`` (D121(i)): no other
+    module, no keyword argument, and no script asset (Dash serves ``assets/*.js``).
 
-    A tripwire, not the guarantee. No figure carries its own config because a figure is
-    ``data`` and ``layout`` only, and the one config a graph receives is the one the
-    mount callback puts in (``charts._GRAPH_JSON``'s ``props``), pinned by
+    A tripwire, not the guarantee. No figure carries its own config because
+    ``charts.figure_problems`` refuses a figure with a ``config`` key, pinned by
+    ``TestColorAllowlist.test_a_figure_that_is_not_a_plain_chart_figure_fails`` (its
+    ``{"data": [], "config": {}}`` case); and the one config a graph receives is the one
+    the mount callback puts in (``charts._GRAPH_JSON``'s ``props``), pinned by
     ``TestMountCallback.test_its_text_returns_dccs_own_graph_with_the_shared_config_hidden``
     and ``TestMountCallback.test_no_runtime_module_builds_a_graph``, with the config's
     value pinned by ``TestTemplate.test_the_config`` (all in test_dashboard_charts.py).
     This catches a second spelling of the key in code; a key built at run time would
     pass it.
     """
+    charts = PACKAGE / "charts.py"
     elsewhere = [
         str(p.relative_to(REPO))
-        for p in RUNTIME_MODULES
-        if p.name != "charts.py" and "topojsonURL" in p.read_text(encoding="utf-8")
+        for p in [*RUNTIME_MODULES, *PACKAGE.rglob("*.js")]
+        if p != charts and "topojsonURL" in p.read_text(encoding="utf-8")
     ]
     assert elsewhere == []
-    charts = PACKAGE / "charts.py"
     tree = ast.parse(charts.read_text(encoding="utf-8"))
     as_key = [
         target.id
@@ -1604,8 +1607,14 @@ def test_only_chart_config_names_topojson_url() -> None:
         and isinstance(node.value, str)
         and "topojsonURL" in node.value
     ]
+    keywords = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.keyword) and node.arg == "topojsonURL"
+    ]
     assert as_key == ["CHART_CONFIG"]
     assert len(strings) == 1
+    assert keywords == []
 
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))

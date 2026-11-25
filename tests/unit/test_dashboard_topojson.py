@@ -1,10 +1,11 @@
 """The /states map's state outlines, ``dashboard/explore/assets/usa_110m.json`` (D121(i), (j)).
 
-The file is the one non-code, non-CSS file the deploy root admits
-(``_deploy_root_file_allowed`` in ``test_dashboard_guards.py``), and these tests are what
-make that entry mean "geometry": closed key sets at every level, the served roster as the
-authority for its ids, and a byte-exact rebuild from the pinned Natural Earth source,
-committed as ``tests/fixtures/natural_earth/`` (public domain). The build step is
+The file is the one file under ``explore/`` that the deploy root admits and that is
+neither Python nor CSS (``_deploy_root_file_allowed`` in ``test_dashboard_guards.py``).
+These tests are what make that entry mean "geometry": closed key sets and pinned shapes
+for every key the file holds, the served roster as the authority for its ids, and a
+byte-exact rebuild from the pinned Natural Earth source, committed as
+``tests/fixtures/natural_earth/`` (public domain). The build step is
 ``scripts/build_usa_topojson.py``, loaded by path.
 
 Plotly.js reading the file and drawing 51 states is #623's e2e check (D121 Guards).
@@ -81,7 +82,24 @@ def _decode(arc: list[list[int]]) -> list[tuple[int, int]]:
     return points
 
 
+def _lonlat(topo: dict[str, Any], arc: list[list[int]]) -> list[tuple[float, float]]:
+    (kx, ky), (tx, ty) = topo["transform"]["scale"], topo["transform"]["translate"]
+    return [(qx * kx + tx, qy * ky + ty) for qx, qy in _decode(arc)]
+
+
+def _inside(point: list[float], ring: list[tuple[float, float]]) -> bool:
+    """Even-odd ray cast: whether ``point`` lies inside the closed ``ring``."""
+    x, y = point
+    crossings = False
+    for (x1, y1), (x2, y2) in zip(ring, ring[1:], strict=False):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            crossings = not crossings
+    return crossings
+
+
 def _twice_area(ring: list[tuple[int, int]]) -> int:
+    """Signed planar area, written here rather than imported from the builder on
+    purpose: an independent oracle cannot share a bug with the code it checks."""
     return sum(
         x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(ring, ring[1:], strict=False)
     )
@@ -102,11 +120,44 @@ class TestRoster:
         assert set(ids) == served
 
     def test_every_geometry_carries_gu_usa(self, topology: dict[str, Any]) -> None:
-        assert all(g["properties"] == {"gu": "USA"} for g in _geometries(topology))
+        for g in _geometries(topology):
+            assert set(g["properties"]) == {"ct", "gu"}, g["id"]
+            assert g["properties"]["gu"] == "USA", g["id"]
+
+
+class TestCenters:
+    """``properties.ct``: where plotly.js 4.1.1 anchors a state's hover label and click
+    point (``h.ct = d.properties.ct``), read from the file for ``USA-states``."""
+
+    def test_each_is_a_lon_lat_pair_to_two_decimals(
+        self, topology: dict[str, Any]
+    ) -> None:
+        for g in _geometries(topology):
+            ct = g["properties"]["ct"]
+            assert len(ct) == 2 and all(type(v) is float for v in ct), g["id"]
+            assert all(round(v, 2) == v for v in ct), g["id"]
+
+    def test_each_sits_inside_its_own_state(self, topology: dict[str, Any]) -> None:
+        """Inside a polygon's exterior and outside its holes. The plain mean of the
+        vertices would put FL, MD and NJ outside (#637's review)."""
+        outside = []
+        for g in _geometries(topology):
+            ct = g["properties"]["ct"]
+            if not any(
+                _inside(ct, _lonlat(topology, topology["arcs"][polygon[0][0]]))
+                and not any(
+                    _inside(ct, _lonlat(topology, topology["arcs"][hole[0]]))
+                    for hole in polygon[1:]
+                )
+                for polygon in _polygons(g)
+            ):
+                outside.append(g["id"])
+        assert outside == []
 
 
 class TestClosedKeys:
-    """Nothing but geometry and its provenance can ride in the file."""
+    """Every key the file holds is named here, with its shape; the rebuild below pins
+    the values."""
 
     def test_its_top_level_keys(self, topology: dict[str, Any]) -> None:
         assert topology["type"] == "Topology"
@@ -119,6 +170,11 @@ class TestClosedKeys:
             "provenance",
         }
         assert set(topology["transform"]) == {"scale", "translate"}
+        bbox = topology["bbox"]
+        assert len(bbox) == 4 and all(type(v) is float for v in bbox)
+        for key in ("scale", "translate"):
+            pair = topology["transform"][key]
+            assert len(pair) == 2 and all(type(v) is float for v in pair), key
 
     def test_its_one_object_is_subunits(self, topology: dict[str, Any]) -> None:
         assert set(topology["objects"]) == {"subunits"}
@@ -135,6 +191,7 @@ class TestClosedKeys:
         provenance = topology["provenance"]
         assert set(provenance) == PROVENANCE_KEYS
         assert all(isinstance(v, str) for v in provenance.values())
+        assert provenance["source"] == builder.SOURCE_NAME
         assert provenance["sha256"] == builder.SOURCE_SHA256
         assert provenance["version"] == builder.NE_VERSION
         assert provenance["url"] == builder.SOURCE_URL
@@ -222,6 +279,9 @@ class TestBuiltFromNaturalEarth:
         )
         assert builder.dumps(topo).encode("utf-8") == ASSET.read_bytes()
 
+    def test_the_default_output_is_the_shipped_file(self) -> None:
+        assert builder.DEFAULT_OUT == ASSET
+
     def test_main_writes_the_shipped_file(self, tmp_path: Path) -> None:
         out = tmp_path / "usa_110m.json"
         assert builder.main(["--source", str(SOURCE), "--out", str(out)]) == 0
@@ -232,6 +292,18 @@ class TestBuiltFromNaturalEarth:
     ) -> None:
         source = tmp_path / "other.geojson"
         source.write_bytes(SOURCE.read_bytes() + b" ")
+        out = tmp_path / "usa_110m.json"
+        assert builder.main(["--source", str(source), "--out", str(out)]) == 1
+        assert not out.exists()
+
+    def test_main_refuses_a_source_it_cannot_build_and_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pinned source that ``build`` refuses is a clean refusal, not a traceback."""
+        raw = json.dumps(_collection(_feature("AA", None))).encode("utf-8")  # type: ignore[arg-type]
+        source = tmp_path / "pinned.geojson"
+        source.write_bytes(raw)
+        monkeypatch.setattr(builder, "SOURCE_SHA256", hashlib.sha256(raw).hexdigest())
         out = tmp_path / "usa_110m.json"
         assert builder.main(["--source", str(source), "--out", str(out)]) == 1
         assert not out.exists()
@@ -249,8 +321,12 @@ class TestServed:
         assert response.get_data() == ASSET.read_bytes()
 
     def test_no_page_links_it(self) -> None:
-        """Dash auto-includes only CSS and JS from assets/; plotly.js fetches the file."""
-        page = appmod.server.test_client().get("/").get_data(as_text=True)
+        """Dash auto-includes only CSS and JS from assets/; plotly.js fetches the file.
+        The stylesheet's link is the control: it shows the scan sees asset links."""
+        response = appmod.server.test_client().get("/")
+        assert response.status_code == 200
+        page = response.get_data(as_text=True)
+        assert "/assets/style.css" in page
         assert "usa_110m" not in page
 
 
@@ -259,6 +335,17 @@ class TestServed:
 SQUARE = [[0.0, 0.0], [0.0, 10.0], [10.0, 10.0], [10.0, 0.0], [0.0, 0.0]]  # clockwise
 HOLE = [[2.0, 2.0], [8.0, 2.0], [8.0, 8.0], [2.0, 8.0], [2.0, 2.0]]  # counter-clockwise
 ISLAND = [[12.0, 0.0], [12.0, 3.0], [15.0, 3.0], [15.0, 0.0], [12.0, 0.0]]
+#: Clockwise. Its vertex mean (3.67, 3.67) and its area-weighted centroid
+#: (54.5 / 19 = 2.868..., the same in y) differ, which is what pins the rule.
+ELL = [
+    [0.0, 0.0],
+    [0.0, 10.0],
+    [1.0, 10.0],
+    [1.0, 1.0],
+    [10.0, 1.0],
+    [10.0, 0.0],
+    [0.0, 0.0],
+]
 
 
 def _feature(
@@ -291,8 +378,47 @@ class TestBuild:
         assert len(geometries[0]["arcs"]) == 2
         assert geometries[1]["type"] == "MultiPolygon"
         assert [len(p) for p in geometries[1]["arcs"]] == [1, 1]
-        assert all(g["properties"] == {"gu": "USA"} for g in geometries)
+        assert all(g["properties"]["gu"] == "USA" for g in geometries)
         assert topo["provenance"]["sha256"] == "x"
+
+    def test_ct_is_the_area_weighted_centroid_rounded_to_two_decimals(self) -> None:
+        topo = builder.build(
+            _collection(_feature("AA", {"type": "Polygon", "coordinates": [ELL]})),
+            source_sha256="x",
+        )
+        assert _geometries(topo)[0]["properties"]["ct"] == [2.87, 2.87]
+
+    def test_ct_follows_the_largest_polygon_wherever_it_is_listed(self) -> None:
+        topo = builder.build(
+            _collection(
+                _feature(
+                    "AA", {"type": "MultiPolygon", "coordinates": [[ISLAND], [SQUARE]]}
+                )
+            ),
+            source_sha256="x",
+        )
+        assert _geometries(topo)[0]["properties"]["ct"] == [5.0, 5.0]
+
+    def test_ct_counts_a_hole_against_its_polygon(self) -> None:
+        """A hole off-center moves the centroid away from it."""
+        hole = [[1.0, 1.0], [4.0, 1.0], [4.0, 4.0], [1.0, 4.0], [1.0, 1.0]]
+        topo = builder.build(
+            _collection(
+                _feature("AA", {"type": "Polygon", "coordinates": [SQUARE, hole]})
+            ),
+            source_sha256="x",
+        )
+        # (100 * 5 - 9 * 2.5) / 91 = 5.247...
+        assert _geometries(topo)[0]["properties"]["ct"] == [5.25, 5.25]
+
+    def test_a_four_point_ring_is_accepted(self) -> None:
+        """The smallest ring: three distinct points and the closing one."""
+        triangle = [[0.0, 0.0], [0.0, 10.0], [10.0, 0.0], [0.0, 0.0]]
+        topo = builder.build(
+            _collection(_feature("AA", {"type": "Polygon", "coordinates": [triangle]})),
+            source_sha256="x",
+        )
+        assert len(_decode(topo["arcs"][0])) == 4
 
     def test_quantized_points_decode_back_within_one_step(self) -> None:
         topo = builder.build(
@@ -325,6 +451,33 @@ class TestBuild:
                 "hole is not counter-clockwise",
             ),
             (_feature("AA", {"type": "Point", "coordinates": [0, 0]}), "unsupported"),
+            (_feature("AA", None), "not a polygon"),  # type: ignore[arg-type]
+            (
+                _feature("AA", {"type": "Polygon", "coordinates": [SQUARE[:-1]]}),
+                "not closed",
+            ),
+            (
+                _feature(
+                    "AA",
+                    {
+                        "type": "Polygon",
+                        "coordinates": [[[0.0, 0.0], [10.0, 10.0], [0.0, 0.0]]],
+                    },
+                ),
+                "fewer than 4 points",
+            ),
+            (
+                _feature(
+                    "AA",
+                    {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [[0.0, 0.0], [5.0, 5.0], [10.0, 10.0], [0.0, 0.0]]
+                        ],
+                    },
+                ),
+                "no area",
+            ),
         ],
     )
     def test_it_refuses(self, feature: dict[str, Any], message: str) -> None:
@@ -342,7 +495,8 @@ class TestBuild:
             )
 
     def test_it_refuses_a_ring_that_collapses_when_quantized(self) -> None:
-        """Never padded or dropped: a ring below 4 distinct points is an error."""
+        """Never padded or dropped: a ring left with fewer than 4 points, counting its
+        closing point (so 3 distinct), is an error."""
         speck = [[5.0, 5.0], [5.0, 5.0000001], [5.0000001, 5.0000001], [5.0, 5.0]]
         with pytest.raises(builder.BuildError, match="fewer than 4 points"):
             builder.build(

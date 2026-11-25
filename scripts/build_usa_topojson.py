@@ -15,10 +15,14 @@ from ``geo.scope: "usa"`` and ``resolution: 110``).
 
 **The shape plotly.js 4.1.1 reads.** It takes ``objects["subunits"]``, keeps only the
 features whose ``properties.gu`` is ``"USA"``, and matches a location against the
-feature's ``id``. So the file holds one object, ``subunits``, with one geometry per
-state and DC. Each geometry's ``id`` is its USPS code (Natural Earth's ``postal``), and
-its ``properties`` is exactly ``{"gu": <gu_a3>}``, because Natural Earth names that
-field ``gu_a3``.
+feature's ``id``. It then anchors that location's hover label and click point at
+``properties.ct`` (``h.ct = d.properties.ct``; the choropleth's hover returns
+``c2p(s.ct)``), which it computes itself only for ``geojson-id`` and reads from the file
+for ``USA-states`` (#637's code review). So the file holds one object, ``subunits``,
+with one geometry per state and DC. Each geometry's ``id`` is its USPS code (Natural
+Earth's ``postal``), and its ``properties`` is exactly ``{"ct": [lon, lat], "gu":
+<gu_a3>}``: Natural Earth names the second field ``gu_a3``, and ``ct`` is the
+area-weighted centroid of the state's largest polygon (:func:`_centroid`).
 
 **The encoding.** Coordinates are quantized (a ``transform`` of :data:`QUANTIZATION`
 steps per axis) and delta-encoded, and each ring is its own arc. Neighbors' borders are
@@ -29,7 +33,10 @@ sharing would change only the file's size.
 does not rewind rings, reads an exterior ring as clockwise; a counter-clockwise one
 fills everything except the state. :func:`build` refuses an exterior ring that is not
 clockwise, or a hole that is not counter-clockwise (planar, in lon/lat, on the quantized
-points that ship). The pinned source passes as it is.
+points that ship). The pinned source passes as it is, and plotly's own ``usa_110m.json``
+follows the same convention (its 65 exterior rings, checked once in #637's review). A
+ring that is not closed, has fewer than 4 points counting its closing point, or has no
+area once quantized is refused too.
 
 **Provenance rides inside the file** (D085), as a top-level ``provenance`` object
 plotly.js does not read: source, version, URL, sha256, license and this build step.
@@ -56,6 +63,8 @@ SOURCE_SHA256 = "8e048ee20587e124e74de5c6bfeea8132ab2313a8f7f4f97e043617f8f37f7f
 LICENSE = "public domain"
 BUILD_STEP = "scripts/build_usa_topojson.py"
 QUANTIZATION = 100_000
+#: ``ct``'s precision, as in plotly's own file: 0.01 degree is about 1 km.
+CT_DECIMALS = 2
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = REPO / "dashboard" / "explore" / "assets" / "usa_110m.json"
@@ -67,8 +76,10 @@ class BuildError(ValueError):
     """The source cannot be turned into the file plotly.js reads."""
 
 
-def _rings(geometry: dict[str, Any]) -> list[list[list[list[float]]]]:
+def _rings(geometry: Any) -> list[list[list[list[float]]]]:
     """A geometry's polygons, each a list of rings, whatever its type."""
+    if not isinstance(geometry, dict):
+        raise BuildError(f"a feature's geometry is {geometry!r}, not a polygon")
     kind = geometry.get("type")
     if kind == "Polygon":
         return [geometry["coordinates"]]
@@ -82,6 +93,30 @@ def _twice_area(ring: Sequence[Point]) -> int:
     return sum(
         x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(ring, ring[1:], strict=False)
     )
+
+
+def _centroid(polygons: Sequence[Sequence[Sequence[Point]]]) -> tuple[float, float]:
+    """``ct``: the area-weighted centroid of the largest polygon, on the quantized
+    points, in quantized units (the caller converts it to lon/lat and rounds it).
+
+    Holes count against the polygon: an exterior runs clockwise and a hole
+    counter-clockwise, so their signed areas and moments subtract. The plain mean of
+    the vertices, plotly's rule for ``geojson-id``, puts FL, MD and NJ's centers outside
+    their states at this resolution; this one keeps all 51 inside and within 0.13
+    degree of plotly's own file (owner, #637's review)."""
+
+    def moments(polygon: Sequence[Sequence[Point]]) -> tuple[int, int, int]:
+        twice_area = cx = cy = 0
+        for ring in polygon:
+            for (x1, y1), (x2, y2) in zip(ring, ring[1:], strict=False):
+                cross = x1 * y2 - x2 * y1
+                twice_area += cross
+                cx += (x1 + x2) * cross
+                cy += (y1 + y2) * cross
+        return twice_area, cx, cy
+
+    twice_area, cx, cy = max((moments(p) for p in polygons), key=lambda m: abs(m[0]))
+    return cx / (3 * twice_area), cy / (3 * twice_area)
 
 
 def _encode(ring: Sequence[Point]) -> list[list[int]]:
@@ -118,10 +153,15 @@ def build(geojson: dict[str, Any], *, source_sha256: str) -> dict[str, Any]:
             point = (round((x - x0) / kx), round((y - y0) / ky))
             if not out or out[-1] != point:
                 out.append(point)
-        if len(out) < 4 or out[0] != out[-1]:
+        if out[0] != out[-1]:
+            raise BuildError(f"{label}: a ring is not closed")
+        if len(out) < 4:
             raise BuildError(
-                f"{label}: a ring has fewer than 4 points after quantizing"
+                f"{label}: a ring has fewer than 4 points after quantizing, "
+                "counting its closing point"
             )
+        if _twice_area(out) == 0:
+            raise BuildError(f"{label}: a ring has no area after quantizing")
         return out
 
     arcs: list[list[list[int]]] = []
@@ -139,10 +179,13 @@ def build(geojson: dict[str, Any], *, source_sha256: str) -> dict[str, Any]:
         # TopoJSON nests arc indexes: a ring is a list of arcs (here always one), a
         # Polygon a list of rings, a MultiPolygon a list of Polygons.
         polygons: list[list[list[int]]] = []
+        shapes: list[list[list[Point]]] = []
         for polygon in _rings(feature["geometry"]):
             indexes: list[list[int]] = []
+            shape: list[list[Point]] = []
             for i, ring in enumerate(polygon):
                 quantized = quantize(ring, code)
+                shape.append(quantized)
                 clockwise = _twice_area(quantized) < 0
                 if i == 0 and not clockwise:
                     raise BuildError(f"{code}: an exterior ring is not clockwise")
@@ -151,11 +194,14 @@ def build(geojson: dict[str, Any], *, source_sha256: str) -> dict[str, Any]:
                 indexes.append([len(arcs)])
                 arcs.append(_encode(quantized))
             polygons.append(indexes)
+            shapes.append(shape)
+        qx, qy = _centroid(shapes)
+        ct = [round(qx * kx + x0, CT_DECIMALS), round(qy * ky + y0, CT_DECIMALS)]
         geometries[code] = (
             {"type": "Polygon", "arcs": polygons[0]}
             if len(polygons) == 1
             else {"type": "MultiPolygon", "arcs": polygons}
-        ) | {"id": code, "properties": {"gu": gu}}
+        ) | {"id": code, "properties": {"ct": ct, "gu": gu}}
 
     return {
         "type": "Topology",
@@ -194,7 +240,9 @@ def _fetch(url: str) -> bytes:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Build the US state outlines the /states map draws (D121(i))."
+    )
     parser.add_argument("--source", type=Path, help="a local copy of the source")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
@@ -207,7 +255,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    topology = build(json.loads(raw), source_sha256=digest)
+    try:
+        topology = build(json.loads(raw), source_sha256=digest)
+    except BuildError as error:
+        print(f"{error}; nothing written", file=sys.stderr)
+        return 1
     args.out.write_text(dumps(topology), encoding="utf-8", newline="\n")
     print(f"wrote {args.out}", file=sys.stderr)
     return 0
