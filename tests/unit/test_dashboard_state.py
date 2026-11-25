@@ -1591,23 +1591,24 @@ class TestWideLayout:
         charts_card = card_children(content, 2)
         assert [type(k).__name__ for k in charts_card[:7]] == [
             "Div",
-            "H2",
             "Div",
+            "H2",
             "Figure",
             "H2",
             "Figure",
             "H2",
         ]
-        # The card opens with the slider's box, its row of its own (#545's rule).
-        (own,) = classed(charts_card[0], "filter-own-row")
+        # The card opens with the figures, then the slider's box, its row of its own
+        # (#545's rule), above only what it narrows (#634, D122).
+        assert charts_card[0].id == MOD["METRICS_ID"]
+        (own,) = classed(charts_card[1], "filter-own-row")
         assert "filter" in own.className.split()
         label, slider = own.children
         assert type(label).__name__ == "Label"
         assert (label.children, label.htmlFor) == (labels.YEARS_FILTER, MOD["YEARS_ID"])
         assert slider.id == MOD["YEARS_ID"]
         charts_card = charts_card[1:]
-        assert charts_card[0].children == MOD["C7_HEADING"]
-        assert charts_card[1].id == MOD["METRICS_ID"]
+        assert charts_card[1].children == MOD["C7_HEADING"]
         assert charts_card[2].id == charts.dom_id(MOD["C7_ID"])
         assert charts_card[3].children == MOD["C10_HEADING"]
         assert charts_card[4].id == charts.dom_id(MOD["C10_ID"])
@@ -3908,9 +3909,10 @@ class TestYearsFilter:
 
     def test_a_range_holding_no_election_shows_the_note(self) -> None:
         """I1 (#620's architect review): the slider steps by one year, so a range can
-        hold no election. The slider, C7's heading and the figures with the all-years
-        note stay, then :data:`labels.STATE_NO_ELECTIONS_IN_RANGE` in place of both
-        charts and the table; the success marker and section links stay."""
+        hold no election. The figures with the all-years note and the slider stay, then
+        :data:`labels.STATE_NO_ELECTIONS_IN_RANGE` in place of both charts and the
+        table, with no section heading before it (#634, D122); the success marker and
+        section links stay."""
         query = "year_from=1850&year_to=1850"
         tree = render(query, usps="TX")
         assert tree.id == PAGE_ID
@@ -3936,14 +3938,13 @@ class TestYearsFilter:
         for key in ST_FIGURE_IDS:
             assert st_figure(tree, key) == st_figure(plain, key), key
         assert find(tree, ALL_YEARS) is not None
-        # The one card: the slider, C7's heading, the figures, then the note.
+        # The one card: the figures, the slider, then the note (#634, D122).
         card = in_one_card(tree, NO_MATCH, total=1)
         held = list(card.children)
-        assert [type(k).__name__ for k in held] == ["Div", "H2", "Div", "P"]
-        assert find(held[0], YEARS) is slider
-        assert held[1].children == MOD["C7_HEADING"]
-        assert held[2].id == ST_FIGURES
-        assert held[3] is note
+        assert [type(k).__name__ for k in held] == ["Div", "Div", "P"]
+        assert held[0].id == ST_FIGURES
+        assert find(held[1], YEARS) is slider
+        assert held[2] is note
         _, results, per_capita = section_entries(tree)
         assert results.href == f"/state/TX/elections?{query}"
         assert per_capita.href == f"/state/TX/per-capita?{query}"
@@ -4189,3 +4190,119 @@ class TestCallback:
             assert PAGE_ID in routed_ids(route(path, shown)), (path, shown)
         assert calls == []
         assert len(bucket.waits) == waits
+
+
+# --- the card's order: the figures above the Years filter (#634, D122) ------------------
+
+
+def card_key(node: Any) -> tuple[str, str]:
+    """A card child as (type, what tells it apart): its id, a heading's text, or, with
+    neither, its classes (``filters`` alone for the filters box, which has no id)."""
+    kind = type(node).__name__
+    if kind == "H2":
+        return kind, node.children
+    ident = getattr(node, "id", None)
+    if ident is not None:
+        return kind, ident
+    classes = (getattr(node, "className", None) or "").split()
+    return kind, "filters" if "filters" in classes else " ".join(classes)
+
+
+FIGURES_KEY = ("Div", ST_FIGURES)
+FILTERS_KEY = ("Div", "filters")
+C7_HEADING_KEY = ("H2", MOD["C7_HEADING"])
+C10_HEADING_KEY = ("H2", MOD["C10_HEADING"])
+TABLE_HEADING_KEY = ("H2", MOD["ELECTORS_TOTALS_TABLE_HEADING"])
+
+
+class TestCardOrder:
+    """#634 (D122, amending D115(g), D117(a), D119(c), (d)): a filter sits directly
+    above what it narrows and below what it does not. The state history's one card
+    opens with the headline figures (unfiltered, no heading of their own), then the
+    Years filter, then C7, C10 and their table. Each case pins the card's direct
+    children exactly and checks that its render took its branch."""
+
+    def keys(self, tree: Any) -> list[tuple[str, str]]:
+        (card,) = every_card(tree)
+        return [card_key(k) for k in card.children]
+
+    def test_the_default_view(self) -> None:
+        tree = render()
+        assert find(tree, ALL_YEARS) is None and find(tree, NO_MATCH) is None
+        keys = self.keys(tree)
+        assert keys[:7] == [
+            FIGURES_KEY,
+            FILTERS_KEY,
+            C7_HEADING_KEY,
+            ("Figure", charts.dom_id(MOD["C7_ID"])),
+            C10_HEADING_KEY,
+            ("Figure", C10_DOM),
+            TABLE_HEADING_KEY,
+        ]
+        # Only the table and its column-name list follow its heading.
+        assert FIGURES_KEY not in keys[7:] and FILTERS_KEY not in keys[7:]
+        assert all(kind != "H2" for kind, _ in keys[7:])
+        (card,) = every_card(tree)
+        tail = list(card.children)[7:]
+        assert find(tail, ELECTORS) is not None
+        assert find(tail, MOD["ELECTORS_GLOSSARY_ID"]) is not None
+
+    def test_a_narrowed_range(self) -> None:
+        tree = render("year_from=1900&year_to=1990")
+        # The branch: a narrower range applies, so the all-years note shows, inside
+        # the figures block, above the filter.
+        note = find(tree, ALL_YEARS)
+        assert note is not None
+        assert find(find(tree, ST_FIGURES), ALL_YEARS) is note
+        assert self.keys(tree) == self.keys(render())
+
+    def test_a_range_holding_no_election(self) -> None:
+        tree = render("year_from=1850&year_to=1850", usps="TX")
+        assert find(tree, NO_MATCH) is not None and find(tree, ALL_YEARS) is not None
+        # No section heading before the note: it stands for C7, C10 and the table.
+        assert self.keys(tree) == [FIGURES_KEY, FILTERS_KEY, ("P", NO_MATCH)]
+
+    def test_c7_unreadable(self) -> None:
+        body = ga_body()
+        (first, *_) = [r for r in body["data"] if r["year"] == 1900]
+        first["state_electoral_votes"] = 99
+        tree = render(body=body)
+        # The branch: C7's collapse is unreadable, so the figures go with it, and C10
+        # stays.
+        assert find(tree, ST_FIGURES) is None
+        assert find(tree, MOD["C7_UNAVAILABLE_ID"]) is not None
+        assert c10_figure(tree) is not None
+        assert self.keys(tree)[:6] == [
+            FILTERS_KEY,
+            C7_HEADING_KEY,
+            ("P", MOD["C7_UNAVAILABLE_ID"]),
+            C10_HEADING_KEY,
+            ("Figure", C10_DOM),
+            TABLE_HEADING_KEY,
+        ]
+
+    @pytest.mark.parametrize(
+        ("usps", "query"),
+        [
+            ("GA", "year_from=1900&year_to=1990"),
+            ("GA", "year_to=1872"),
+            ("TX", "year_from=1850&year_to=1850"),
+        ],
+    )
+    def test_nothing_above_the_filter_changes_with_it(
+        self, usps: str, query: str
+    ) -> None:
+        """AC1, tied to the placement: what the card holds above the filter is the
+        same under the default and a narrowed range, but for the all-years note, which
+        names the filter and narrows nothing (D122)."""
+
+        def above(tree: Any) -> list[str]:
+            (card,) = every_card(tree)
+            held = list(card.children)
+            at = [card_key(k) for k in held].index(FILTERS_KEY)
+            return [t for k in held[:at] for t in texts(k)]
+
+        narrowed = above(render(query, usps=usps))
+        plain = above(render(usps=usps))
+        assert narrowed[-1] == labels.METRIC_ALL_YEARS_NOTE
+        assert narrowed[:-1] == plain

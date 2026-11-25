@@ -204,8 +204,9 @@ def test_every_width_keeps_order_measure_and_tables(
 @pytest.mark.plotlyjs_fetches(1)
 def test_the_state_history_shows_one_years_filter_and_no_t4(page: Page) -> None:
     """T4 and its filters left the history for the results page (#619, D118); its
-    one filter since #620 (D119) is the Years slider, labeled, above C7's heading in
-    the page's one card, with no dropdown and no popular-vote checkbox."""
+    one filter since #620 (D119) is the Years slider, labeled, with no dropdown and no
+    popular-vote checkbox. In the page's one card it sits below the headline figures,
+    which it does not narrow, and above C7's heading (#634, D122)."""
     open_at(page, STATE_PATH, 390)
     for gone in ("#state-results", "#state-history", "#state-years"):
         expect(page.locator(gone)).to_have_count(0)
@@ -220,6 +221,8 @@ def test_the_state_history_shows_one_years_filter_and_no_t4(page: Page) -> None:
     )
     slider = rect(page, STATE_YEARS)
     heading = rect(page, f"{STATE_SUCCESS} .card > h2:first-of-type")
+    figures = rect(page, STATE_FIGURES)
+    assert figures["bottom"] <= slider["top"], (figures, slider)
     assert slider["bottom"] <= heading["top"], (slider, heading)
     assert slider["right"] <= 390, slider
 
@@ -619,8 +622,9 @@ def test_the_years_slider_writes_the_url_and_back_and_forward_restore_it(
 @pytest.mark.plotlyjs_fetches(0)
 def test_a_range_holding_no_election_shows_the_note(page: Page) -> None:
     """#620 (I1): on Texas, 1850 alone holds no election: the note stands in place of
-    C7, C10 and their table, the slider, C7's heading and the figures (with the
-    all-years note) stay, and no chart mounts, so plotly.js is not fetched."""
+    C7, C10 and their table, directly under the slider with no section heading
+    (#634, D122); the figures (with the all-years note) above the slider stay, and no
+    chart mounts, so plotly.js is not fetched."""
     page.goto("/state/TX?year_from=1850&year_to=1850")
     assert_rendered(page, STATE_SUCCESS)
     expect(page.locator(STATE_NO_MATCH)).to_have_text(
@@ -629,6 +633,7 @@ def test_a_range_holding_no_election_shows_the_note(page: Page) -> None:
     expect(page.locator(STATE_YEARS)).to_have_count(1)
     expect(page.locator("#state-history-metrics")).to_be_visible()
     expect(page.locator("#state-history-metrics-all-years")).to_be_visible()
+    expect(page.locator(f"{STATE_SUCCESS} .card h2")).to_have_count(0)
     for gone in (C7, C10, "#state-electors"):
         expect(page.locator(gone)).to_have_count(0)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

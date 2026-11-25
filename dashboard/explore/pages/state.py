@@ -85,7 +85,8 @@ METRICS_ALL_YEARS_ID = "state-history-metrics-all-years"
 
 #: The headline figures (#601, D112(e), (g), D115): the block and each figure's value,
 #: by metric key, in display order, the page's one per-key table (D114(d)); DOM ids are
-#: stable and never renamed (D097(g)). In C7's card, after its heading.
+#: stable and never renamed (D097(g)). First in C7's card, above the Years filter,
+#: which does not reach them (#634, D122).
 METRICS_ID = "state-history-metrics"
 METRIC_IDS = {
     "state_elections_count": "state-elections-count",
@@ -418,8 +419,8 @@ def _figures(
     shares), and in how many its
     electors cast a vote for the candidate who took office (this page's alone: it needs
     the candidate rows). Unfiltered: ``records`` is C7's whole collapse, so the Years
-    filter never reaches them (D112(g), D115(g), D119), and while it applies a narrower
-    range (``narrowed``) a note says so.
+    filter never reaches them (D112(g), D115(g), D119), and they sit above it (#634,
+    D122); while it applies a narrower range (``narrowed``) a note says so.
 
     An allotment no figure can read makes every figure unrecognized (D120); a
     ``pv_status`` fault, the popular-vote count alone; a took-office fault, the
@@ -736,7 +737,8 @@ def _controls(chosen: Range) -> html.Div:
             ),
         ],
         # The filters box, whose margin gives the card its space under its top rule
-        # (#567, D111), as on the state's per-capita page.
+        # where it opens the card (#567, D111), as on the state's per-capita page; the
+        # figures open it wherever C7's collapse was read (#634, D122).
         className="filters filter-row",
     )
 
@@ -750,10 +752,11 @@ def _charts_section(
     chosen: Range,
     year_min: int,
 ) -> tuple[list[Any], bool]:
-    """C7 and C10's one section (#560, #582, #618, #620; D106, D113, D117, D119): the
-    Years slider, C7's heading, the headline figures (#601, D115), C7, C10's heading,
-    C10, then the table the two share and its column-name list, for the state's rows
-    from the API path ``source``.
+    """C7 and C10's one section (#560, #582, #618, #620, #634; D106, D113, D117, D119,
+    D122): the headline figures (#601, D115), the Years slider, C7's heading, C7,
+    C10's heading, C10, then the table the two share and its column-name list, for the
+    state's rows from the API path ``source``. The slider sits directly above what it
+    narrows and below the figures, which it does not (D122).
 
     ``full`` is each chart's whole collapse (:func:`collapsed`), ``None`` where it
     cannot be read. With neither, there is nothing to narrow: no slider, and the
@@ -764,10 +767,11 @@ def _charts_section(
     note first among the table's, while the other chart, its column and the page stay.
     What shows outside each chart's place follows the collapses, never whether a chart
     was drawn (a drawing reads the narrowed records, so it could depend on the range;
-    D119(c), (d)): the slider, and the figures, which read C7's whole collapse and show
-    under C7's heading wherever it was read, whether or not C7 was drawn. Where the
-    range holds no election, :data:`explore.labels.STATE_NO_ELECTIONS_IN_RANGE` stands
-    in place of both charts and the table. ``components.chart`` and the table are built
+    D119(c), (d)): the slider, and the figures, which read C7's whole collapse and open
+    the card wherever it was read, whether or not C7 was drawn. Where the range holds
+    no election, :data:`explore.labels.STATE_NO_ELECTIONS_IN_RANGE` stands in place of
+    both charts and the table, directly under the slider with no section heading
+    (D122). ``components.chart`` and the table are built
     after both ``try`` blocks (D095(f)). Returns the content and whether the slider
     rendered, the one source :func:`render` passes on for the filter sentence."""
     electors_full, totals_full = full
@@ -797,16 +801,22 @@ def _charts_section(
         None if records is None else narrow(records, chosen)
         for records in (electors_full, totals_full)
     ]
-    content: list[Any] = [_controls(chosen), html.H2(C7_HEADING)]
-    if electors_full is not None:
-        content.append(_figures(electors_full, rows, chosen.narrowed))
+    # The figures first, then the filter above only what it narrows (#634, D122).
+    content: list[Any] = (
+        []
+        if electors_full is None
+        else [_figures(electors_full, rows, chosen.narrowed)]
+    )
+    content.append(_controls(chosen))
     if not any(shown):
+        # In place of C7, C10 and the table, so no section heading before it (D122).
         content.append(
             html.P(
                 labels.STATE_NO_ELECTIONS_IN_RANGE, id=NO_MATCH_ID, className="empty"
             )
         )
         return content, True
+    content.append(html.H2(C7_HEADING))
     electors_shown, totals_shown = shown
     c7 = (
         None
@@ -922,8 +932,8 @@ def render(
         [
             state_view.section_nav(usps, state_view.HISTORY, applied_search(chosen)),
             dcc.Location(id=URL_ID, refresh="callback-nav"),
-            # The page's one section (#567, D111; #618, D117): C7 and C10 with the
-            # table they share, under the Years slider (#620, D119).
+            # The page's one section (#567, D111; #618, D117): the figures, then the
+            # Years slider (#620, D119; #634, D122) over C7 and C10 with their table.
             components.card(section),
             components.provenance_footer(provenance),
         ],

@@ -780,8 +780,8 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Elections in which a state appointed electors (count)
 - **Plain:** On a state's history page: how many elections in this dataset the state appointed electors in, with the earliest and latest. An election in which the state appointed no electors (Georgia in 1864) is left out, so the number can be smaller than the years the electors chart shows; a note names the years left out.
 - **Precise:** The number of years on `/v1/states/{usps}` whose one allotment, collapsed by `electors()` (`state_electoral_votes`), `state_view.allotment` reads as greater than 0: an `int` (never a `bool`) that `labels.finite` accepts. In reader text this is "appointed electors", never "took part" (D115). First and last are the earliest and latest of those years. It is unfiltered: the history page's Years filter does not reach it (D119), and the filters on the results by election page (`/state/<usps>/elections`) do not reach it (D112(g)), and it matches C7's companion table at its default range (the state's whole span). If any year's allotment is not an `int` 0 or above that `labels.finite` accepts (`state_view.allotment`), all five state figures read *Unrecognized value* and C7 stays (D120). If the collapse itself fails, because a year's allotments disagree, C7's chart gives way to its note, the table's electors column reads *Not available right now*, and the figures go with it (D112(c); #618). With no year above 0 it reads `labels.METRIC_NO_FIGURE_NO_ELECTORS`. While it shows a number and some year's allotment is exactly 0, `labels.METRIC_ZERO_ALLOTMENT_NOTE` names those years through `labels.metric_years`. Recorded Georgia: 50 elections (1824–2024); C7 shows 51 years, and 1864 is left out.
-- **Shown as:** `labels.METRIC_LABELS["state_elections_count"]`; the value through `labels.metric_elections` (`labels.METRIC_COUNT_ELECTIONS`, `labels.METRIC_COUNT_ELECTIONS_ONE`); `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ZERO_ALLOTMENT_NOTE`; `labels.METRIC_ALL_YEARS_NOTE`, under the figures while the Years filter applies a narrower range than the state's span (#620); `labels.UNRECOGNIZED`. On `/state/<usps>`, in `state-history-metrics` inside the card C7 and C10 share, after its heading and before the chart; the value `state-elections-count` (`pages/state.py`).
-- **Source:** #569; #601; D112(c), (e), (g); D115; `EcPvRow.state_electoral_votes` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #601, approved at its plan gate.
+- **Shown as:** `labels.METRIC_LABELS["state_elections_count"]`; the value through `labels.metric_elections` (`labels.METRIC_COUNT_ELECTIONS`, `labels.METRIC_COUNT_ELECTIONS_ONE`); `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ZERO_ALLOTMENT_NOTE`; `labels.METRIC_ALL_YEARS_NOTE`, under the figures while the Years filter applies a narrower range than the state's span (#620); `labels.UNRECOGNIZED`. On `/state/<usps>`, in `state-history-metrics`, first in the card C7 and C10 share, with no heading of its own, above the Years slider, which does not reach it (#634); the value `state-elections-count` (`pages/state.py`).
+- **Source:** #569; #601; D112(c), (e), (g); D115; #634 (placement above the Years filter); `EcPvRow.state_electoral_votes` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #601, approved at its plan gate.
 - **Not:** The years with rows. Elections the state's people voted in. A count of electors.
 - **Status:** settled
 
@@ -1475,15 +1475,16 @@ articles and announcements). Every rule binds all three unless the rule states a
   `/elections/over-time`, it is one note in place of the chart or charts, their companion table
   and its download; the heading, lede, filter sentence, section links, filters and provenance
   footer stay, and the page keeps its success marker. A failed summary read shows that section's
-  unavailable sentence instead. On `/state/<usps>`, it stands in place of C7, C10 and their table
-  when the Years filter leaves no election (for example 1849–1851 for Texas); the heading, lede,
-  filter sentence, slider, section links, headline figures with `labels.METRIC_ALL_YEARS_NOTE`, and
-  footer stay, and the page keeps its success marker.
+  unavailable sentence instead. On `/state/<usps>`, it stands in place of C7, C10 and their table,
+  directly after the Years slider with no section heading before it, when the Years filter leaves
+  no election (for example 1849–1851 for Texas); the heading, lede, filter sentence, section
+  links, the headline figures above the slider with `labels.METRIC_ALL_YEARS_NOTE`, the slider,
+  and footer stay, and the page keeps its success marker (#634).
 - **Shown as:** `labels.NO_ELECTIONS_MATCH` (T1's empty text in `pages/elections.py`, and the note
   on the two chart pages); `labels.STATE_NO_ELECTIONS_IN_RANGE` (`/state/<usps>`, #620).
 - **Source:** #596 acceptance criteria (owner, 2026-11-20); D110; `ba` spec for #596; T1's empty
   text since #306; #620 and D119 (the state history's form; `ba` spec for #620, approved at its
-  plan gate).
+  plan gate); #634 (order).
 - **Not:** *Degraded state*. *Not-found state*. `components.NO_ROWS`, which other tables show
   ("rows"). *No average*. "No data": the elections are in this dataset; the filters leave none shown.
 - **Status:** settled
