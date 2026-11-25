@@ -94,8 +94,9 @@ DROPDOWNS = {
 def open_at(page: Page, path: str, width: int) -> str:
     """``path`` rendered from data at ``width``; returns its success marker. On the
     state history it waits for C7 and C10 to be drawn too (#560, #582): the charts
-    mount after plotly.js loads, above the filters, so a measurement taken before then
-    can see them move by the charts' height."""
+    mount after plotly.js loads, below the figures and the Years filter, so a
+    measurement of what follows a chart (C10, the table) taken before then can see it
+    move by the chart's height."""
     page.set_viewport_size({"width": width, "height": 900})
     page.goto(path)
     success = PAGES[path][0]
@@ -170,6 +171,32 @@ def test_wide_the_per_capita_page_s_year_control_has_its_own_row_above_t7(
     assert table["top"] >= own["bottom"]
 
 
+@pytest.mark.parametrize("width", [*WIDE_WIDTHS, NARROW_DESKTOP, 390])
+def test_the_state_history_s_years_filter_sits_between_the_figures_and_c7(
+    page: Page, width: int
+) -> None:
+    """The state history's one filter (#620, D119) in the new order (#634, D122): at
+    every width its box sits below the headline figures and above C7's heading; at
+    1280 and 1850 px the slider's box takes its own row with the control at the
+    measure (#545's rule), and at 1100 and 390 px it fills the filters box as
+    before."""
+    success = open_at(page, STATE_PATH, width)
+    own = own_row(page, success)
+    box = rect(page, f"{success} .filters")
+    figures = rect(page, STATE_FIGURES)
+    heading = rect(page, f"{success} .card > h2:first-of-type")
+    assert figures["bottom"] <= box["top"] + 0.5, (width, figures, box)
+    assert box["bottom"] <= heading["top"] + 0.5, (width, box, heading)
+    assert abs(own["width"] - box["width"]) <= 0.5, (width, own, box)
+    held = rects(page, f"{success} .filters > .filter-own-row > *")
+    assert held and all(h["width"] <= MEASURE_PX + 0.5 for h in held), held
+    control = rect(page, f"{success} .filter-own-row {STATE_YEARS}")
+    if width in WIDE_WIDTHS:
+        assert abs(control["width"] - MEASURE_PX) <= 0.5, (width, control)
+    else:
+        assert control["width"] <= box["width"] + 0.5, (width, control, box)
+
+
 @pytest.mark.parametrize("width", [390, NARROW_DESKTOP])
 @pytest.mark.parametrize("path", [RESULTS_PATH, PER_CAPITA_PATH, CANDIDATE_PATH])
 def test_narrow_the_filters_stack_as_before(
@@ -204,8 +231,9 @@ def test_every_width_keeps_order_measure_and_tables(
 @pytest.mark.plotlyjs_fetches(1)
 def test_the_state_history_shows_one_years_filter_and_no_t4(page: Page) -> None:
     """T4 and its filters left the history for the results page (#619, D118); its
-    one filter since #620 (D119) is the Years slider, labeled, above C7's heading in
-    the page's one card, with no dropdown and no popular-vote checkbox."""
+    one filter since #620 (D119) is the Years slider, labeled, with no dropdown and no
+    popular-vote checkbox. In the page's one card it sits below the headline figures,
+    which it does not narrow, and above C7's heading (#634, D122)."""
     open_at(page, STATE_PATH, 390)
     for gone in ("#state-results", "#state-history", "#state-years"):
         expect(page.locator(gone)).to_have_count(0)
@@ -220,6 +248,8 @@ def test_the_state_history_shows_one_years_filter_and_no_t4(page: Page) -> None:
     )
     slider = rect(page, STATE_YEARS)
     heading = rect(page, f"{STATE_SUCCESS} .card > h2:first-of-type")
+    figures = rect(page, STATE_FIGURES)
+    assert figures["bottom"] <= slider["top"], (figures, slider)
     assert slider["bottom"] <= heading["top"], (slider, heading)
     assert slider["right"] <= 390, slider
 
@@ -619,8 +649,9 @@ def test_the_years_slider_writes_the_url_and_back_and_forward_restore_it(
 @pytest.mark.plotlyjs_fetches(0)
 def test_a_range_holding_no_election_shows_the_note(page: Page) -> None:
     """#620 (I1): on Texas, 1850 alone holds no election: the note stands in place of
-    C7, C10 and their table, the slider, C7's heading and the figures (with the
-    all-years note) stay, and no chart mounts, so plotly.js is not fetched."""
+    C7, C10 and their table, directly under the slider with no section heading
+    (#634, D122); the figures (with the all-years note) above the slider stay, and no
+    chart mounts, so plotly.js is not fetched."""
     page.goto("/state/TX?year_from=1850&year_to=1850")
     assert_rendered(page, STATE_SUCCESS)
     expect(page.locator(STATE_NO_MATCH)).to_have_text(
@@ -629,6 +660,7 @@ def test_a_range_holding_no_election_shows_the_note(page: Page) -> None:
     expect(page.locator(STATE_YEARS)).to_have_count(1)
     expect(page.locator("#state-history-metrics")).to_be_visible()
     expect(page.locator("#state-history-metrics-all-years")).to_be_visible()
+    expect(page.locator(f"{STATE_SUCCESS} .card h2")).to_have_count(0)
     for gone in (C7, C10, "#state-electors"):
         expect(page.locator(gone)).to_have_count(0)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

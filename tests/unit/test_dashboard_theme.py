@@ -1963,7 +1963,12 @@ class TestLayoutRules:
             for at, prelude, _ in shipped_rules()
             if re.search(r"\.card\b", prelude)
         ]
-        assert found == [(None, ".card"), (None, ".card > .states:first-child")], found
+        assert found == [
+            (None, ".card"),
+            (None, ".card > .states:first-child"),
+            # The state history's figures open its card (#634, D122).
+            (None, ".card > .figures:first-child"),
+        ], found
 
     def test_the_header_comment_describes_the_layout(self) -> None:
         css = STYLESHEET.read_text(encoding="utf-8")
