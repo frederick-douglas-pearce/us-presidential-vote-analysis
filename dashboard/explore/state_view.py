@@ -14,10 +14,11 @@ body one refuses both refuse.
 
 It also holds the state history's per-year collapse, :func:`electors` read through
 :func:`collapsed` (#640, D120), and its headline figures over the records it returns,
-:func:`history_figures` (#621, D120), so the ``/states`` table and map (#641, #623)
-refuse the same rows and compute exactly what each state's page shows: the rule of an
-election with electors appointed and the popular-vote flag live here, the arithmetic
-in :mod:`explore.metrics`.
+:func:`history_figures` (#621, D120). The ``/states`` table and map (#641, #623) are
+to call the same functions, so that, once each has checked its rows with :func:`rows`
+first as the history page does, they refuse the same rows and compute exactly what
+each state's page shows: the rule of an election with electors appointed and the
+popular-vote flag live here, the arithmetic in :mod:`explore.metrics`.
 
 A shared module, like ``components`` and ``labels``: pure functions of what a page
 already read, importing nothing from ``explore`` but ``labels``, ``metrics``,
@@ -197,10 +198,11 @@ def electors(
 ) -> list[dict[str, Any]]:
     """C7's rows (#560, D106): the state's appointed allotment and popular-vote status,
     one per election from its first, collapsed from ``rows``: one per candidate on the
-    history page (``/v1/states/{usps}``), one per election from N2
-    (``/v1/elections/states``) for the ``/states`` table and map. Moved here from
-    ``pages/state.py`` by #640 (D120), so the page and ``/states`` refuse the same rows
-    before :func:`history_figures` reads them.
+    history page (``/v1/states/{usps}``); one per election from N2
+    (``/v1/elections/states``) for the ``/states`` table and map (#641, #623), which
+    are to call it. Moved here from ``pages/state.py`` by #640 (D120), so that a caller
+    that checks its rows first, as the precondition below says, refuses the same rows
+    as the page before :func:`history_figures` reads them.
 
     **The caller's precondition.** ``rows`` are mappings of one state whose ``year``
     :func:`explore.query.checked_year` accepts and the index serves, as
@@ -240,9 +242,10 @@ def collapsed(
     page's C10 collapse), or ``None`` where its rows cannot be read (a ``KeyError`` or
     ``TypeError``): the history page runs it once per render (#620, D119), so the span,
     the figures and the chart's half read one result, and a fault there takes only
-    that chart. The ``/states`` table and map read a state's N2 rows through the same
-    function (#640, D120), so a fault removes that state's figures there as it does on
-    its page."""
+    that chart. It catches those two only; any other exception propagates
+    (``TestSharedCollapse``). The ``/states`` table and map (#641, #623) are to read a
+    state's N2 rows through the same function (#640, D120), so that a fault removes
+    that state's figures there as it does on its page."""
     try:
         return collapse(rows, served, usps, source)
     except (KeyError, TypeError):
@@ -344,10 +347,11 @@ def popular_vote_flags(
     an unknown code there leaves the count as it is; that year's table cell words it
     (owner, #635's review, ge.5; D120). Raises nothing on the records
     :func:`history_figures` has accepted (mappings with an ``int`` year, one per
-    year); a missing ``pv_status`` reads as null there. Both callers, the history page
-    and the ``/states`` table and map, pass :func:`electors`' records, and that
-    collapse refuses such a row first (#640, D120), so the null reading is reached
-    only by a direct caller."""
+    year); a missing ``pv_status`` reads as null there. Its one caller is
+    :func:`history_figures`, which the history page reaches with :func:`electors`'
+    records, and that collapse refuses such a row first (#640, D120); the ``/states``
+    table and map (#641, #623) are to pass the same records, so the null reading is
+    reached only by a direct caller of :func:`history_figures`."""
     by_year = {r.get("year"): r.get("pv_status") for r in records}
     pairs: list[tuple[int, object]] = []
     for year in years:
@@ -395,13 +399,15 @@ UNRECOGNIZED_HISTORY = HistoryFigures(
 def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
     """The state history's figures over one state's per-year ``records`` (``year``,
     ``state_electoral_votes``, ``pv_status``), the one computation the history page
-    (#621) and the ``/states`` map (#623) share, so the two cannot disagree (D120).
+    (#621) and the ``/states`` table and map (#641, #623) are to share, so the two
+    cannot disagree (D120).
 
-    **One record per year.** The page and the ``/states`` table and map pass C7's
-    collapse, :func:`electors` read through :func:`collapsed` (#640, D120), which
-    guarantees it and refuses a year whose rows disagree, so the two refuse the same
-    rows. This function also refuses a year named twice itself: every figure then
-    reads unrecognized (:data:`UNRECOGNIZED_HISTORY`), since :mod:`explore.metrics`'
+    **One record per year.** The page passes C7's collapse, :func:`electors` read
+    through :func:`collapsed` (#640, D120), which guarantees it and refuses a year
+    whose rows disagree; the ``/states`` table and map are to pass the same, after
+    checking their rows with :func:`rows`, so the two refuse the same rows. This
+    function also refuses a year named twice itself: every figure then reads
+    unrecognized (:data:`UNRECOGNIZED_HISTORY`), since :mod:`explore.metrics`'
     select and change do not detect a repeated year. That is its own totality backstop,
     for a direct caller that skips the collapse.
 

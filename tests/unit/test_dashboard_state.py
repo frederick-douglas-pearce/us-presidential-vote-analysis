@@ -3694,16 +3694,21 @@ class TestFurtherStateFigures:
 
 
 def n2_records() -> dict[str, list[dict[str, Any]]]:
-    """N2's rows, one state's at a time, through C7's per-year collapse, the function
-    the ``/states`` table and map share with each state's page (#640, D120): each
-    state's rows are passed as a list, so the collapse, not this helper, is what finds
-    a year named twice, a disagreement or a gap."""
+    """N2's rows, one state's at a time, along the path the ``/states`` table and map
+    (#641, #623) are to take (#640, D120): the page's row check, ``state_view.rows``,
+    then C7's per-year collapse, ``state_view.electors``, as the history page runs
+    them. The collapse refuses a year whose rows disagree and a gap; it accepts a
+    repeated identical row, so N2's one row per state-year is
+    ``TestN2Fixture.test_count_and_no_repeat``'s check, not this helper's."""
+    path = "/v1/elections/states"
     served = set(state_view.served_years(INDEX))
     by_state: dict[str, list[dict[str, Any]]] = {}
     for row in N2["data"]:
         by_state.setdefault(row["state_usps"], []).append(row)
     return {
-        usps: state_view.electors(rows, served, usps, "/v1/elections/states")
+        usps: state_view.electors(
+            state_view.rows({"data": rows}, usps, served, path), served, usps, path
+        )
         for usps, rows in by_state.items()
     }
 
@@ -3741,7 +3746,8 @@ class TestHistoryFiguresOnN2:
 
 class TestHistoryFiguresRefusals:
     """``state_view.history_figures``' own refusals (#635's review; D120 amended):
-    what the ``/states`` map's input can carry that C7's collapse never passes."""
+    its totality backstop for a caller that passes records C7's collapse did not
+    produce, or rows the page's row check (``state_view.rows``) did not check first."""
 
     @staticmethod
     def records(*rows: tuple[Any, Any]) -> list[dict[str, Any]]:
@@ -3770,7 +3776,10 @@ class TestHistoryFiguresRefusals:
     def test_a_year_that_is_no_int_makes_every_figure_unrecognized(
         self, year: Any
     ) -> None:
-        # ge.4: unreachable from C7's collapse, a rule of the shared function.
+        # ge.4: a rule of the shared function. A float year passes C7's collapse
+        # (``state_series`` reads 1824.0 as the served 1824); the page refuses it
+        # earlier, in ``state_view.rows``, and #641 is to check N2's rows the same
+        # way (#640, D120), so this is the backstop for a caller that does not.
         assert (
             state_view.history_figures(self.records((year, 9), (2024, 16)))
             == state_view.UNRECOGNIZED_HISTORY
@@ -4397,9 +4406,10 @@ def _no_allotment(rows: list[dict[str, Any]]) -> None:
 
 class TestSharedCollapse:
     """C7's per-year collapse lives in ``state_view`` (#640, D120): the history page
-    and the ``/states`` table and map (#641, #623) read a state's rows through the one
-    function, ``state_view.collapsed(state_view.electors, …)``, so they refuse the
-    same rows, and a fault reads as ``None`` (no figures) for both."""
+    reads a state's rows through ``state_view.collapsed(state_view.electors, …)``, and
+    the ``/states`` table and map (#641, #623) are to read N2's through the same call.
+    These tests feed both shapes of rows to it directly: each fault reads as ``None``
+    (no figures) for both. That the ``/states`` render calls it is #641's to guard."""
 
     SOURCE = "/v1/elections/states"
 
@@ -4439,9 +4449,11 @@ class TestSharedCollapse:
         "fault", ["a row without pv_status", "a null status beside a value"]
     )
     def test_the_collapse_changes_what_n2_s_figures_read(self, fault: str) -> None:
-        # Load-bearing (architect Q3): N2's rows through ``over_time.state_series``
-        # alone, keyed by year as before #640, give figures that read as recognized,
-        # where the shared collapse refuses the same rows.
+        # The collapse is stricter than ``over_time.state_series`` alone on these
+        # faults (architect Q3): the same rows, keyed by year (the last of a year's
+        # rows kept) and read by ``state_series`` and ``history_figures``, give figures
+        # that read as recognized, where the shared collapse refuses them. It guards
+        # no caller; the spy below guards the page's.
         rows = self.n2_rows()
         SHARED_FAULTS[fault](rows)
         by_year = {r["year"]: r for r in rows}
@@ -4454,23 +4466,55 @@ class TestSharedCollapse:
     ) -> None:
         # The page cannot fork the collapse: its render calls ``state_view.collapsed``
         # on ``state_view.electors`` with its checked rows (architect Q4).
-        collapses: list[Any] = []
+        # and ``history_figures`` reads the very records that call returned (AC1).
+        calls: list[tuple[Any, Any]] = []
         electors_rows: list[Any] = []
-        real_collapsed, real_electors = state_view.collapsed, state_view.electors
+        figures_input: list[Any] = []
+        real_collapsed = state_view.collapsed
+        real_electors = state_view.electors
+        real_figures = state_view.history_figures
 
         def spy_electors(rows: Any, *args: Any) -> Any:
             electors_rows.append(copy.deepcopy(rows))
             return real_electors(rows, *args)
 
         def spy_collapsed(collapse: Any, *args: Any) -> Any:
-            collapses.append(collapse)
-            return real_collapsed(collapse, *args)
+            result = real_collapsed(collapse, *args)
+            calls.append((collapse, result))
+            return result
+
+        def spy_figures(records: Any) -> Any:
+            figures_input.append(records)
+            return real_figures(records)
 
         monkeypatch.setattr(state_view, "electors", spy_electors)
         monkeypatch.setattr(state_view, "collapsed", spy_collapsed)
+        monkeypatch.setattr(state_view, "history_figures", spy_figures)
         render()
-        assert collapses == [spy_electors, MOD["popular_totals"]]
+        by_collapse = dict(calls)
+        assert len(calls) == 2
+        assert set(by_collapse) == {spy_electors, MOD["popular_totals"]}
         assert electors_rows == [self.page_rows()]
+        assert len(figures_input) == 1
+        assert figures_input[0] is by_collapse[spy_electors]
+
+    @pytest.mark.parametrize("error", [ValueError, AttributeError, IndexError])
+    def test_collapsed_reads_only_its_two_faults_as_none(
+        self, error: type[Exception]
+    ) -> None:
+        # ``collapsed``'s contract (ge.2): a ``KeyError`` or ``TypeError`` is rows that
+        # cannot be read, ``None``; any other exception is a defect and propagates.
+        def raising(exc: type[Exception]) -> Any:
+            def collapse(*_args: Any) -> Any:
+                raise exc("x")
+
+            return collapse
+
+        args: tuple[Any, ...] = ([], set(SERVED), "GA", GA_PATH)
+        assert state_view.collapsed(raising(KeyError), *args) is None
+        assert state_view.collapsed(raising(TypeError), *args) is None
+        with pytest.raises(error):
+            state_view.collapsed(raising(error), *args)
 
     @pytest.mark.parametrize(
         "name", ["electors", "_per_year", "per_year", "collapsed", "Collapse"]

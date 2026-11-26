@@ -10,8 +10,8 @@ and the section links join them (D105, D118). C7 and C10 come from one response,
 collapse its rows, one per candidate, to one per election (D106, D113), and their table
 joins the two collapses on the year (#618, D117). C7's collapse is
 :func:`explore.state_view.electors`, run through :func:`explore.state_view.collapsed`,
-the functions the ``/states`` table and map share (#640, D120); C10's,
-:func:`popular_totals`, is this page's alone. The state is the path
+the functions the ``/states`` table and map (#641, #623) are to share (#640, D120);
+C10's, :func:`popular_totals`, is this page's alone. The state is the path
 (``/state/<usps>``, an item singular as ``/states`` is plural), in upper case as the
 API writes a USPS code. It is validated against the state roster before it is
 formatted into an API path: the latest election's rows (``/v1/elections/{year_max}``,
@@ -349,7 +349,7 @@ def _figures(
     popular vote to choose its electors, the change in its electors from its first
     election to its latest (all four computed by
     :func:`explore.state_view.history_figures`, the computation the ``/states`` map
-    shares), and in how many its
+    is to share), and in how many its
     electors cast a vote for the candidate who took office (this page's alone: it needs
     the candidate rows). Unfiltered: ``records`` is C7's whole collapse, so the Years
     filter never reaches them (D112(g), D115(g), D119), and they sit above it (#634,
