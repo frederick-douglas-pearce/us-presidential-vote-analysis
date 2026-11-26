@@ -984,12 +984,15 @@ def _too_deep(figure: dict[str, Any]) -> None:
 
 #: The ways a test breaks a live chart's own figure (#467, #484): a key the template
 #: fixes; a slot holding a kind its check does not expect (every chart's first trace
-#: names itself); and nesting deeper than any recursive walk can follow, which
-#: ``components.chart`` must refuse before it copies the figure (D099).
+#: names itself); nesting deeper than any recursive walk can follow, which
+#: ``components.chart`` must refuse before it copies the figure (D099); and a trace
+#: type outside ``charts.TRACE_TYPES`` (#638, D121(b′)), on every chart's own
+#: registry row, ``short_value_ticks`` included.
 BREAKAGES: dict[str, Callable[[dict[str, Any]], None]] = {
     "fixed_key": lambda figure: figure["layout"].__setitem__("hovermode", "x unified"),
     "mistyped_slot": lambda figure: figure["data"][0].__setitem__("name", {}),
     "too_deep": _too_deep,
+    "wrong_type": lambda figure: figure["data"][0].__setitem__("type", "heatmap"),
 }
 
 #: What the not-drawn log line names for each breakage (#484): the problem the breakage
@@ -998,6 +1001,7 @@ BREAKAGE_PROBLEMS = {
     "fixed_key": "layout.hovermode: fixed by the template",
     "mistyped_slot": "data[0].name: an object, not a string",
     "too_deep": "nested deeper than",
+    "wrong_type": "data[0].type: 'heatmap', not a chart trace type",
 }
 
 

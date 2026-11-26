@@ -572,6 +572,127 @@ class TestColorIsNeverTheOnlyCarrier:
         assert charts.color_only_pairs(figure) == [(0, 2)]
 
 
+class TestTraceTypes:
+    """#638 (D121(b′)): every trace is a ``scatter`` or a ``bar``, on every chart; a
+    trace with no ``type`` is read as a ``scatter``."""
+
+    def test_the_allow_list_is_scatter_and_bar(self) -> None:
+        """Hand-written: a type admitted there fails here."""
+        expected = frozenset({"scatter", "bar"})
+        assert expected == charts.TRACE_TYPES
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "choropleth",
+            "heatmap",
+            "histogram2d",
+            "densitymap",
+            "surface",
+            "pie",
+            "scattergl",
+            "scattergeo",
+            "",
+            "Scatter",
+            "bar ",
+            None,
+            7,
+            ["bar"],
+        ],
+    )
+    def test_any_other_type_is_refused(self, kind: Any) -> None:
+        figure = {"data": [trace(kind, mode="markers")]}
+        refusal = f"data[0].type: {kind!r}, not a chart trace type (scatter or bar)"
+        problems = charts.figure_problems(figure)
+        # A value that is no string is also refused by its slot kind (#484).
+        assert [p for p in problems if "not a chart trace type" in p] == [refusal]
+
+    def test_a_choropleth_naming_a_coloraxis_is_refused(self) -> None:
+        """No ``colorscale`` key for :func:`charts.color_problems` to see."""
+        figure = {
+            "data": [
+                {
+                    "type": "choropleth",
+                    "coloraxis": "coloraxis",
+                    "locations": ["GA"],
+                    "z": [1],
+                    "hovertemplate": "x",
+                }
+            ]
+        }
+        assert charts.color_problems(figure) == []
+        assert (
+            "data[0].type: 'choropleth', not a chart trace type (scatter or bar)"
+            in charts.figure_problems(figure)
+        )
+
+    def test_only_the_offending_trace_is_named(self) -> None:
+        figure = {"data": [trace("bar"), trace("heatmap"), trace(mode="lines")]}
+        assert charts.trace_type_problems(figure) == [
+            "data[1].type: 'heatmap', not a chart trace type (scatter or bar)"
+        ]
+
+    @pytest.mark.parametrize(
+        "first",
+        [
+            trace(mode="markers"),
+            trace("bar"),
+            {"mode": "markers", "hovertemplate": "x"},
+        ],
+    )
+    def test_scatter_bar_and_no_type_pass(self, first: dict[str, Any]) -> None:
+        assert charts.figure_problems({"data": [first]}) == []
+
+    def test_no_type_is_read_as_a_scatter(self) -> None:
+        """So the scatter-only rule that a trace names its mode still reaches it."""
+        problems = charts.figure_problems({"data": [{"hovertemplate": "x"}]})
+        assert problems == ["data[0].mode: a scatter trace names its mode"]
+
+    def test_every_live_chart_draws_only_scatter_and_bar(
+        self, live_figures: dict[str, Any]
+    ) -> None:
+        """Every registered live chart's default view draws only allowed types. The
+        filtered and absent views (``CHART_QUERIES``) are ``TestEveryChart``'s; any
+        other render that draws a refused type fails the conftest not-drawn check."""
+        drawn = {
+            each.get("type", "scatter")
+            for figure in live_figures.values()
+            for each in figure["data"]
+        }
+        assert drawn <= charts.TRACE_TYPES
+        assert drawn  # the premise: the live charts draw traces
+
+    def test_frames_are_refused(self) -> None:
+        """``dcc.Graph`` passes ``frames`` to plotly, which can animate to a trace of
+        any type the figure's data does not hold."""
+        figure = {
+            "data": [trace("bar")],
+            "frames": [{"data": [{"type": "heatmap", "z": [[1, 2]]}]}],
+        }
+        assert charts.figure_problems(figure) == [
+            "frames: a chart draws only the traces in its data"
+        ]
+
+    @pytest.mark.parametrize("key", ["updatemenus", "sliders"])
+    def test_a_restyling_control_is_refused(self, key: str) -> None:
+        """A button's or step's ``restyle`` args can set a trace's ``type``."""
+        control = {"method": "restyle", "args": [{"type": "heatmap"}], "label": "m"}
+        items = "buttons" if key == "updatemenus" else "steps"
+        figure = {"data": [trace("bar")], "layout": {key: [{items: [control]}]}}
+        assert charts.figure_problems(figure) == [
+            f"layout.{key}: no control may restyle a chart"
+        ]
+
+    @pytest.mark.parametrize("value", [[], None, {}, "x"])
+    def test_frames_and_controls_are_refused_on_any_value(self, value: Any) -> None:
+        for figure in (
+            {"data": [], "frames": value},
+            {"data": [], "layout": {"updatemenus": value}},
+            {"data": [], "layout": {"sliders": value}},
+        ):
+            assert charts.trace_type_problems(figure) != [], figure
+
+
 class TestMarkupNumbersAndOverrides:
     @pytest.mark.parametrize(
         ("text", "refused"),
@@ -1785,12 +1906,16 @@ SAMPLES: dict[str, list[Any]] = {
 #: Slots a check reads by name that ``SLOT_KINDS`` does not list by anchor: ``data`` and
 #: ``layout``, the figure's own (``figure_problems`` checks both); slots whose own rule
 #: pins the value whatever its kind (a trace's ``legend``, refused unless exactly
-#: ``"legend"``; a bar's ``width`` and ``offset``, ``config`` and the layout's fixed
-#: keys, each refused on any value); and the template keys, declared under ``any``.
+#: ``"legend"``; a bar's ``width`` and ``offset``, ``config``, ``frames``, the layout's
+#: fixed keys and its ``updatemenus`` and ``sliders`` (#638), each refused on any
+#: value); and the template keys, declared under ``any``.
 OTHER_READS = {
     "data",
     "layout",
     "config",
+    "frames",
+    "layout.updatemenus",
+    "layout.sliders",
     "data[i].legend",
     "data[i].width",
     "data[i].offset",
