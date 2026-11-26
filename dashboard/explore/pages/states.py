@@ -132,12 +132,13 @@ def roster(body: Any, year: int) -> list[tuple[str, str]]:
 
     Read by :func:`explore.state_view.roster`, the reading the state pages judge from
     too, and the rows must name the year the roster was read for. Each name is as
-    served; :func:`link_text` is what a link shows.
+    served, sorted by what its link shows (:func:`link_text`), so a state shown by
+    its code sorts by that code (#647's review, r1.code-review.10).
     """
     named, states = state_view.roster(body)
     if named != year:
         raise TypeError(f"/v1/elections/{year} carries rows of {named}")
-    return sorted(states.items(), key=lambda kv: kv[1])
+    return sorted(states.items(), key=lambda kv: link_text(*kv))
 
 
 def link_text(usps: str, name: str) -> str:
@@ -150,18 +151,14 @@ def figure_cell(figures: state_view.HistoryFigures | None, key: str) -> Any:
     """One figure's cell (#641): :data:`explore.labels.UNAVAILABLE_CELL` for a refused
     state, else the value half of the state page's figure
     (:func:`explore.state_view.history_cell`), the popular-vote count with its N
-    (:data:`explore.labels.STATES_COUNT_OF`) where it has a figure."""
+    (:data:`explore.labels.STATES_COUNT_OF`) where it has a figure: where
+    :func:`explore.state_view.history_cell` gives it a rest, which
+    :func:`explore.labels.metric_count` does only for a recognized count with an N."""
     if figures is None:
         return labels.cell(labels.UNAVAILABLE_CELL)
     value, rest = state_view.history_cell(figures, key)
-    pv = figures.popular_vote
-    if (
-        key == "state_pv_elections_count"
-        and rest is not None
-        and not figures.unrecognized
-        and not pv.unrecognized
-        and pv.n
-    ):
+    if key == "state_pv_elections_count" and rest is not None:
+        pv = figures.popular_vote
         value = labels.STATES_COUNT_OF.format(count=pv.count, n=pv.n)
     return labels.cell(value)
 

@@ -58,15 +58,16 @@ TABLES = {
     "states-history": "/states",
 }
 
-#: Each page's reads before #309, recorded on ``main`` at 72312da with
-#: :class:`RecordingClient` at the registry's concrete values: the download adds none.
-#: The candidate history (#331) was built with its download, so its entry pins its
-#: reads rather than recording them from before one; that a download makes no request
-#: is guarded by ``test_the_shared_modules_read_no_api`` and ``TestRequestBudget``.
 #: The ``/states`` history table's CSV-only figure columns (#641, D123): metric keys,
 #: not served fields, in its download alone.
 FIGURE_COLUMNS = set(state_view.HISTORY_VALUE_KEYS)
 
+#: Each page's reads before #309, recorded on ``main`` at 72312da with
+#: :class:`RecordingClient` at the registry's concrete values: the download adds none.
+#: The candidate history (#331) was built with its download, so its entry pins its
+#: reads rather than recording them from before one, and ``/states``' N2 read (#641,
+#: D123) is pinned, not recorded; that a download makes no request is guarded by
+#: ``test_the_shared_modules_read_no_api`` and ``TestRequestBudget``.
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/not-found-404": [],  # the custom-404 page reads no data (#325)
@@ -2554,10 +2555,10 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
         {"usps": "GA"},
         {"/v1/states/GA/per-capita": _row(*PER_CAPITA_ROW_FIELDS)},
     ),
-    # The headline totals' national fields (#601), which no table shows, doctored on
-    # the first row too, so each total reads its own field's value.
     # The history table on /states (#641, D123): one state's allotment.
     "/states": ({}, {"/v1/elections/states": _n2_first_allotment}),
+    # The headline totals' national fields (#601), which no table shows, doctored on
+    # the first row too, so each total reads its own field's value.
     "/candidate/<slug>": (
         {"slug": "andrew-jackson"},
         {

@@ -217,17 +217,17 @@ STATE_MISSES = ["/v1/elections/2024", "/v1/states/GA", "/v1/states/GA/per-capita
 #: ``/state/GA/per-capita`` either way; the results page (#619), which sorts between
 #: them, nothing, since it reads the history's rows, already filled; the per-capita
 #: page T7's rows alone, the roster already filled.
+STATE_PAGE_MISSES = {
+    "/state/<usps>": ["/v1/elections/2024", "/v1/states/GA"],
+    "/state/<usps>/elections": [],
+    "/state/<usps>/per-capita": ["/v1/states/GA/per-capita"],
+}
 #: The fill on a miss after :data:`STATE_MISSES`: ``/states`` sorts after every
 #: ``/state/GA…`` page, so the roster is filled and N2 is its one fill (#641, D123).
 STATES_MISSES = [N2_PATH]
 #: The same by page: the slice that pins N2 to ``/states``' render, since an earlier
 #: page reading it would leave this slice empty.
 STATES_PAGE_MISSES = {"/states": [N2_PATH]}
-STATE_PAGE_MISSES = {
-    "/state/<usps>": ["/v1/elections/2024", "/v1/states/GA"],
-    "/state/<usps>/elections": [],
-    "/state/<usps>/per-capita": ["/v1/states/GA/per-capita"],
-}
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:

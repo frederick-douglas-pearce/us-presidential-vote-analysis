@@ -470,14 +470,16 @@ def history_cell(figures: HistoryFigures, key: str) -> tuple[str, str | None]:
     :data:`explore.labels.METRIC_NO_FIGURE_NO_ELECTORS` where no year has electors or
     for the plain count, D115(i)); else the ``labels.metric_*`` wording. Words nothing
     itself. ``TypeError`` for a key it does not compute."""
+    if key not in HISTORY_KEYS:
+        # Before any lookup by key, so a key this does not compute is a TypeError
+        # whatever the figures (#647's review, r1.code-review.1).
+        raise TypeError(f"{key} is no figure history_figures computes")
     years = list(figures.years)
     no_figure = (
         labels.METRIC_NO_FIGURE[key]
         if years and key != "state_elections_count"
         else labels.METRIC_NO_FIGURE_NO_ELECTORS
     )
-    if key not in HISTORY_KEYS:
-        raise TypeError(f"{key} is no figure history_figures computes")
     if figures.unrecognized:
         return labels.UNRECOGNIZED, None
     if key == "state_elections_count":
@@ -545,7 +547,9 @@ def states_history(
     list is refused), then :func:`collapsed` on :func:`electors`, then
     :func:`history_figures`. Only a ``KeyError`` or ``TypeError`` from :func:`rows`
     reads as refused; any other exception propagates, as in :func:`collapsed`. The
-    three are looked up when called, so a test can watch them (``TestStatesHistory``).
+    four (:func:`rows`, :func:`collapsed`, :func:`electors` and
+    :func:`history_figures`) are looked up when called, so a test can watch them
+    (``TestStatesHistory.test_the_render_reads_the_shared_path``).
     """
     found = rows_of(body)
     if not found:

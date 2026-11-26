@@ -74,7 +74,8 @@ TABLE_ID = MOD["TABLE_ID"]
 YEARS_ID = MOD["YEARS_ID"]
 PV_ID = MOD["PV_ID"]
 #: The paths a first render fills on a miss: N1 for the averages (#437); C2, C4 and C5
-#: read it from their own pages since #562, and no page reads N2 (D107).
+#: read it from their own pages since #562, and this page reads no N2 (D107; ``/states``
+#: reads it since #641, D123).
 FILLS_TUPLE = (api.SUMMARY_PATH,)
 FILLS = list(FILLS_TUPLE)
 
@@ -605,7 +606,7 @@ class TestRequestBudget:
             # every filter change after it is answered from the cache.
             assert calls == FILLS, search
             assert len(bucket.waits) == 1, search
-        # An old state key reads nothing more: no page reads N2 since #562 (D107).
+        # An old state key reads nothing more: this page reads no N2 since #562 (D107).
         for search in ("?state=GA", "?state=GA&year_from=1900", "?state=AK&pv=1"):
             route("/elections", search)
         assert calls == FILLS
@@ -1651,7 +1652,7 @@ def test_the_page_is_registered_as_planned() -> None:
     assert PAGE["path"] == "/elections"
     assert PAGE["prefetch"] == (api.ELECTIONS_PATH,)
     # N1, the averages' source: a literal filled on a miss (#437, D074(ii)); no N2
-    # since #562 (D107).
+    # here since #562 (D107).
     assert PAGE["on_miss"] == FILLS_TUPLE
     assert PAGE["success"] == PAGE_ID
     assert VERSION  # the recorded snapshot every cached render answers from

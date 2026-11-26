@@ -256,6 +256,11 @@ class TestStatesTable:
                 row["state"] = "  "
         tree = page(roster=roster)
         assert table_rows(tree)["GA"][0] == "GA"
+        # Sorted by what its link shows, the code (#647's review, r1.code-review.10):
+        # between Florida and Hawaii, never first.
+        order = list(table_rows(tree))
+        assert order.index("GA") == order.index("FL") + 1
+        assert order[0] == "AL"
         listed = {
             link.href: link.children
             for link in of_type(find(tree, PICKER_MOD["LIST_ID"]), "Link")
@@ -531,11 +536,38 @@ class TestHistoryCell:
         assert state_view.history_cell(figures, "state_elections_count")[0] == "1"
         assert state_view.history_cell(figures, "state_first_election")[0] == "1824"
 
-    def test_another_key_is_refused(self) -> None:
-        with pytest.raises(TypeError):
-            state_view.history_cell(
-                state_view.UNRECOGNIZED_HISTORY, "state_took_office_count"
-            )
+    @pytest.mark.parametrize("key", ["state_took_office_count", "nonsense"])
+    def test_another_key_is_refused_whatever_the_figures(self, key: str) -> None:
+        # The key is checked before any lookup by key (#647's review,
+        # r1.code-review.1): figures with years reach the no-figure lookup, where a
+        # key ``METRIC_NO_FIGURE`` lacks ("nonsense") would raise ``KeyError``.
+        with_years = state_view.history_figures(
+            [{"year": 1824, "state_electoral_votes": 9, "pv_status": None}]
+        )
+        assert with_years.years
+        for figures in (with_years, state_view.UNRECOGNIZED_HISTORY):
+            with pytest.raises(TypeError):
+                state_view.history_cell(figures, key)
+
+    def test_the_states_table_words_its_cells_through_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # D123(e) on /states (#647's review, r1.guard-efficacy.1): every state's four
+        # cells go through history_cell, in display order, with that state's figures.
+        calls: list[tuple[Any, str]] = []
+        real = state_view.history_cell
+
+        def spy(figures: Any, key: str) -> Any:
+            calls.append((figures, key))
+            return real(figures, key)
+
+        monkeypatch.setattr(state_view, "history_cell", spy)
+        page()
+        found = history(n2())
+        assert [key for _f, key in calls] == list(state_view.HISTORY_KEYS) * 51
+        assert [f for f, _key in calls] == [
+            found[usps] for usps in ROSTER_STATES for _ in state_view.HISTORY_KEYS
+        ]
 
     def test_the_state_page_words_its_four_figures_through_it(
         self, monkeypatch: pytest.MonkeyPatch
