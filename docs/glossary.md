@@ -2271,7 +2271,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Shown as:** in `pages/states.py`: `STATES_HISTORY_HEADING`, `STATES_HISTORY_INTRO`, `STATES_HISTORY_UNAVAILABLE`, `STATES_HISTORY_UNAVAILABLE_NOTE`, `STATES_HISTORY_DOWNLOAD_NOTE` (under the table and in the download's preamble), `PAGE_ONLY` (the column-name list's four page-only rows, each naming its download columns and the served fields it is built from), and the download "each state's history figures" in `states-history-figures.csv`, whose preamble ends on `STATES_HISTORY_EMPTY_CELL_LINE` in place of `export.NULL_LINE`; in `labels.py`: `STATES_HISTORY_HEADERS` (keyed by metric key), `STATES_COUNT_OF`, and `LABELS["state"]` for the state column; cells through `state_view.history_cell` (`labels.metric_elections`, `labels.metric_first_election`, `labels.metric_count`, `labels.metric_change`, `labels.METRIC_NO_FIGURE_NO_ELECTORS`, `labels.METRIC_NO_FIGURE`, `labels.UNRECOGNIZED`) and `labels.UNAVAILABLE_CELL`.
 - **Source:** #641 (the owner chose to ship the table before the map, 2026-11-24; the card order, the refused-state cell, the CSV's figure columns and the closing line in place of `NULL_LINE`: owner decisions at and after its plan gate, 2026-11-25); D120 (residuals (1)–(3)); D121(f); D096(d); D116(a); D123; reader wording: `ba` spec for #641.
 - **Not:** The list of states below it. A state's history page, which shows more (the took-office count, the charts). A historical record of when a state first voted. The *Degraded state* (the whole page). A download of N2's rows.
-- **Status:** settled; wording pending (owner approval of `STATES_HISTORY_DOWNLOAD_NOTE`, `STATES_HISTORY_EMPTY_CELL_LINE` and the `PAGE_ONLY` download-column wording; *Open decisions*)
+- **Status:** settled (`STATES_HISTORY_DOWNLOAD_NOTE`, `STATES_HISTORY_EMPTY_CELL_LINE`, the `PAGE_ONLY` download-column wording and the download's name approved by the owner at #641's merge gate, 2026-11-26)
 
 ### Theme choice (Dark, Auto or Light)
 - **Plain:** How the site looks: dark pages, light pages, or Auto, which follows the light or
@@ -2656,7 +2656,6 @@ decision and who makes it.
   this election", which does not hold for 1912 and the other elections two years after a census,
   and uses "apportionment" in prose. #379 rewords it (owner decision, 2026-11-02). The owner
   approves the rewrite, on a label spec from `ba`.
-- **State histories compared** (#641): `STATES_HISTORY_DOWNLOAD_NOTE`, `STATES_HISTORY_EMPTY_CELL_LINE` and the column-name list's download-column wording (`PAGE_ONLY`) in `pages/states.py` were worded by `ba` after #641's plan gate. The owner approves them.
 - **Candidates with electoral votes chart (C9)**, **Electoral votes outside the top two** and
   **Electors without a counted vote**: the historical claims in the #563 wording await the
   owner's check: 1872, Horace Greeley 3 electoral votes cast and none counted
