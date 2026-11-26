@@ -172,21 +172,23 @@ _COLOR_KEY_RE = re.compile(r".*(?:color|colors|colorway)")
 #: which the page's text reads too.
 FONT_TOKEN = "--font-body"
 
-#: Color-scale attributes no chart may set, matched by key name at any depth (#645,
-#: D121): a colorscale maps numbers to colors that are no token, and each other key
-#: here makes plotly.js draw one (its ``hasColorscale``) or a colorbar in its default
-#: colorscale. In plotly.js 4.1.1 they sit on a ``scatter`` or ``bar`` trace's
-#: ``marker`` (``showscale`` and ``colorbar`` there only) and ``marker.line``, on the
-#: layout (``coloraxis``, ``coloraxis2``, …, and ``colorscale``), and in a scatter's
-#: ``fillgradient``; ``zmid`` and ``zauto`` are on no allowed trace type, and are here
-#: so that every refusal D121(a) makes for the map is in this one set. ``zmin`` and
-#: ``zmax`` are not, since the map sets them. The one exception is #639's ``map_bins``
-#: (D121(b)): on the map's ``data[0]`` only, ``colorscale`` (with its stops),
-#: ``colorbar`` and ``showscale``, at those exact paths.
+#: Color-scale attributes no chart may set, matched by key name at any depth and
+#: refused on any value (#645, D121): each configures a color scale, which maps numbers
+#: to colors that are no token, and some draw one, or a colorbar in plotly.js's default
+#: colorscale (its ``hasColorscale``: ``showscale: true``, a numeric ``cmin`` and
+#: ``cmax``, a ``colorscale``, a ``colorbar``). In plotly.js 4.1.1 they sit on a
+#: ``scatter`` or ``bar`` trace's ``marker`` (``showscale`` and ``colorbar`` there
+#: only) and ``marker.line``, on the layout (``coloraxis``, ``coloraxis2``, …, and
+#: ``colorscale``), and in a scatter's ``fillgradient``; ``zmid`` and ``zauto`` are on
+#: no allowed trace type, and are here so that every refusal D121(a) makes for the map
+#: is in this one set. ``zmin`` and ``zmax`` are not, since the map is to set them.
+#: #639 is to add the one exception, under ``map_bins`` (D121(b)): on the map's
+#: ``data[0]`` only, ``colorscale`` (with its stops), ``colorbar`` and ``showscale``.
 _REFUSED_KEY_RE = re.compile(
-    r".*colorscale|showscale|colorbar|cauto|cmin|cmax|cmid|coloraxis\d*"
-    r"|reversescale|fillgradient|zmid|zauto"
+    r"(?:.*colorscale|showscale|colorbar|cauto|cmin|cmax|cmid|coloraxis\d*"
+    r"|reversescale|fillgradient|zmid|zauto)"
 )
+
 
 #: The one Plotly template every chart is drawn with (#432), in both palettes: its color
 #: slots name tokens, which :data:`CHART_CALLBACK` resolves from the palette in effect,
@@ -409,8 +411,8 @@ def color_problems(figure: Mapping[str, Any]) -> list[str]:
     The allowlist: a key ending ``color``, ``colors`` or ``colorway`` holds a token
     reference other than :data:`FONT_TOKEN`, or (``colorway`` only) a list of them;
     ``family`` may hold only :data:`FONT_TOKEN`; no other string contains ``var(``; no
-    key of :data:`_REFUSED_KEY_RE` (a colorscale, a colorbar, or a key that draws
-    either, #645), on any value. A numeric or list ``color`` is refused, so a trace
+    key of :data:`_REFUSED_KEY_RE` (a key that configures a color scale or a
+    colorbar, #645), on any value. A numeric or list ``color`` is refused, so a trace
     never colors its points one by one: color would then carry categories inside one
     trace, where :func:`color_only_pairs` cannot see it, and a number would pick a
     colorscale's color, which is no token. Whether a named color token exists in

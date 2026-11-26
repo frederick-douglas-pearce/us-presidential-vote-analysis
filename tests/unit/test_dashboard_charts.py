@@ -698,8 +698,8 @@ class TestTraceTypes:
 
 #: Each refused color-scale key (#645, D121), hand-written: a key dropped from
 #: ``charts._REFUSED_KEY_RE`` fails here. Each value is scalar or empty, and falsy where
-#: the key takes one, since the rule is the key's presence: a refusal that looked at
-#: the value would pass these.
+#: the key takes one, since the rule is the key's presence: a refusal that read the
+#: value would let these through, and these cases would fail.
 MARKER_KEYS: dict[str, Any] = {
     "colorscale": "",
     "autocolorscale": False,
@@ -719,7 +719,6 @@ LINE_KEYS = {k: v for k, v in MARKER_KEYS.items() if k not in ("showscale", "col
 TRACE_KEYS: dict[str, Any] = {"fillgradient": {}, "zmid": 0, "zauto": False}
 LAYOUT_KEYS: dict[str, Any] = {"coloraxis": {}, "coloraxis2": {}, "colorscale": {}}
 REFUSED_KEYS = sorted({*MARKER_KEYS, *TRACE_KEYS})
-EC = "var(--chart-ec)"
 
 
 def colored(kind: str) -> dict[str, Any]:
@@ -727,14 +726,14 @@ def colored(kind: str) -> dict[str, Any]:
     fields: dict[str, Any] = {"mode": "markers"} if kind == "scatter" else {}
     return trace(
         kind,
-        marker={"color": EC, "line": {"color": EC}},
+        marker={"color": charts.EC_COLOR, "line": {"color": charts.EC_COLOR}},
         **fields,
     )
 
 
 class TestRefusedColorKeys:
     """#645 (D121): a ``scatter`` or ``bar`` trace, or the layout, carrying any key that
-    draws a color scale or a colorbar is refused, on every chart."""
+    configures a color scale or a colorbar is refused, on every chart."""
 
     def test_each_key_is_refused_by_name_and_no_near_miss_is(self) -> None:
         refused = charts._REFUSED_KEY_RE
@@ -746,13 +745,11 @@ class TestRefusedColorKeys:
         for key in misses:
             assert not refused.fullmatch(key), key
 
-    @pytest.mark.parametrize("flag", [False, True])
     @pytest.mark.parametrize("kind", ["scatter", "bar"])
-    def test_the_base_traces_pass(self, kind: str, flag: bool) -> None:
+    def test_the_base_traces_pass(self, kind: str) -> None:
         figure = {"data": [colored(kind)]}
-        assert charts.figure_problems(figure, short_value_ticks=flag) == []
+        assert charts.figure_problems(figure) == []
 
-    @pytest.mark.parametrize("flag", [False, True])
     @pytest.mark.parametrize("kind", ["scatter", "bar"])
     @pytest.mark.parametrize(
         ("holder", "key", "value"),
@@ -763,27 +760,22 @@ class TestRefusedColorKeys:
         ],
     )
     def test_a_trace_key_is_refused_at_its_path(
-        self, holder: str, key: str, value: Any, kind: str, flag: bool
+        self, holder: str, key: str, value: Any, kind: str
     ) -> None:
-        """``short_value_ticks`` does not reach the color rule; it is here so that
-        #639's ``map_bins`` joins it, and is not coverage of its own."""
         figure = {"data": [colored(kind)]}
         target = figure["data"][0]
         for part in holder.split(".") if holder else []:
             target = target[part]
         target[key] = value
         path = ".".join(p for p in ("data[0]", holder, key) if p)
-        assert charts.figure_problems(figure, short_value_ticks=flag) == [
+        assert charts.figure_problems(figure) == [
             f"{path}: no colorscale or colorbar"
         ]
 
-    @pytest.mark.parametrize("flag", [False, True])
     @pytest.mark.parametrize(("key", "value"), list(LAYOUT_KEYS.items()))
-    def test_a_layout_key_is_refused_at_its_path(
-        self, key: str, value: Any, flag: bool
-    ) -> None:
+    def test_a_layout_key_is_refused_at_its_path(self, key: str, value: Any) -> None:
         figure = {"data": [colored("bar")], "layout": {key: value}}
-        assert charts.figure_problems(figure, short_value_ticks=flag) == [
+        assert charts.figure_problems(figure) == [
             f"layout.{key}: no colorscale or colorbar"
         ]
 
