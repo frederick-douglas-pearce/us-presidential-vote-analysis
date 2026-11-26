@@ -86,6 +86,14 @@ EC_FIELDS = frozenset(
         "electoral_votes_outside_top_two",
         "electors_without_a_counted_vote",
         "ec_margin",
+        # The ``/states`` history table's figures (#641, D123, amending D116(a)): metric
+        # keys, not ``/v1`` fields, computed from ``state_electoral_votes`` and
+        # ``pv_status``, so this source carries them.
+        "state_elections_count",
+        "state_first_election",
+        "state_pv_elections_count",
+        "state_pv_elections_n",
+        "state_electors_change",
     }
 )
 
@@ -150,7 +158,9 @@ USGOV_SOURCE = (
     "usgov_license_url",
 )
 
-#: The preamble's last line: what an empty cell means.
+#: The preamble's last line: what an empty cell means. A table whose empty cell means
+#: something else passes its own (``null_line``; #641, D123), the ``/states`` history
+#: table alone today.
 NULL_LINE = "An empty cell is a null: the dataset holds no value there."
 
 #: The first field of every preamble row.
@@ -241,8 +251,10 @@ def preamble(
     provenance: dict[str, Any],
     url: str,
     notes: Iterable[str] = (),
+    null_line: str = NULL_LINE,
 ) -> list[str]:
-    """The preamble's sentences, in order, read from ``provenance``, never literals."""
+    """The preamble's sentences, in order, read from ``provenance``, never literals;
+    the last is ``null_line``, :data:`NULL_LINE` unless a table says otherwise."""
     carried = sources(fields)
     coverage = provenance["coverage"]
     lines = [
@@ -257,7 +269,7 @@ def preamble(
         )
     lines.append(f"View: {url}")
     lines += notes
-    lines.append(NULL_LINE)
+    lines.append(null_line)
     return [_line(str(text)) for text in lines]
 
 
@@ -283,12 +295,16 @@ def csv_text(
     rows: Iterable[dict[str, Any]],
     download: Download,
     notes: Iterable[str] = (),
+    null_line: str = NULL_LINE,
 ) -> str:
-    """The file: byte-order mark, preamble, a blank row, header, and one row per row."""
+    """The file: byte-order mark, preamble (ending on ``null_line``), a blank row,
+    header, and one row per row."""
     # The marker is written bare, never through row(), which would quote it.
     lines = [
         f"{COMMENT},{row([text])}"
-        for text in preamble(fields, download.provenance, download.view_url, notes)
+        for text in preamble(
+            fields, download.provenance, download.view_url, notes, null_line
+        )
     ]
     lines.append("\r\n")
     lines.append(row(fields))

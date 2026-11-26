@@ -912,6 +912,23 @@ METRIC_FIRST_ELECTION_ONE = "{year}, with 1 elector appointed"
 METRIC_CHANGE = "{change}, from {first} in {first_year} to {latest} in {latest_year}"
 #: A negative change's sign: U+2212, read aloud as "minus", never a hyphen.
 MINUS_SIGN = "\u2212"
+#: The ``/states`` history table's column headers (#641, D123; ba spec, approved at
+#: #641's plan gate, 2026-11-25), by metric key, so C11's map (#623) can name the same
+#: figures: :data:`METRIC_LABELS`' state figures without "this state", each read alone
+#: in its header's tooltip and the column-name list, so "in this dataset" stays.
+STATES_HISTORY_HEADERS = {
+    "state_elections_count": "Elections with electors appointed",
+    "state_first_election": "First election in this dataset with electors appointed",
+    "state_pv_elections_count": "Elections with a popular vote to choose electors",
+    "state_electors_change": (
+        "Change in electors appointed, first election in this dataset to latest"
+    ),
+}
+#: The ``/states`` table's popular-vote cell (#641; ba): the count and its N, never a
+#: bare count, which beside the elections count would read a null status as a
+#: legislature's choice; the start of :data:`METRIC_COUNT_OF`, which the state page
+#: shows.
+STATES_COUNT_OF = "{count} of {n}"
 #: A select with no figure because the years shown hold no election for the state (a
 #: state's per-capita page, whose year range spans the dataset; #600). On the elections
 #: pages no year shown shows *No elections match* and no figure instead.

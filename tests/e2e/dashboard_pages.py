@@ -363,7 +363,7 @@ def assert_layout_holds(
     placed grid item) and none has a positive tab index; every paragraph, chart caption
     and party-notes item in ``main`` is within the 42rem measure; the page never
     scrolls sideways; each of ``tables`` (table ids) is there, and from about 1280 px
-    none scrolls. A page that shows no table (home, the States list; #567) passes
+    none scrolls. A page that shows no table (home; #567) passes
     ``tables_expected=False`` with no ids: the other checks still run, and naming no
     table is otherwise refused, so a caller cannot drop its tables by accident."""
     found = page.evaluate(

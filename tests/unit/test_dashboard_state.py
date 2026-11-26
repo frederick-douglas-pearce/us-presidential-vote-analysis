@@ -325,7 +325,8 @@ def test_the_per_capita_parser_keeps_only_the_year_range(
 def test_the_picker_is_registered_as_planned() -> None:
     assert PICKER["path"] == "/states"
     assert PICKER["prefetch"] == (api.ELECTIONS_PATH,)
-    assert PICKER["on_miss"] == (api.ROSTER_PATH,)
+    # N2 since #641 (D123, amending D107), filled on a miss: D072's prefetch unchanged.
+    assert PICKER["on_miss"] == (api.ROSTER_PATH, api.ELECTION_STATES_PATH)
     assert PICKER["success"] == PICKER_MOD["PAGE_ID"]
 
 
@@ -733,7 +734,7 @@ class TestRoster:
         _, calls, _ = cached_client(monkeypatch)
         assert PAGE_ID in routed_ids(route("/state/GA", search))
         assert PICKER["success"] in routed_ids(route("/states", search))
-        assert calls == [ROSTER_PATH, GA_PATH]
+        assert calls == [ROSTER_PATH, GA_PATH, api.ELECTION_STATES_PATH]
 
     @pytest.mark.parametrize(
         "coverage",
@@ -1144,7 +1145,8 @@ class TestPicker:
     ) -> None:
         _, calls, _ = cached_client(monkeypatch)
         assert PICKER["success"] in routed_ids(route("/states"))
-        assert calls == [ROSTER_PATH]
+        # The roster, then N2 for the history table (#641, D123).
+        assert calls == [ROSTER_PATH, api.ELECTION_STATES_PATH]
         calls.clear()
         # The state pages read the same roster: no second fill of it.
         assert PAGE_ID in routed_ids(route("/state/GA"))
@@ -3007,14 +3009,22 @@ class TestN2Fixture:
         keys = [(r["year"], r["state_usps"]) for r in N2["data"]]
         assert len(keys) == len(set(keys))
 
-    def test_georgia_equals_the_state_history(self) -> None:
-        history = {r["year"]: r for r in RECORDED["/v1/states/GA"]["data"]}
-        for row in [r for r in N2["data"] if r["state_usps"] == "GA"]:
-            assert (
-                row["state_electoral_votes"]
-                == history[row["year"]]["state_electoral_votes"]
-            )
-            assert row["pv_status"] == history[row["year"]]["pv_status"]
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_each_state_equals_its_state_history(self, usps: str) -> None:
+        # #641's AC2, per year: N2's allotment and status for each year equal the
+        # state history's, and the two hold the same years, both ways (TX since #641).
+        history: dict[int, list[dict[str, Any]]] = {}
+        for r in RECORDED[f"/v1/states/{usps}"]["data"]:
+            history.setdefault(r["year"], []).append(r)
+        mine = [r for r in N2["data"] if r["state_usps"] == usps]
+        assert {r["year"] for r in mine} == set(history)
+        for row in mine:
+            for candidate_row in history[row["year"]]:
+                assert (
+                    row["state_electoral_votes"]
+                    == candidate_row["state_electoral_votes"]
+                )
+                assert row["pv_status"] == candidate_row["pv_status"]
 
     def test_each_per_capita_recording_on_the_shared_fields(self) -> None:
         shared = (
@@ -3694,10 +3704,10 @@ class TestFurtherStateFigures:
 
 
 def n2_records() -> dict[str, list[dict[str, Any]]]:
-    """N2's rows, one state's at a time, along the path the ``/states`` table and map
-    (#641, #623) are to take (#640, D120): the page's row check, ``state_view.rows``,
-    then C7's per-year collapse, ``state_view.electors``, as the history page runs
-    them. The collapse refuses a year whose rows disagree and a gap; it accepts a
+    """N2's rows, one state's at a time, along the path the ``/states`` table takes
+    (#641, D123) and C11's map (#623) is to (#640, D120): the page's row check,
+    ``state_view.rows``, then C7's per-year collapse, ``state_view.electors``, as the
+    history page runs them. The collapse refuses a year whose rows disagree and a gap; it accepts a
     repeated identical row, so N2's one row per state-year is
     ``TestN2Fixture.test_count_and_no_repeat``'s check, not this helper's."""
     path = "/v1/elections/states"
@@ -3715,7 +3725,7 @@ def n2_records() -> dict[str, list[dict[str, Any]]]:
 
 class TestHistoryFiguresOnN2:
     """``state_view.history_figures`` is the one computation the ``/states`` table
-    and map are to share (#621, D120; #641, #623): N2 serves one row per state-year
+    shares (#621, D120; #641, D123), and C11's map (#623) is to: N2 serves one row per state-year
     with the fields it reads, and each state's rows pass the page's own row check and
     collapse (:func:`n2_records`, #640), so the map's values are to equal each state
     page's."""
@@ -4408,9 +4418,11 @@ def _no_allotment(rows: list[dict[str, Any]]) -> None:
 class TestSharedCollapse:
     """C7's per-year collapse lives in ``state_view`` (#640, D120): the history page
     reads a state's rows through ``state_view.collapsed(state_view.electors, …)``, and
-    the ``/states`` table and map (#641, #623) are to read N2's through the same call.
-    These tests feed both shapes of rows to it directly: each fault reads as ``None``
-    (no figures) for both. That the ``/states`` render calls it is #641's to guard."""
+    the ``/states`` table reads N2's through the same call (#641, D123), as C11's map
+    (#623) is to. These tests feed both shapes of rows to it directly: each fault reads
+    as ``None`` (no figures) for both. That the ``/states`` render calls it is
+    ``TestStatesHistory.test_the_render_reads_the_shared_path``
+    (``test_dashboard_states.py``)."""
 
     SOURCE = "/v1/elections/states"
 

@@ -10,7 +10,7 @@ and the section links join them (D105, D118). C7 and C10 come from one response,
 collapse its rows, one per candidate, to one per election (D106, D113), and their table
 joins the two collapses on the year (#618, D117). C7's collapse is
 :func:`explore.state_view.electors`, run through :func:`explore.state_view.collapsed`,
-the functions the ``/states`` table and map (#641, #623) are to share (#640, D120);
+the functions the ``/states`` table shares (#640, D120; #641, D123);
 C10's, :func:`popular_totals`, is this page's alone. The state is the path
 (``/state/<usps>``, an item singular as ``/states`` is plural), in upper case as the
 API writes a USPS code. It is validated against the state roster before it is
@@ -348,8 +348,9 @@ def _figures(
     C7's collapse, ``records``), its first election, in how many of them it held a
     popular vote to choose its electors, the change in its electors from its first
     election to its latest (all four computed by
-    :func:`explore.state_view.history_figures`, the computation the ``/states`` map
-    is to share), and in how many its
+    :func:`explore.state_view.history_figures`, the computation the ``/states`` table
+    shares, and worded by :func:`explore.state_view.history_cell`, as its cells are),
+    and in how many its
     electors cast a vote for the candidate who took office (this page's alone: it needs
     the candidate rows). Unfiltered: ``records`` is C7's whole collapse, so the Years
     filter never reaches them (D112(g), D115(g), D119), and they sit above it (#634,
@@ -368,25 +369,21 @@ def _figures(
     # test_the_figures_show_in_the_approved_order`` renders every ``METRIC_IDS`` id, so
     # the ``TypeError`` below is reachable only by a code change a test catches.
     for key, ident in METRIC_IDS.items():
-        # A plain count words its own case (D115(i)); every other figure's, keyed.
-        no_figure = (
-            labels.METRIC_NO_FIGURE[key]
-            if years and key != "state_elections_count"
-            else labels.METRIC_NO_FIGURE_NO_ELECTORS
-        )
         value: str
         rest: str | None
-        if figures.unrecognized:
+        if key in state_view.HISTORY_KEYS:
+            # Worded by the one function the ``/states`` table's cells read too (#641,
+            # architect I-1), so the two pages cannot word a figure differently.
+            value, rest = state_view.history_cell(figures, key)
+        elif figures.unrecognized:
             value, rest = labels.UNRECOGNIZED, None
-        elif key == "state_elections_count":
-            value, rest = labels.metric_elections(figures.elections, years, no_figure)
-        elif key == "state_first_election":
-            value, rest = labels.metric_first_election(figures.first, no_figure)
-        elif key == "state_pv_elections_count":
-            value, rest = labels.metric_count(figures.popular_vote, years, no_figure)
-        elif key == "state_electors_change":
-            value, rest = labels.metric_change(figures.change, no_figure)
         elif key == "state_took_office_count":
+            # A count words its N's absence by the years shown (D115(i)), keyed.
+            no_figure = (
+                labels.METRIC_NO_FIGURE[key]
+                if years
+                else labels.METRIC_NO_FIGURE_NO_ELECTORS
+            )
             counted = metrics.METRICS[key].counted
             if counted is None:  # a code fault in METRICS, never a data fault
                 raise TypeError(f"{key} has no counted value")

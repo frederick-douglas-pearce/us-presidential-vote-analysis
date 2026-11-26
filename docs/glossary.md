@@ -148,9 +148,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   degraded state only its heading, its lede and `components.UNAVAILABLE_MESSAGE`. *Source:* no lede
   on the not-found state: owner decision, 2026-11-01, #325; the filter sentence only where filters
   show: #331 (PR #390) and #419 (filed on the owner's approval); the election subpages: `ba` spec
-  for #465, approved by the owner at its plan gate (2026-11-10); this rule: #392. *Status:* settled;
-  wording pending (the `/states` lede, a literal in `layout` in `pages/states.py`, says "Open one to
-  see …" on the degraded state too, where the list it points at does not show).
+  for #465, approved by the owner at its plan gate (2026-11-10); this rule: #392; the `/states` lede reworded by #641. *Status:* settled.
 
 ---
 
@@ -440,7 +438,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Change in electors appointed (a state's, first election to latest)
 - **Plain:** On a state's history page: how many more or fewer electors the state appointed in its latest election than in its first election in this dataset, with both years and both numbers. A plus sign means more and a minus sign fewer; 0 means the same number. It compares two elections only and says nothing about the years in between.
 - **Precise:** `metrics.change` over (year, `state_electoral_votes`, cell) triples for the years whose allotment from C7's collapse `state_view.allotment` reads as above 0 (an `int`, never a `bool`, that `labels.finite` accepts; D115(c), D120), computed by `state_view.history_figures`. The value is the latest year's allotment minus the first year's: a signed `int`, zero allowed, with no N; first and latest are given as (year, cell), the cells from `labels.number`, as C7's table writes them. The first year is *A state's first election*. It is unfiltered (D112(g), D119). With one such year it reads `labels.METRIC_NO_FIGURE["state_electors_change"]`; with none, `labels.METRIC_NO_FIGURE_NO_ELECTORS`. An unreadable allotment makes all five state figures read *Unrecognized value*. It is never a ratio, percentage or growth rate (D112(d) as amended by D120). Recorded: Georgia +7 (1824: 9, 2024: 16); Texas +36 (1848: 4, 2024: 40). On the recorded `/v1/elections/states`, 13 states are negative, 8 zero and 30 positive.
-- **Shown as:** `labels.METRIC_LABELS["state_electors_change"]`; the value through `labels.metric_change` (`labels.METRIC_CHANGE`, signed by `labels.signed`: "+", `labels.MINUS_SIGN` (U+2212) or an unsigned 0); `labels.METRIC_NO_FIGURE["state_electors_change"]`; `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.UNRECOGNIZED`. In `state-history-metrics` on `/state/<usps>`, the value `state-electors-change`. The `/states` map (#623) is to read the same `state_view.history_figures`.
+- **Shown as:** `labels.METRIC_LABELS["state_electors_change"]`; the value through `labels.metric_change` (`labels.METRIC_CHANGE`, signed by `labels.signed`: "+", `labels.MINUS_SIGN` (U+2212) or an unsigned 0); `labels.METRIC_NO_FIGURE["state_electors_change"]`; `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.UNRECOGNIZED`. In `state-history-metrics` on `/state/<usps>`, the value `state-electors-change`. On `/states`, the signed value alone in the column `labels.STATES_HISTORY_HEADERS["state_electors_change"]` (*State histories compared*), read through the same `state_view.history_figures`; the map (#623) is to read it too.
 - **Source:** #621 (owner's ruling on Q1 at its plan gate, 2026-11-24); D097(a) as amended by D120; D112(d); D115(c); `EcPvRow.state_electoral_votes`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #621, approved at its plan gate.
 - **Not:** "Grew", "gained", "lost" or any other word that characterizes the change. A change since the state's first election historically (for most states that was before 1824). The earliest and latest electors appointed nationally (*Earliest and latest electors appointed*). Electoral votes cast.
 - **Status:** settled
@@ -643,7 +641,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   `C7_UNAVAILABLE` or `C10_UNAVAILABLE` in place of a chart, *Not available right now* in that
   chart's column of the shared table with `ELECTORS_UNAVAILABLE_NOTE` or `TOTALS_UNAVAILABLE_NOTE`
   first among its notes, and, when a fault reaches both charts, `ELECTORS_TOTALS_TABLE_UNAVAILABLE`
-  in place of the table. The page stays.
+  in place of the table. The page stays. The `/states` table's own unavailable state (`STATES_HISTORY_UNAVAILABLE` in `pages/states.py`), when `/v1/elections/states` cannot be read or is malformed: the list of states, the heading, the lede and the rest of the page still show.
 - **Status:** settled
 
 ### Earliest and latest electors appointed (figures)
@@ -665,7 +663,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### A state's first election
 - **Plain:** The first election in this dataset in which a state appointed electors. On a state's history page it is also a figure, with the electors appointed that year. A state's history page starts its charts and table there, so a state that joined the Union after 1824, such as Texas (1848), does not open on years before it took part. An election later on in which the state appointed no electors (Texas in 1864 and 1868) stays on the charts and in the table.
 - **Precise:** `first_election(records)` in `explore/state_view.py` (moved from `pages/state.py` by #621): the earliest year of C7's collapse (`electors()`) whose `state_electoral_votes` `state_view.allotment` reads as above 0: an `int` (never a `bool`) above 0 that `labels.finite` accepts. This is the same rule as the *Elections in which a state appointed electors* count, whose first year is this one, and the figure `state_first_election` picks the same year (#621, D120; a `select` with pick `first` over the allotment, which refuses an unreadable allotment where this function skips it). The figure shows no N: the elections count beside it states N and its years. If C7's collapse cannot be built, the page's span falls back to the state's first served row (`over_time.state_series`' own start), and no caption names a first election. On served data no state lacks one, and every state's first served row is its first election (checked against the live API for #620). It is about this dataset's rows, not a historical claim about when the state first voted.
-- **Shown as:** `labels.FIRST_ELECTION_START_NOTE` (else `labels.FIRST_ELECTION_START_NOTE_THIS_STATE`) in C7's and C10's captions, only when the years shown start there and it is after `coverage.year_min`. The default start of the Years slider on `/state/<usps>`. The figure: `labels.METRIC_LABELS["state_first_election"]`; the value through `labels.metric_first_election` (`labels.METRIC_FIRST_ELECTION`, `labels.METRIC_FIRST_ELECTION_ONE`); `labels.METRIC_NO_FIGURE["state_first_election"]` (which is `labels.METRIC_NO_FIGURE_NO_ELECTORS`); `labels.UNRECOGNIZED`; the value `state-first-election` in `state-history-metrics`.
+- **Shown as:** `labels.FIRST_ELECTION_START_NOTE` (else `labels.FIRST_ELECTION_START_NOTE_THIS_STATE`) in C7's and C10's captions, only when the years shown start there and it is after `coverage.year_min`. The default start of the Years slider on `/state/<usps>`. The figure: `labels.METRIC_LABELS["state_first_election"]`; the value through `labels.metric_first_election` (`labels.METRIC_FIRST_ELECTION`, `labels.METRIC_FIRST_ELECTION_ONE`); `labels.METRIC_NO_FIGURE["state_first_election"]` (which is `labels.METRIC_NO_FIGURE_NO_ELECTORS`); `labels.UNRECOGNIZED`; the value `state-first-election` in `state-history-metrics`. On `/states`, the year alone in the column `labels.STATES_HISTORY_HEADERS["state_first_election"]` (*State histories compared*).
 - **Source:** #620 scope and ACs (owner, 2026-11-23); #621; D115(c) ("appointed electors"); D119; D120; reader wording: `ba` spec for #620, approved by the owner at its plan gate (2026-11-23).
 - **Not:** The dataset's first year (`year_min`). The first year a state has a row. "Took part" (D115). The first election held by popular vote in the state.
 - **Status:** settled
@@ -780,7 +778,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Elections in which a state appointed electors (count)
 - **Plain:** On a state's history page: how many elections in this dataset the state appointed electors in, with the earliest and latest. An election in which the state appointed no electors (Georgia in 1864) is left out, so the number can be smaller than the years the electors chart shows; a note names the years left out.
 - **Precise:** The number of years on `/v1/states/{usps}` whose one allotment, collapsed by `electors()` (`state_electoral_votes`), `state_view.allotment` reads as greater than 0: an `int` (never a `bool`) that `labels.finite` accepts. In reader text this is "appointed electors", never "took part" (D115). First and last are the earliest and latest of those years. It is unfiltered: the history page's Years filter does not reach it (D119), and the filters on the results by election page (`/state/<usps>/elections`) do not reach it (D112(g)), and it matches C7's companion table at its default range (the state's whole span). If any year's allotment is not an `int` 0 or above that `labels.finite` accepts (`state_view.allotment`), all five state figures read *Unrecognized value* and C7 stays (D120). If the collapse itself fails, because a year's allotments disagree, C7's chart gives way to its note, the table's electors column reads *Not available right now*, and the figures go with it (D112(c); #618). With no year above 0 it reads `labels.METRIC_NO_FIGURE_NO_ELECTORS`. While it shows a number and some year's allotment is exactly 0, `labels.METRIC_ZERO_ALLOTMENT_NOTE` names those years through `labels.metric_years`. Recorded Georgia: 50 elections (1824–2024); C7 shows 51 years, and 1864 is left out.
-- **Shown as:** `labels.METRIC_LABELS["state_elections_count"]`; the value through `labels.metric_elections` (`labels.METRIC_COUNT_ELECTIONS`, `labels.METRIC_COUNT_ELECTIONS_ONE`); `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ZERO_ALLOTMENT_NOTE`; `labels.METRIC_ALL_YEARS_NOTE`, under the figures while the Years filter applies a narrower range than the state's span (#620); `labels.UNRECOGNIZED`. On `/state/<usps>`, in `state-history-metrics`, first in the card C7 and C10 share, with no heading of its own, above the Years slider, which does not reach it (#634); the value `state-elections-count` (`pages/state.py`).
+- **Shown as:** `labels.METRIC_LABELS["state_elections_count"]`; the value through `labels.metric_elections` (`labels.METRIC_COUNT_ELECTIONS`, `labels.METRIC_COUNT_ELECTIONS_ONE`); `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ZERO_ALLOTMENT_NOTE`; `labels.METRIC_ALL_YEARS_NOTE`, under the figures while the Years filter applies a narrower range than the state's span (#620); `labels.UNRECOGNIZED`. On `/state/<usps>`, in `state-history-metrics`, first in the card C7 and C10 share, with no heading of its own, above the Years slider, which does not reach it (#634); the value `state-elections-count` (`pages/state.py`). On `/states`, the value half in the table's column `labels.STATES_HISTORY_HEADERS["state_elections_count"]` (*State histories compared*).
 - **Source:** #569; #601; D112(c), (e), (g); D115; #634 (placement above the Years filter); `EcPvRow.state_electoral_votes` in `src/usvote/api/models.py`; `METRICS` in `dashboard/explore/metrics.py`; reader wording: `ba` spec for #601, approved at its plan gate.
 - **Not:** The years with rows. Elections the state's people voted in. A count of electors.
 - **Status:** settled
@@ -788,7 +786,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### Elections in which a state held a popular vote to choose its electors (count)
 - **Plain:** On a state's history page: of the elections in this dataset in which the state appointed electors, how many chose those electors by a popular vote rather than, for example, by the state legislature. This counts how electors were chosen in every election. It does not count the elections this dataset has popular-vote totals for, which begin much later.
 - **Precise:** `metrics.flag_count` over one flag per year whose allotment `state_view.allotment` reads as above 0, computed by `state_view.history_figures` (`state_view.popular_vote_flags`). The flag is true when `pv_status` is `popular_vote` and false when it is `legislature_chosen`; a null or blank is left out of N. The figure alone reads *Unrecognized value* for any other value, or for `not_participating` in a year with electors appointed, which contradicts itself; the other figures, C7, C10, their shared table and the page stay. N (M) is the elections with electors appointed (owner, Q4), so it matches the elections count unless a status is null. It is not read against the popular-vote window (`reads_pv_window` is `False`; Q2(i), D120), and there is no window note. It is unfiltered and never a percentage. Recorded: Georgia 49 of 50 (1824–2024; in 1824 the legislature chose); Texas 43 of 43 (1848–2024).
-- **Shown as:** `labels.METRIC_LABELS["state_pv_elections_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); `labels.METRIC_NO_FIGURE["state_pv_elections_count"]`; `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ALL_YEARS_NOTE`; `labels.UNRECOGNIZED`. In `state-history-metrics` on `/state/<usps>`, the value `state-pv-elections-count`.
+- **Shown as:** `labels.METRIC_LABELS["state_pv_elections_count"]`; the value through `labels.metric_count` (`labels.METRIC_COUNT_OF`, `labels.METRIC_COUNT_OF_ONE`); `labels.METRIC_NO_FIGURE["state_pv_elections_count"]`; `labels.METRIC_NO_FIGURE_NO_ELECTORS`; `labels.METRIC_ALL_YEARS_NOTE`; `labels.UNRECOGNIZED`. In `state-history-metrics` on `/state/<usps>`, the value `state-pv-elections-count`. On `/states`, `labels.STATES_COUNT_OF` ("{count} of {n}") in the column `labels.STATES_HISTORY_HEADERS["state_pv_elections_count"]` (*State histories compared*).
 - **Source:** #621 (owner's rulings on Q2(i) and Q4 at its plan gate, 2026-11-24); D115(b) as amended by D120; `EcPvRow.pv_status`; `src/usvote/pv/status.py`; reader wording: `ba` spec for #621, approved at its plan gate.
 - **Not:** *Popular vote in this dataset* (`has_popular_vote`). The years chart C10 draws totals for. Elections with a popular-vote winner in this dataset. The state's popular-vote winner.
 - **Status:** settled
@@ -1492,7 +1490,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 ### No figure (a figure with no election to include)
 - **Plain:** The page shows no number because none of the elections shown can enter it. Either all of them fall in years this dataset has no popular-vote figures for, or this dataset has no value for any of them, or, on a state's page, the years shown hold no election for that state, or this state appointed electors in no election, or, for a change, this state appointed electors in only one election, or, for a candidate's total, one or more of the elections shown has no number. It is not zero: a count of zero shows 0.
 - **Precise:** `labels.metric_count`, `labels.metric_select`, `labels.metric_total`, `labels.metric_elections`, `labels.metric_first_election` or `labels.metric_change` with no unrecognized value and no value to show. Causes are checked in order. First, on a state's People per electoral vote page, no row in the year range (`labels.METRIC_NO_FIGURE_NO_ELECTIONS`). On a state's history page, no year with an allotment above 0 (`labels.METRIC_NO_FIGURE_NO_ELECTORS`, every figure). On a candidate's page, no election (`labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`, defensive). Then, for a figure read against the popular-vote window, no year shown inside the window of `meta.provenance.coverage` (`labels.METRIC_NO_FIGURE_PV_YEARS`). Otherwise the value is null, worded per metric key (`labels.METRIC_NO_FIGURE`): a count or select is null when every value is null, a sum when any year is (D097), which is why its wording says "one or more", and a change when fewer than two years have a value (D120). On the elections pages no year shown is not a cause: the page shows *No elections match* and no figure. It is never 0, "nan" or an empty cell.
-- **Shown as:** `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE_NO_ELECTORS`, `labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`, `labels.METRIC_NO_FIGURE_PV_YEARS`, and `labels.METRIC_NO_FIGURE` (keyed by metric key), through `labels.metric_count`, `labels.metric_select`, `labels.metric_total`, `labels.metric_elections`, `labels.metric_first_election` and `labels.metric_change`.
+- **Shown as:** `labels.METRIC_NO_FIGURE_NO_ELECTIONS`, `labels.METRIC_NO_FIGURE_NO_ELECTORS`, `labels.METRIC_NO_FIGURE_NO_CANDIDATE_ELECTIONS`, `labels.METRIC_NO_FIGURE_PV_YEARS`, and `labels.METRIC_NO_FIGURE` (keyed by metric key), through `labels.metric_count`, `labels.metric_select`, `labels.metric_total`, `labels.metric_elections`, `labels.metric_first_election` and `labels.metric_change`. On `/states`, the same wording in the table's figure cells (*State histories compared*).
 - **Source:** #569 acceptance criteria; D097; D112; #601; D115; reader wording: `ba` specs for #569, #600 and #601.
 - **Not:** Zero. *No average* (a mean). *No popular-vote figure in this dataset* (a cell). *Unrecognized value*.
 - **Status:** settled
@@ -1519,7 +1517,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Status:** settled
 
 ### Not available right now (a cell)
-- **Plain:** A cell this page could not read just now. It is not a value: the dataset may well
+- **Plain:** A cell this page could not read or check just now. It is not a value: the dataset may well
   hold one, and trying again in a minute may show it. Different from *Not in this dataset*.
 - **Precise:** One string, `labels.UNAVAILABLE_CELL` (moved from `T1_N1_UNAVAILABLE_CELL`,
   `pages/elections.py`, unchanged), in every cell of a column whose source could not be read or
@@ -1534,10 +1532,10 @@ articles and announcements). Every rule binds all three unless the rule states a
   vote column of the table C7 and C10 share, each with its own note first among the table's
   (`ELECTORS_UNAVAILABLE_NOTE`, `TOTALS_UNAVAILABLE_NOTE`), which names the column and says that
   in the download its cells are empty because they were not read, not because the dataset has
-  no value.
+  no value. On `/states` (#641), every figure cell of a state whose rows the row check or the per-year collapse refuses, or that has no rows, one row at a time rather than a column, with `STATES_HISTORY_UNAVAILABLE_NOTE` (`pages/states.py`) under the table while any row shows it; where the per-year collapse refuses them, that state's history page puts this cell in its electors column; where the row check refuses them, or the state has no rows, that page shows its degraded state instead. In that table's download the row stays, its figure cells empty (`STATES_HISTORY_EMPTY_CELL_LINE`).
 - **Shown as:** `labels.UNAVAILABLE_CELL`; the notes `T1_N1_UNAVAILABLE_NOTE` (`pages/elections.py`,
   tier 1 only; tier 2 has no note), `ELECTORS_UNAVAILABLE_NOTE` and `TOTALS_UNAVAILABLE_NOTE`
-  (`pages/state.py`).
+  (`pages/state.py`), and `STATES_HISTORY_UNAVAILABLE_NOTE` (`pages/states.py`).
 - **Source:** #563 (owner decision at its plan gate, 2026-11-22); #618 (owner's ruling,
   2026-11-23); reader wording: `ba` spec for #618, approved by the owner at its plan gate
   (2026-11-23).
@@ -1552,7 +1550,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   also the cell for `has_popular_vote: false` and for a null or blank nominating party (*Party*),
   whose one cause is that this dataset records no party for that candidate in that election
   (`labels.PARTY_NULL_NOTE`); it is not *without a nomination*. Both are about what the dataset
-  holds. In a CSV download the same thing is an empty cell (`export.NULL_LINE`). A
+  holds. In a CSV download the same thing is an empty cell (`export.NULL_LINE`). One download is the exception: in the *State histories compared* table's download on `/states`, `STATES_HISTORY_EMPTY_CELL_LINE` replaces that line, and an empty cell there means only that the page shows no number (*No figure*, *Unrecognized value* or *Not available right now*), not that the dataset holds no value. A
   cause, where one is known, follows it after a colon (*Outside the popular-vote window*).
 - **Shown as:** `labels.NOT_IN_DATASET`, reached through `labels.has_popular_vote`, `labels.yes_no`,
   `labels.number`, `labels.share` (so `labels.share_cell`), `labels.census_year`,
@@ -2098,7 +2096,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   (`pages/election_per_capita.py`), both with the placeholder "All states" (a literal in `_controls`
   in `pages/election_states.py` and in `_control` in `pages/election_per_capita.py`), and on
   `/candidate/<slug>`, with `STATE_PLACEHOLDER` and named by the lede's `FILTER_SENTENCE` or
-  `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`; `/states`; the name, as served, as the link to
+  `FILTER_SENTENCE_ONE_YEAR` in `pages/candidate.py`; `/states` (its list of states, and *State histories compared*, both linking each state by its name from the roster, or by its two-letter code where that name has nothing in it (`link_text` in `pages/states.py`; owner, #641's plan gate); its `LEDE` and `description` in `pages/states.py`); the name, as served, as the link to
   the state history page `/state/<usps>` in T2, T5 and T6 (`components.state_cell`), and the heading
   of the state history page; the state pages' own wording is under *State pages*. The home page's
   lede and its "Browse by state" link (`pages/home.py`). The site navigation's States link,
@@ -2266,6 +2264,14 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Not:** turnout; a candidate's popular votes; the national total (C5); a zero, which no
   marker is; "no popular vote", which the band is not.
 - **Status:** settled.
+
+### State histories compared (the table on `/states`)
+- **Plain:** On the States page, above the list of states: one row for every state and DC, with four figures from that state's history page side by side: the elections in which it appointed electors, its first election in this dataset, in how many of those elections it chose its electors by a popular vote, and the change in its electors appointed from its first election in this dataset to its latest. Each state's name links to its history page. The figures cover only the elections in this dataset.
+- **Precise:** Read from `/v1/elections/states` (N2), declared in `/states`' `on_miss` and filled on a miss (D123, amending D107). For each roster state (roster order, sorted by what its link shows, the name and link from the roster, never N2's own name field, and the state's code where the name has nothing in it), `state_view.states_history` runs its N2 rows through `state_view.rows`, then `state_view.collapsed(state_view.electors, …)`, then `state_view.history_figures`, the path the state's history page takes (D120(g) and its #640 amendment), so each figure equals that page's; `state_view.history_cell` words each figure for both. A cell shows the value half of the page's figure: the elections count, the first election's year, the popular-vote count as "count of N" (`labels.STATES_COUNT_OF`, so a null status is never read as the legislature choosing), and the signed change. A figure the page reads as *No figure* or *Unrecognized value* reads the same here. A state whose rows the row check or the collapse refuses, or that has no N2 rows, reads *Not available right now* in all four cells, with a note under the table; other rows are unaffected. A body-level fault (no list of rows, a row that is no mapping, a code off the roster, every state refused) or an unread N2 replaces the table, its download and its column-name list with the section's own unavailable sentence; the list of states, the heading, the lede and the success marker stay. The four figure columns are page-only (D116(a)). The table's download, `states-history-figures.csv`, has the table's rows: one per state and DC, in the table's order. Its columns are `state`, then the download-only columns `state_usps`, `state_elections_count`, `state_first_election`, `state_pv_elections_count`, `state_pv_elections_n` and `state_electors_change`. Its `state` column holds what the table's link shows: the roster name, or the state's two-letter code where that name has nothing in it, so it is never empty. Each figure is a raw integer: the change is signed (a fall is written "-2"), and the page's "count of N" is split into the count and its N. A figure cell is empty where the page shows that figure's no-figure text, *Unrecognized value* or *Not available right now*, so an empty cell there does not mean the dataset holds no value. The five figure keys are metric keys, not `/v1` fields; computed from electors appointed and `pv_status`, they are in `export.EC_FIELDS` (D123, amending D116(a)). Chart C11, the map (#623), is to join this section and read the same figures.
+- **Shown as:** in `pages/states.py`: `STATES_HISTORY_HEADING`, `STATES_HISTORY_INTRO`, `STATES_HISTORY_UNAVAILABLE`, `STATES_HISTORY_UNAVAILABLE_NOTE`, `STATES_HISTORY_DOWNLOAD_NOTE` (under the table and in the download's preamble), `PAGE_ONLY` (the column-name list's four page-only rows, each naming its download columns and the served fields it is built from), and the download "each state's history figures" in `states-history-figures.csv`, whose preamble ends on `STATES_HISTORY_EMPTY_CELL_LINE` in place of `export.NULL_LINE`; in `labels.py`: `STATES_HISTORY_HEADERS` (keyed by metric key), `STATES_COUNT_OF`, and `LABELS["state"]` for the state column; cells through `state_view.history_cell` (`labels.metric_elections`, `labels.metric_first_election`, `labels.metric_count`, `labels.metric_change`, `labels.METRIC_NO_FIGURE_NO_ELECTORS`, `labels.METRIC_NO_FIGURE`, `labels.UNRECOGNIZED`) and `labels.UNAVAILABLE_CELL`.
+- **Source:** #641 (the owner chose to ship the table before the map, 2026-11-24; the card order, the refused-state cell, the CSV's figure columns and the closing line in place of `NULL_LINE`: owner decisions at and after its plan gate, 2026-11-25); D120 (residuals (1)–(3)); D121(f); D096(d); D116(a); D123; reader wording: `ba` spec for #641.
+- **Not:** The list of states below it. A state's history page, which shows more (the took-office count, the charts). A historical record of when a state first voted. The *Degraded state* (the whole page). A download of N2's rows.
+- **Status:** settled (`STATES_HISTORY_DOWNLOAD_NOTE`, `STATES_HISTORY_EMPTY_CELL_LINE`, the `PAGE_ONLY` download-column wording and the download's name approved by the owner at #641's merge gate, 2026-11-26)
 
 ### Theme choice (Dark, Auto or Light)
 - **Plain:** How the site looks: dark pages, light pages, or Auto, which follows the light or
@@ -2472,7 +2478,7 @@ articles and announcements). Every rule binds all three unless the rule states a
   names, in the chart's key, the series of markers drawn in place of a point or bar for such a
   value (C5 and C10 through `labels.C5_MARKER_LABELS` and `labels.C10_MARKER_LABELS`), and
   `labels.C4_HOVER`, `labels.C4_STATE_HOVER`, `labels.C5_HOVER` and `labels.C10_HOVER` write
-  it with `labels.UNRECOGNIZED_NOTE`.
+  it with `labels.UNRECOGNIZED_NOTE`. On `/states`, the table's figure cells, through `labels.cell` (*State histories compared*).
 - **Source:** owner decision, 2026-10-10, #348 (no raw values in cells); wording: owner decision,
   2026-10-11, #348; the rule (a null names no cause; a non-null value outside the known set reads
   this) and its reach to the numeric cells and the census year: owner decisions at the #355 plan
@@ -2554,6 +2560,9 @@ Every `LABELS` key and the entry that defines it.
 
 T1's recipients column has no `LABELS` key: its header is a page constant (`RECIPIENTS_HEADER`,
 *Recipients*).
+
+The `/states` table's four figure columns have no `LABELS` key: their headers are
+`labels.STATES_HISTORY_HEADERS`, keyed by metric key (*State histories compared*).
 
 Metric keys (`labels.METRIC_LABELS`) are not `LABELS` keys; each is named under its entry's
 **Shown as**: `elections_shown` (*Elections shown*), `ec_margin_mean` and `pv_margin_mean`
@@ -2647,10 +2656,6 @@ decision and who makes it.
   this election", which does not hold for 1912 and the other elections two years after a census,
   and uses "apportionment" in prose. #379 rewords it (owner decision, 2026-11-02). The owner
   approves the rewrite, on a label spec from `ba`.
-- **A page-level sentence shows only in the page states where it is true** (wording rule): the
-  `/states` lede (a literal in `layout` in `pages/states.py`) says "Open one to see …" on the
-  degraded state too, where the list of states it points at does not show. A follow-up rewords or
-  splits it; the owner approves, on a label spec from `ba`.
 - **Candidates with electoral votes chart (C9)**, **Electoral votes outside the top two** and
   **Electors without a counted vote**: the historical claims in the #563 wording await the
   owner's check: 1872, Horace Greeley 3 electoral votes cast and none counted

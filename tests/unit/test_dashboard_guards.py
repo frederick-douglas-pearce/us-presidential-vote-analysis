@@ -121,10 +121,11 @@ FIXTURE_FILES = {
     "/v1/meta": "v1_meta.json",
     "/v1/elections": "v1_elections.json",
     "/v1/elections/1824": "v1_elections_1824.json",
-    # N1 (#431), the elections pages' fill on a miss (#434, #436, #437, #562). N2
-    # (#428) is not here: no page reads it since #562 (D107), so a page that reads it
-    # again fails this run by name.
+    # N1 (#431), the elections pages' fill on a miss (#434, #436, #437, #562).
     "/v1/elections/summary": "v1_elections_summary.json",
+    # N2 (#428), /states' history table's fill on a miss since #641 (D123, amending
+    # D107), the run's last: ``/states`` renders after every ``/state/GA…`` page.
+    "/v1/elections/states": "v1_elections_states.json",
     # The state roster, ``/v1/elections/{year_max}`` (#279), and the state page's fill.
     "/v1/elections/2024": "v1_elections_2024.json",
     "/v1/states/GA": "v1_states_GA.json",
@@ -152,6 +153,8 @@ DOWNLOAD_IDS_BY_PAGE = {
     "/state/<usps>/elections": ("state-results-csv",),
     "/state/<usps>/per-capita": ("state-per-capita-csv",),
     "/candidate/<slug>": ("candidate-history-csv",),
+    # The history table (#641, D123).
+    "/states": ("states-history-csv",),
 }
 DOWNLOAD_IDS = tuple(i for ids in DOWNLOAD_IDS_BY_PAGE.values() for i in ids)
 
@@ -190,8 +193,9 @@ ELECTION_MISSES = [MISS_PATH, "/v1/elections/1824/per-capita"]
 
 #: The elections pages' fills on a miss after :data:`ELECTION_MISSES` (``/elections``
 #: sorts after ``/election/1824…`` and before ``/state/GA``): N1, which the index's
-#: averages read first, and its two subpages (#562) then find cached. N2 is read by no
-#: page since #562 (D107). The program still runs on a permissive bucket (D100(h)).
+#: averages read first, and its two subpages (#562) then find cached. N2 is read by
+#: ``/states`` alone since #641 (D123): :data:`STATES_MISSES`. The program still runs
+#: on a permissive bucket (D100(h)).
 ELECTIONS_MISSES = ["/v1/elections/summary"]
 #: The same fill by page (#562), each render's own slice of ``SERVED``.
 ELECTIONS_PAGE_MISSES = {
@@ -199,8 +203,8 @@ ELECTIONS_PAGE_MISSES = {
     "/elections/majority": [],
     "/elections/over-time": [],
 }
-#: N2, which no page reads since #562 (D107): asserted absent from every request.
-RETIRED_N2 = "/v1/elections/states"
+#: N2 (#641, D123, amending D107): the one page that declares it, and its fill.
+N2_PATH = "/v1/elections/states"
 
 #: The fills on a miss after :data:`ELECTIONS_MISSES`, in the order the success run
 #: renders the pages that make them: the state history's roster,
@@ -218,6 +222,12 @@ STATE_PAGE_MISSES = {
     "/state/<usps>/elections": [],
     "/state/<usps>/per-capita": ["/v1/states/GA/per-capita"],
 }
+#: The fill on a miss after :data:`STATE_MISSES`: ``/states`` sorts after every
+#: ``/state/GA…`` page, so the roster is filled and N2 is its one fill (#641, D123).
+STATES_MISSES = [N2_PATH]
+#: The same by page: the slice that pins N2 to ``/states``' render, since an earlier
+#: page reading it would leave this slice empty.
+STATES_PAGE_MISSES = {"/states": [N2_PATH]}
 
 
 def _run(program: str) -> subprocess.CompletedProcess[str]:
@@ -548,7 +558,7 @@ for page in PAGES:
         misses.append(template.format(**values))
 assert {MISS_PATH!r} in misses, f"no registered page reads the miss path: {{misses}}"
 # Every named fill, so a page that stops declaring one in on_miss fails by name.
-assert set({CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r}) <= set(
+assert set({CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r} + {STATES_MISSES!r}) <= set(
     misses
 ), misses
 # Warmup's fills wait for tokens without limit: past the bucket's burst each one sleeps
@@ -586,11 +596,12 @@ for page in PAGES:
 # Each election page made its own fill and no other's (#465), and so did each state
 # page (#559).
 for key, misses in {{
-    **{ELECTION_PAGE_MISSES!r}, **{STATE_PAGE_MISSES!r}, **{ELECTIONS_PAGE_MISSES!r}
+    **{ELECTION_PAGE_MISSES!r}, **{STATE_PAGE_MISSES!r}, **{ELECTIONS_PAGE_MISSES!r},
+    **{STATES_PAGE_MISSES!r},
 }}.items():
     assert served_by_page[key] == misses, (key, served_by_page[key], misses)
-# No page reads N2 since #562 (D107), answered or not.
-assert {RETIRED_N2!r} not in REQUESTED, REQUESTED
+# N2 is declared by /states alone (#641, D123): a second reader is a deliberate edit.
+assert [p["path"] for p in PAGES if {N2_PATH!r} in p.get("on_miss", ())] == ["/states"]
 # Every table's CSV (#309) is built in these renders, under this guard, on its own
 # page. That a download is its link's data: URL with no route or callback behind it
 # is checked elsewhere: link_problems and TestRequestBudget in test_dashboard_export.py.
@@ -616,7 +627,7 @@ assert unrendered_charts(
     {{"C99": _charts.Chart("/elections", "t"), "C98": _charts.Chart("/elections", "t", True)}}
 ) == ["C99"]
 
-for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r}:
+for miss in {CANDIDATE_MISSES!r} + {ELECTION_MISSES!r} + {ELECTIONS_MISSES!r} + {STATE_MISSES!r} + {STATES_MISSES!r}:
     assert miss in api.CLIENT.snapshot.responses, ("the miss was not stored", miss)
 
 # A year the index does not serve: refused from the cached index, so nothing is
@@ -686,7 +697,7 @@ assert states_page["success"] == "states", states_page["success"]
 
 expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
-expected += [*{CANDIDATE_MISSES!r}, *{ELECTION_MISSES!r}, *{ELECTIONS_MISSES!r}, *{STATE_MISSES!r}]
+expected += [*{CANDIDATE_MISSES!r}, *{ELECTION_MISSES!r}, *{ELECTIONS_MISSES!r}, *{STATE_MISSES!r}, *{STATES_MISSES!r}]
 assert SERVED == expected, (SERVED, expected)
 """
         + _ALL_MODULES_LOADED
@@ -910,7 +921,11 @@ def test_the_guard_values_render_the_miss_path() -> None:
     assert ELECTION_MISSES[0] == MISS_PATH
     # Every fill on a miss the success run expects is answered from a recording.
     assert set(
-        CANDIDATE_MISSES + ELECTION_MISSES + ELECTIONS_MISSES + STATE_MISSES
+        CANDIDATE_MISSES
+        + ELECTION_MISSES
+        + ELECTIONS_MISSES
+        + STATE_MISSES
+        + STATES_MISSES
     ) <= set(FIXTURE_FILES)
 
 
