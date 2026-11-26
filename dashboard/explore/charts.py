@@ -172,9 +172,21 @@ _COLOR_KEY_RE = re.compile(r".*(?:color|colors|colorway)")
 #: which the page's text reads too.
 FONT_TOKEN = "--font-body"
 
-#: Color attributes no chart may set: a colorscale maps numbers to colors that are no
-#: token.
-_REFUSED_KEY_RE = re.compile(r".*colorscale")
+#: Color-scale attributes no chart may set, matched by key name at any depth (#645,
+#: D121): a colorscale maps numbers to colors that are no token, and each other key
+#: here makes plotly.js draw one (its ``hasColorscale``) or a colorbar in its default
+#: colorscale. In plotly.js 4.1.1 they sit on a ``scatter`` or ``bar`` trace's
+#: ``marker`` (``showscale`` and ``colorbar`` there only) and ``marker.line``, on the
+#: layout (``coloraxis``, ``coloraxis2``, …, and ``colorscale``), and in a scatter's
+#: ``fillgradient``; ``zmid`` and ``zauto`` are on no allowed trace type, and are here
+#: so that every refusal D121(a) makes for the map is in this one set. ``zmin`` and
+#: ``zmax`` are not, since the map sets them. The one exception is #639's ``map_bins``
+#: (D121(b)): on the map's ``data[0]`` only, ``colorscale`` (with its stops),
+#: ``colorbar`` and ``showscale``, at those exact paths.
+_REFUSED_KEY_RE = re.compile(
+    r".*colorscale|showscale|colorbar|cauto|cmin|cmax|cmid|coloraxis\d*"
+    r"|reversescale|fillgradient|zmid|zauto"
+)
 
 #: The one Plotly template every chart is drawn with (#432), in both palettes: its color
 #: slots name tokens, which :data:`CHART_CALLBACK` resolves from the palette in effect,
@@ -397,17 +409,18 @@ def color_problems(figure: Mapping[str, Any]) -> list[str]:
     The allowlist: a key ending ``color``, ``colors`` or ``colorway`` holds a token
     reference other than :data:`FONT_TOKEN`, or (``colorway`` only) a list of them;
     ``family`` may hold only :data:`FONT_TOKEN`; no other string contains ``var(``; no
-    colorscale. A numeric or list ``color`` is refused, so a trace never colors its
-    points one by one: color would then carry categories inside one trace, where
-    :func:`color_only_pairs` cannot see it, and a number would pick a colorscale's
-    color, which is no token. Whether a named color token exists in ``style.css`` is
-    the tests' to check (this module reads no file): ``TestEveryChart`` for every
-    rendered chart, ``TestTemplate`` for the template.
+    key of :data:`_REFUSED_KEY_RE` (a colorscale, a colorbar, or a key that draws
+    either, #645), on any value. A numeric or list ``color`` is refused, so a trace
+    never colors its points one by one: color would then carry categories inside one
+    trace, where :func:`color_only_pairs` cannot see it, and a number would pick a
+    colorscale's color, which is no token. Whether a named color token exists in
+    ``style.css`` is the tests' to check (this module reads no file):
+    ``TestEveryChart`` for every rendered chart, ``TestTemplate`` for the template.
     """
     problems = []
     for path, key, value in _walk(figure):
         if _REFUSED_KEY_RE.fullmatch(key):
-            problems.append(f"{path}: no colorscale")
+            problems.append(f"{path}: no colorscale or colorbar")
         elif _COLOR_KEY_RE.fullmatch(key):
             if path.endswith("]"):
                 continue  # an item of a color list: the list itself is checked
@@ -664,11 +677,11 @@ def number_problems(figure: Mapping[str, Any]) -> list[str]:
 
 #: The trace types a chart may draw (D121(b′), #638): a closed allow-list, so it fails
 #: closed as plotly.js adds types. Any other type is refused on every chart, since
-#: several (a ``choropleth`` with no ``colorscale``, a trace naming a ``coloraxis``,
-#: ``heatmap``, ``histogram2d``, ``densitymap``, ``surface`` and more) color by a
-#: number in plotly's default colorscale, which is no token, with no key
-#: :func:`color_problems` would see. A trace with no ``type`` is a ``scatter``, as
-#: every check here reads it.
+#: several (a ``choropleth`` with no ``colorscale``, ``heatmap``, ``histogram2d``,
+#: ``densitymap``, ``surface`` and more) color by a number in plotly's default
+#: colorscale, which is no token, with no key :func:`color_problems` would see. (A
+#: trace naming a ``coloraxis`` is refused by that key too since #645.) A trace with
+#: no ``type`` is a ``scatter``, as every check here reads it.
 TRACE_TYPES: frozenset[str] = frozenset({"scatter", "bar"})
 
 
