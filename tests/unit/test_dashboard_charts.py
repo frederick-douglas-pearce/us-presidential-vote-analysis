@@ -745,6 +745,17 @@ class TestRefusedColorKeys:
         for key in misses:
             assert not refused.fullmatch(key), key
 
+    def test_color_problems_admits_a_near_miss_and_zmin_zmax(self) -> None:
+        """Through :func:`charts.color_problems`, not the pattern alone: a key that
+        holds a refused name inside a longer one (``xcmin``, ``showscales``) and the
+        map's ``zmin``/``zmax`` are not refused, so the rule matches the whole key."""
+        names = ["xcmin", "showscales", "colorbarx", "zmin", "zmax"]
+        figure = {
+            "data": [{**colored("bar"), **dict.fromkeys(names, 0)}],
+            "layout": dict.fromkeys(names, 0),
+        }
+        assert charts.color_problems(figure) == []
+
     @pytest.mark.parametrize("kind", ["scatter", "bar"])
     def test_the_base_traces_pass(self, kind: str) -> None:
         figure = {"data": [colored(kind)]}
