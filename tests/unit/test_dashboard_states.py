@@ -484,6 +484,19 @@ class TestHistoryValues:
         assert state_view.history_values(None) == blank
         assert state_view.history_values(state_view.UNRECOGNIZED_HISTORY) == blank
 
+    def test_a_state_with_no_electors_appointed_is_all_blank(self) -> None:
+        # Recognized figures with no year of electors (an allotment of 0 only): the
+        # page shows no-electors wording for every figure, so the download writes no
+        # number, never a count of 0 (#641's acceptance gate, Class B survivor
+        # history-values-zero-elections).
+        figures = state_view.history_figures(
+            [{"year": 1864, "state_electoral_votes": 0, "pv_status": "not_participating"}]
+        )
+        assert not figures.unrecognized and figures.elections == 0
+        assert state_view.history_values(figures) == dict.fromkeys(
+            state_view.HISTORY_VALUE_KEYS
+        )
+
     def test_a_count_with_no_n_leaves_both_popular_vote_columns_blank(self) -> None:
         records = [
             {"year": 1824, "state_electoral_votes": 9, "pv_status": None},
