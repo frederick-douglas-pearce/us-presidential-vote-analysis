@@ -45,10 +45,14 @@ TABLE_ID = PICKER_MOD["HISTORY_TABLE_ID"]
 UNAVAILABLE_ID = PICKER_MOD["HISTORY_UNAVAILABLE_ID"]
 GLOSSARY_ID = PICKER_MOD["HISTORY_GLOSSARY_ID"]
 N2_PATH = api.ELECTION_STATES_PATH
-#: The roster's states (one row per candidate and state) in the page's order, by name.
+#: The roster's states (one row per candidate and state) in the page's order: by what
+#: each link shows (the name, or the code where the name is blank).
 ROSTER_STATES = [
     usps
-    for usps, _ in sorted(state_view.roster(ROSTER)[1].items(), key=lambda kv: kv[1])
+    for usps, _ in sorted(
+        state_view.roster(ROSTER)[1].items(),
+        key=lambda kv: PICKER_MOD["link_text"](*kv),
+    )
 ]
 
 

@@ -127,8 +127,8 @@ dash.register_page(
 
 
 def roster(body: Any, year: int) -> list[tuple[str, str]]:
-    """``(usps, name)`` for each state the roster names, sorted by name, or
-    ``TypeError``.
+    """``(usps, name)`` for each state the roster names, sorted by what its link shows
+    (the name, or the code where the name is blank), or ``TypeError``.
 
     Read by :func:`explore.state_view.roster`, the reading the state pages judge from
     too, and the rows must name the year the roster was read for. Each name is as

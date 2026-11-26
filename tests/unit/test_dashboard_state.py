@@ -3704,10 +3704,10 @@ class TestFurtherStateFigures:
 
 
 def n2_records() -> dict[str, list[dict[str, Any]]]:
-    """N2's rows, one state's at a time, along the path the ``/states`` table and map
-    (#641, #623) are to take (#640, D120): the page's row check, ``state_view.rows``,
-    then C7's per-year collapse, ``state_view.electors``, as the history page runs
-    them. The collapse refuses a year whose rows disagree and a gap; it accepts a
+    """N2's rows, one state's at a time, along the path the ``/states`` table takes
+    (#641, D123) and C11's map (#623) is to (#640, D120): the page's row check,
+    ``state_view.rows``, then C7's per-year collapse, ``state_view.electors``, as the
+    history page runs them. The collapse refuses a year whose rows disagree and a gap; it accepts a
     repeated identical row, so N2's one row per state-year is
     ``TestN2Fixture.test_count_and_no_repeat``'s check, not this helper's."""
     path = "/v1/elections/states"
@@ -3725,7 +3725,7 @@ def n2_records() -> dict[str, list[dict[str, Any]]]:
 
 class TestHistoryFiguresOnN2:
     """``state_view.history_figures`` is the one computation the ``/states`` table
-    and map are to share (#621, D120; #641, #623): N2 serves one row per state-year
+    shares (#621, D120; #641, D123), and C11's map (#623) is to: N2 serves one row per state-year
     with the fields it reads, and each state's rows pass the page's own row check and
     collapse (:func:`n2_records`, #640), so the map's values are to equal each state
     page's."""
@@ -4418,9 +4418,11 @@ def _no_allotment(rows: list[dict[str, Any]]) -> None:
 class TestSharedCollapse:
     """C7's per-year collapse lives in ``state_view`` (#640, D120): the history page
     reads a state's rows through ``state_view.collapsed(state_view.electors, …)``, and
-    the ``/states`` table and map (#641, #623) are to read N2's through the same call.
-    These tests feed both shapes of rows to it directly: each fault reads as ``None``
-    (no figures) for both. That the ``/states`` render calls it is #641's to guard."""
+    the ``/states`` table reads N2's through the same call (#641, D123), as C11's map
+    (#623) is to. These tests feed both shapes of rows to it directly: each fault reads
+    as ``None`` (no figures) for both. That the ``/states`` render calls it is
+    ``TestStatesHistory.test_the_render_reads_the_shared_path``
+    (``test_dashboard_states.py``)."""
 
     SOURCE = "/v1/elections/states"
 
