@@ -8,7 +8,10 @@ Its results by election (T4, #279) is a page of its own since #619,
 and the section links join them (D105, D118). C7 and C10 come from one response,
 ``/v1/states/{usps}``, filled on a miss, which the results page reads too; they
 collapse its rows, one per candidate, to one per election (D106, D113), and their table
-joins the two collapses on the year (#618, D117). The state is the path
+joins the two collapses on the year (#618, D117). C7's collapse is
+:func:`explore.state_view.electors`, run through :func:`explore.state_view.collapsed`,
+the functions the ``/states`` table and map share (#640, D120); C10's,
+:func:`popular_totals`, is this page's alone. The state is the path
 (``/state/<usps>``, an item singular as ``/states`` is plural), in upper case as the
 API writes a USPS code. It is validated against the state roster before it is
 formatted into an API path: the latest election's rows (``/v1/elections/{year_max}``,
@@ -34,7 +37,6 @@ provenance footer comes from the response's own ``meta.provenance``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any, NamedTuple
 
 import dash
@@ -215,62 +217,12 @@ dash.register_page(
 )
 
 
-def _per_year(
-    rows: list[dict[str, Any]], usps: str, source: str, field: str
-) -> dict[int, dict[str, Any]]:
-    """One record per year of ``rows`` (``year``, ``state_usps``, ``pv_status`` and
-    ``field``), the rule C7 and C10 share (D106, D113): every row of a year must carry
-    one ``pv_status`` (a null beside a value is two values, D077, D098), so a
-    disagreement there degrades both charts. Only ``field`` is left for the caller to
-    fold in, as ``None`` here. Raises ``KeyError`` for a row without ``year`` or
-    ``pv_status`` and ``TypeError`` for a year's two statuses."""
-    by_year: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        year = row["year"]
-        record = {
-            "year": year,
-            "state_usps": usps,
-            field: None,
-            "pv_status": row["pv_status"],
-        }
-        kept = by_year.setdefault(year, record)
-        if not over_time.same(kept["pv_status"], record["pv_status"]):
-            raise TypeError(f"{source} has two values of pv_status in {year}")
-    return by_year
-
-
-def electors(
-    rows: list[dict[str, Any]], served: set[int], usps: str, source: str
-) -> list[dict[str, Any]]:
-    """C7's rows (#560, D106): the state's appointed allotment and popular-vote status,
-    one per election from its first, collapsed from ``rows`` (one per candidate, as the
-    results page's T4 shows them, already checked by :func:`explore.state_view.rows`,
-    so each row's year is a served year).
-
-    Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a year's
-    rows that disagree on either value (a null beside a figure is two values, D077,
-    D098) or a gap after the state's first election
-    (:func:`explore.over_time.state_series`, C7's rule, which C4's one-state series
-    shared until #562, D107), so C7 draws one value per election or nothing.
-    """
-    field = "state_electoral_votes"
-    by_year = _per_year(rows, usps, source, field)
-    seen: set[int] = set()
-    for row in rows:
-        year, value = row["year"], row[field]
-        if year in seen and not over_time.same(by_year[year][field], value):
-            raise TypeError(f"{source} has two values of {field} in {year}")
-        by_year[year][field] = value
-        seen.add(year)
-    return over_time.state_series(by_year, served, source, usps)
-
-
 def popular_totals(
     rows: list[dict[str, Any]], served: set[int], usps: str, source: str
 ) -> list[dict[str, Any]]:
     """C10's rows (#582, D113): the state's total popular vote and popular-vote status,
-    one per election from its first, collapsed from ``rows`` as :func:`electors`
-    collapses C7's, and as checked.
+    one per election from its first, collapsed from ``rows`` as
+    :func:`explore.state_view.electors` collapses C7's, and as checked.
 
     ``state_popular_total`` is a joined field, null on any candidate row with no
     popular-vote record in the state (``EcPvRow``'s own description, "None if no PV"),
@@ -279,7 +231,8 @@ def popular_totals(
     must carry a total, and those must be one value: a candidate figure beside a null
     total contradicts the field's meaning and refuses, alone in its year or not (D113,
     amendment). A year where every row is skipped reads a null total, which its cell
-    then names the cause of. ``pv_status`` keeps C7's rule (:func:`_per_year`).
+    then names the cause of. ``pv_status`` keeps C7's rule
+    (:func:`explore.state_view.per_year`).
 
     Pure; raises ``KeyError`` for a row without a field and ``TypeError`` for a row
     with a figure and no total, a year's two totals or two statuses, or a gap after the
@@ -287,7 +240,7 @@ def popular_totals(
     value per election or nothing.
     """
     field = "state_popular_total"
-    by_year = _per_year(rows, usps, source, field)
+    by_year = state_view.per_year(rows, usps, source, field)
     seen: set[int] = set()
     for row in rows:
         year, value, votes = row["year"], row[field], row["popular_votes"]
@@ -300,26 +253,6 @@ def popular_totals(
         by_year[year][field] = value
         seen.add(year)
     return over_time.state_series(by_year, served, source, usps)
-
-
-Collapse = Callable[[list[dict[str, Any]], set[int], str, str], list[dict[str, Any]]]
-
-
-def collapsed(
-    collapse: Collapse,
-    rows: list[dict[str, Any]],
-    served: set[int],
-    usps: str,
-    source: str,
-) -> list[dict[str, Any]] | None:
-    """One chart's collapse over the state's whole history (:func:`electors` or
-    :func:`popular_totals`), or ``None`` where its rows cannot be read: run once per
-    render (#620, D119), so the span, the figures and the chart's half read one
-    result, and a fault here takes only that chart."""
-    try:
-        return collapse(rows, served, usps, source)
-    except (KeyError, TypeError):
-        return None
 
 
 class Range(NamedTuple):
@@ -760,7 +693,8 @@ def _charts_section(
     state's rows from the API path ``source``. The slider sits directly above what it
     narrows and below the figures, which it does not (D122).
 
-    ``full`` is each chart's whole collapse (:func:`collapsed`), ``None`` where it
+    ``full`` is each chart's whole collapse (:func:`explore.state_view.collapsed`),
+    ``None`` where it
     cannot be read. With neither, there is nothing to narrow: no slider, and the
     table's heading shows :data:`ELECTORS_TOTALS_TABLE_UNAVAILABLE` in its place. Each
     chart draws its collapse narrowed to ``chosen`` (:func:`narrow`), in a ``try`` of
@@ -920,8 +854,8 @@ def render(
     # #620 (D119(d)).
     full: tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None] = (
         (
-            collapsed(electors, rows, served, usps, source),
-            collapsed(popular_totals, rows, served, usps, source),
+            state_view.collapsed(state_view.electors, rows, served, usps, source),
+            state_view.collapsed(popular_totals, rows, served, usps, source),
         )
         if labels.has_text(rows[0]["state"])
         else (None, None)
