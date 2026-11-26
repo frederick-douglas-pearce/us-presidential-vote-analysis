@@ -768,9 +768,7 @@ class TestRefusedColorKeys:
             target = target[part]
         target[key] = value
         path = ".".join(p for p in ("data[0]", holder, key) if p)
-        assert charts.figure_problems(figure) == [
-            f"{path}: no colorscale or colorbar"
-        ]
+        assert charts.figure_problems(figure) == [f"{path}: no colorscale or colorbar"]
 
     @pytest.mark.parametrize(("key", "value"), list(LAYOUT_KEYS.items()))
     def test_a_layout_key_is_refused_at_its_path(self, key: str, value: Any) -> None:

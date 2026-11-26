@@ -189,7 +189,6 @@ _REFUSED_KEY_RE = re.compile(
     r"|reversescale|fillgradient|zmid|zauto)"
 )
 
-
 #: The one Plotly template every chart is drawn with (#432), in both palettes: its color
 #: slots name tokens, which :data:`CHART_CALLBACK` resolves from the palette in effect,
 #: so "the light template" and "the dark template" are this one resolved against each.
