@@ -978,8 +978,10 @@ class TestSharedPieces:
             "query",
         }
         # And the state pages' (#559), which therefore own the roster reading, and since
-        # #621 (D120) the state history's figures, which the /states map shares.
-        assert graph["state_view"] == {"labels", "metrics", "query"}
+        # #621 (D120) the state history's figures, which the /states map is to share,
+        # and since #640 (D120) C7's per-year collapse, which reads ``over_time``'s
+        # ``same`` and ``state_series``.
+        assert graph["state_view"] == {"labels", "metrics", "over_time", "query"}
         # The summaries share the cells' rule of what is a figure (#437, D097(f)).
         assert graph["metrics"] == {"labels"}
         assert in_cycles(graph) == []
