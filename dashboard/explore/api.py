@@ -166,6 +166,12 @@ CANDIDATES_PATH = "/v1/candidates"
 #: is unchanged.
 SUMMARY_PATH = "/v1/elections/summary"
 
+#: Every state's row for every election in one response (N2, #428, D098): the state
+#: picker's history table on ``/states`` (#641, D123, amending D107), and chart C11's
+#: map after it (#623). A literal, declared in ``on_miss`` and filled on a miss
+#: (D074(ii)), so D072's prefetch extent is unchanged (D123 names when that changes).
+ELECTION_STATES_PATH = "/v1/elections/states"
+
 _PLACEHOLDER_RE = re.compile(r"{(.*?)}")
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")

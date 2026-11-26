@@ -14,11 +14,13 @@ body one refuses both refuse.
 
 It also holds the state history's per-year collapse, :func:`electors` read through
 :func:`collapsed` (#640, D120), and its headline figures over the records it returns,
-:func:`history_figures` (#621, D120). The ``/states`` table and map (#641, #623) are
-to call the same functions, so that, once each has checked its rows with :func:`rows`
-first as the history page does, they refuse the same rows and compute exactly what
-each state's page shows: the rule of an election with electors appointed and the
-popular-vote flag live here, the arithmetic in :mod:`explore.metrics`.
+:func:`history_figures` (#621, D120), with each figure's wording, :func:`history_cell`
+(#641). The ``/states`` table (#641, D123) reads every state's N2 rows through
+:func:`states_history`, which checks them with :func:`rows` first and then calls the
+same functions, so it refuses the same rows and computes exactly what each state's
+page shows; C11's map (#623) is to call it too. The rule of an election with electors
+appointed and the popular-vote flag live here, the arithmetic in
+:mod:`explore.metrics`.
 
 A shared module, like ``components`` and ``labels``: pure functions of what a page
 already read, importing nothing from ``explore`` but ``labels``, ``metrics``,
@@ -199,10 +201,11 @@ def electors(
     """C7's rows (#560, D106): the state's appointed allotment and popular-vote status,
     one per election from its first, collapsed from ``rows``: one per candidate on the
     history page (``/v1/states/{usps}``); one per election from N2
-    (``/v1/elections/states``) for the ``/states`` table and map (#641, #623), which
-    are to call it. Moved here from ``pages/state.py`` by #640 (D120), so that a caller
-    that checks its rows first, as the precondition below says, refuses the same rows
-    as the page before :func:`history_figures` reads them.
+    (``/v1/elections/states``) for the ``/states`` table (#641, D123, through
+    :func:`states_history`), and C11's map (#623) after it. Moved here from
+    ``pages/state.py`` by #640 (D120), so that a caller that checks its rows first,
+    as the precondition below says, refuses the same rows as the page before
+    :func:`history_figures` reads them.
 
     **The caller's precondition.** ``rows`` are mappings of one state whose ``year``
     :func:`explore.query.checked_year` accepts and the index serves, as
@@ -243,9 +246,9 @@ def collapsed(
     ``TypeError``): the history page runs it once per render (#620, D119), so the span,
     the figures and the chart's half read one result, and a fault there takes only
     that chart. It catches those two only; any other exception propagates
-    (``TestSharedCollapse``). The ``/states`` table and map (#641, #623) are to read a
-    state's N2 rows through the same function (#640, D120), so that a fault removes
-    that state's figures there as it does on its page."""
+    (``TestSharedCollapse``). The ``/states`` table reads each state's N2 rows through
+    the same function (#640, D120; #641, D123, :func:`states_history`), so that a
+    fault removes that state's figures there as it does on its page."""
     try:
         return collapse(rows, served, usps, source)
     except (KeyError, TypeError):
@@ -350,8 +353,8 @@ def popular_vote_flags(
     year); a missing ``pv_status`` reads as null there. Its one caller is
     :func:`history_figures`, which the history page reaches with :func:`electors`'
     records, and that collapse refuses such a row first (#640, D120); the ``/states``
-    table and map (#641, #623) are to pass the same records, so the null reading is
-    reached only by a direct caller of :func:`history_figures`."""
+    table passes the same records (#641, D123, :func:`states_history`), so the null
+    reading is reached only by a direct caller of :func:`history_figures`."""
     by_year = {r.get("year"): r.get("pv_status") for r in records}
     pairs: list[tuple[int, object]] = []
     for year in years:
@@ -399,14 +402,14 @@ UNRECOGNIZED_HISTORY = HistoryFigures(
 def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
     """The state history's figures over one state's per-year ``records`` (``year``,
     ``state_electoral_votes``, ``pv_status``), the one computation the history page
-    (#621) and the ``/states`` table and map (#641, #623) are to share, so the two
-    cannot disagree (D120).
+    (#621) and the ``/states`` table (#641, D123) share, and C11's map (#623) is to,
+    so the two cannot disagree (D120).
 
     **One record per year.** The page passes C7's collapse, :func:`electors` read
     through :func:`collapsed` (#640, D120), which guarantees it and refuses a year
-    whose rows disagree; the ``/states`` table and map are to pass the same, after
-    checking their rows with :func:`rows`, so the two refuse the same rows. This
-    function also refuses a year named twice itself: every figure then reads
+    whose rows disagree; the ``/states`` table passes the same, after checking its
+    rows with :func:`rows` (:func:`states_history`), so the two refuse the same
+    rows. This function also refuses a year named twice itself: every figure then reads
     unrecognized (:data:`UNRECOGNIZED_HISTORY`), since :mod:`explore.metrics`'
     select and change do not detect a repeated year. That is its own totality backstop,
     for a direct caller that skips the collapse.
@@ -444,3 +447,126 @@ def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
         else metrics.flag_count(flags, True),
         metrics.change(triples),
     )
+
+
+# --- every state's figures, for /states (#641, D123) ---------------------------------
+
+#: The four figures :func:`history_figures` computes, by metric key, in display order:
+#: the keys :func:`history_cell` words and the ``/states`` table shows.
+HISTORY_KEYS = (
+    "state_elections_count",
+    "state_first_election",
+    "state_pv_elections_count",
+    "state_electors_change",
+)
+
+
+def history_cell(figures: HistoryFigures, key: str) -> tuple[str, str | None]:
+    """One of :data:`HISTORY_KEYS`' figures as ``(value, rest)`` (#641, architect
+    I-1): the state history's figure (``pages/state.py``) and the ``/states`` table's
+    cell both read it, so the two cannot word a figure differently. An unrecognized
+    allotment reads :data:`explore.labels.UNRECOGNIZED`; a figure with nothing to
+    show, its own no-figure wording (:data:`explore.labels.METRIC_NO_FIGURE`, or
+    :data:`explore.labels.METRIC_NO_FIGURE_NO_ELECTORS` where no year has electors or
+    for the plain count, D115(i)); else the ``labels.metric_*`` wording. Words nothing
+    itself. ``TypeError`` for a key it does not compute."""
+    years = list(figures.years)
+    no_figure = (
+        labels.METRIC_NO_FIGURE[key]
+        if years and key != "state_elections_count"
+        else labels.METRIC_NO_FIGURE_NO_ELECTORS
+    )
+    if key not in HISTORY_KEYS:
+        raise TypeError(f"{key} is no figure history_figures computes")
+    if figures.unrecognized:
+        return labels.UNRECOGNIZED, None
+    if key == "state_elections_count":
+        return labels.metric_elections(figures.elections, years, no_figure)
+    if key == "state_first_election":
+        return labels.metric_first_election(figures.first, no_figure)
+    if key == "state_pv_elections_count":
+        return labels.metric_count(figures.popular_vote, years, no_figure)
+    return labels.metric_change(figures.change, no_figure)
+
+
+#: The ``/states`` download's figure columns (#641, D123): the raw values a cell shows,
+#: the popular-vote count split into its count and N.
+HISTORY_VALUE_KEYS = (
+    "state_elections_count",
+    "state_first_election",
+    "state_pv_elections_count",
+    "state_pv_elections_n",
+    "state_electors_change",
+)
+
+
+def history_values(figures: HistoryFigures | None) -> dict[str, int | None]:
+    """The raw values of a state's figures, by :data:`HISTORY_VALUE_KEYS`, for the
+    ``/states`` download (#641, D123): the count of elections, the first election's
+    year, the popular-vote count and its N, and the signed change. ``None`` (an empty
+    cell) wherever the page shows no number: a refused state (``figures`` ``None``),
+    an unrecognized figure, or a figure with nothing to show; both popular-vote columns
+    together, so an N of 0 is never written as a count."""
+    empty: dict[str, int | None] = dict.fromkeys(HISTORY_VALUE_KEYS)
+    if figures is None or figures.unrecognized:
+        return empty
+    values = dict(empty)
+    if figures.elections:
+        values["state_elections_count"] = figures.elections
+    if not figures.first.unrecognized and figures.first.first is not None:
+        values["state_first_election"] = figures.first.first[0]
+    pv = figures.popular_vote
+    if not pv.unrecognized and pv.n:
+        values["state_pv_elections_count"] = pv.count
+        values["state_pv_elections_n"] = pv.n
+    if not figures.change.unrecognized and figures.change.value is not None:
+        values["state_electors_change"] = figures.change.value
+    return values
+
+
+def states_history(
+    body: Any, roster_states: list[str], served: set[int], source: str
+) -> dict[str, HistoryFigures | None]:
+    """Every roster state's history figures from N2's ``body`` (``source``, the API
+    path; #641, D123), keyed by USPS code in ``roster_states``' order: ``None`` for a
+    state whose rows are refused, the third cell state beside *No figure* and
+    *Unrecognized value* (D120's residual (2)). The ``/states`` table reads it, and
+    C11's map (#623) is to, leaving a refused state out as it does those two (D123,
+    amending D121(f)).
+
+    Raises ``TypeError`` where the body itself cannot be read, so the whole section
+    degrades: no non-empty list of rows, a row that is not a mapping, a row whose
+    ``state_usps`` is no roster code (D006: the roster is the authority), or every
+    state refused (a fault of the whole response, owner at #641's plan gate).
+
+    Each state's rows take the history page's path, so a state refuses here exactly
+    what its page refuses (D120's residuals (1) and (3)): :func:`rows` (a row of no
+    served year, or a year of the wrong type; a state with no rows, since an empty
+    list is refused), then :func:`collapsed` on :func:`electors`, then
+    :func:`history_figures`. Only a ``KeyError`` or ``TypeError`` from :func:`rows`
+    reads as refused; any other exception propagates, as in :func:`collapsed`. The
+    three are looked up when called, so a test can watch them (``TestStatesHistory``).
+    """
+    found = rows_of(body)
+    if not found:
+        raise TypeError(f"{source} carries no list of rows")
+    groups: dict[str, list[dict[str, Any]]] = {usps: [] for usps in roster_states}
+    for row in found:
+        if not isinstance(row, dict):
+            raise TypeError(f"{source} carries a row that is not an object")
+        usps = row.get("state_usps")
+        if not isinstance(usps, str) or usps not in groups:
+            raise TypeError(f"{source} carries a row of no state on the roster")
+        groups[usps].append(row)
+    result: dict[str, HistoryFigures | None] = {}
+    for usps, group in groups.items():
+        try:
+            checked = rows({"data": group}, usps, served, source)
+        except (KeyError, TypeError):
+            result[usps] = None
+            continue
+        records = collapsed(electors, checked, served, usps, source)
+        result[usps] = None if records is None else history_figures(records)
+    if result and all(figures is None for figures in result.values()):
+        raise TypeError(f"{source} carries no state's rows that can be read")
+    return result

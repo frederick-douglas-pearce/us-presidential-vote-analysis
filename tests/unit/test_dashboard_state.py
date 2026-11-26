@@ -325,7 +325,8 @@ def test_the_per_capita_parser_keeps_only_the_year_range(
 def test_the_picker_is_registered_as_planned() -> None:
     assert PICKER["path"] == "/states"
     assert PICKER["prefetch"] == (api.ELECTIONS_PATH,)
-    assert PICKER["on_miss"] == (api.ROSTER_PATH,)
+    # N2 since #641 (D123, amending D107), filled on a miss: D072's prefetch unchanged.
+    assert PICKER["on_miss"] == (api.ROSTER_PATH, api.ELECTION_STATES_PATH)
     assert PICKER["success"] == PICKER_MOD["PAGE_ID"]
 
 
@@ -733,7 +734,7 @@ class TestRoster:
         _, calls, _ = cached_client(monkeypatch)
         assert PAGE_ID in routed_ids(route("/state/GA", search))
         assert PICKER["success"] in routed_ids(route("/states", search))
-        assert calls == [ROSTER_PATH, GA_PATH]
+        assert calls == [ROSTER_PATH, GA_PATH, api.ELECTION_STATES_PATH]
 
     @pytest.mark.parametrize(
         "coverage",
@@ -1144,7 +1145,8 @@ class TestPicker:
     ) -> None:
         _, calls, _ = cached_client(monkeypatch)
         assert PICKER["success"] in routed_ids(route("/states"))
-        assert calls == [ROSTER_PATH]
+        # The roster, then N2 for the history table (#641, D123).
+        assert calls == [ROSTER_PATH, api.ELECTION_STATES_PATH]
         calls.clear()
         # The state pages read the same roster: no second fill of it.
         assert PAGE_ID in routed_ids(route("/state/GA"))
@@ -3007,14 +3009,22 @@ class TestN2Fixture:
         keys = [(r["year"], r["state_usps"]) for r in N2["data"]]
         assert len(keys) == len(set(keys))
 
-    def test_georgia_equals_the_state_history(self) -> None:
-        history = {r["year"]: r for r in RECORDED["/v1/states/GA"]["data"]}
-        for row in [r for r in N2["data"] if r["state_usps"] == "GA"]:
-            assert (
-                row["state_electoral_votes"]
-                == history[row["year"]]["state_electoral_votes"]
-            )
-            assert row["pv_status"] == history[row["year"]]["pv_status"]
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_each_state_equals_its_state_history(self, usps: str) -> None:
+        # #641's AC2, per year: N2's allotment and status for each year equal the
+        # state history's, and the two hold the same years, both ways (TX since #641).
+        history: dict[int, list[dict[str, Any]]] = {}
+        for r in RECORDED[f"/v1/states/{usps}"]["data"]:
+            history.setdefault(r["year"], []).append(r)
+        mine = [r for r in N2["data"] if r["state_usps"] == usps]
+        assert {r["year"] for r in mine} == set(history)
+        for row in mine:
+            for candidate_row in history[row["year"]]:
+                assert (
+                    row["state_electoral_votes"]
+                    == candidate_row["state_electoral_votes"]
+                )
+                assert row["pv_status"] == candidate_row["pv_status"]
 
     def test_each_per_capita_recording_on_the_shared_fields(self) -> None:
         shared = (

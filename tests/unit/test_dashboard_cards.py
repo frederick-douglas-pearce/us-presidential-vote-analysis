@@ -28,7 +28,8 @@ from tests.unit.test_dashboard_export import all_pages, page_key, page_of
 #: section (#567's plan inventory). The custom-404 page has none.
 CARD_COUNTS = {
     "/": 1,
-    "/states": 1,
+    # The history table's section (#641, D123), then the list of states.
+    "/states": 2,
     "/elections": 1,
     "/elections/majority": 1,
     "/elections/over-time": 1,

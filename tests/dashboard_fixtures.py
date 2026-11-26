@@ -19,8 +19,8 @@ RECORDED_FILES: dict[str, str] = {
     "/v1/elections": "v1_elections.json",
     # Every election's national summary, N1 (#431): the elections pages' source.
     "/v1/elections/summary": "v1_elections_summary.json",
-    # Every state's row for every election, N2 (#428): read by no page since #562
-    # (D107); test input for C7's reconciliation (D106(h)).
+    # Every state's row for every election, N2 (#428): /states' history table since
+    # #641 (D123), and C7's reconciliation oracle (D106(h)).
     "/v1/elections/states": "v1_elections_states.json",
     **{
         f"/v1/elections/{year}": f"v1_elections_{year}.json"

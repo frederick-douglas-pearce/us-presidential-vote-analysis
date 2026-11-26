@@ -25,7 +25,7 @@ import pytest
 from dash import html
 from dash.development.base_component import Component
 
-from explore import api, charts, components, export, labels
+from explore import api, charts, components, export, labels, state_view
 from explore import app as appmod
 from tests.unit.test_dashboard_app import (
     RECORDED,
@@ -54,6 +54,8 @@ TABLES = {
     # T7 has a page of its own since #559.
     "state-per-capita": "/state/<usps>/per-capita",
     "candidate-history": "/candidate/<slug>",
+    # Every state's history figures (#641, D123); not the retired ``state-history``.
+    "states-history": "/states",
 }
 
 #: Each page's reads before #309, recorded on ``main`` at 72312da with
@@ -61,6 +63,10 @@ TABLES = {
 #: The candidate history (#331) was built with its download, so its entry pins its
 #: reads rather than recording them from before one; that a download makes no request
 #: is guarded by ``test_the_shared_modules_read_no_api`` and ``TestRequestBudget``.
+#: The ``/states`` history table's CSV-only figure columns (#641, D123): metric keys,
+#: not served fields, in its download alone.
+FIGURE_COLUMNS = set(state_view.HISTORY_VALUE_KEYS)
+
 READS_BEFORE = {
     "/": ["/v1/meta"],
     "/not-found-404": [],  # the custom-404 page reads no data (#325)
@@ -99,7 +105,8 @@ READS_BEFORE = {
         "/v1/elections",
         "/v1/states/GA",
     ],
-    "/states": ["/v1/elections", "/v1/elections/2024"],
+    # N2 since #641 (D123), for the history table.
+    "/states": ["/v1/elections", "/v1/elections/2024", "/v1/elections/states"],
     "/candidate/<slug>": [
         "/v1/candidates",
         "/v1/elections",
@@ -1593,7 +1600,20 @@ class TestExactlyTheView:
             for link in links(tree).values()
             for field in Csv(link.href).header
         }
-        assert label_key_problems(sorted(headers)) == []
+        # The /states history table's figures are metric keys, not served fields (D123,
+        # amending D116(a)); the test below pins them to that one download.
+        assert label_key_problems(sorted(headers - FIGURE_COLUMNS)) == []
+
+    def test_only_the_states_history_download_carries_figure_columns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        carriers = {
+            link_id
+            for tree in all_pages(monkeypatch).values()
+            for link_id, link in links(tree).items()
+            if FIGURE_COLUMNS & set(Csv(link.href).header)
+        }
+        assert carriers == {"states-history-csv"}
 
     def test_each_filename_names_its_view_and_table(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1616,6 +1636,7 @@ class TestExactlyTheView:
             "state-electors-csv": "state-GA-electors-and-total-popular-vote.csv",
             "state-per-capita-csv": "state-GA-per-capita.csv",
             "candidate-history-csv": "candidate-andrew-jackson-history.csv",
+            "states-history-csv": "states-history-figures.csv",
         }
 
     def test_each_link_on_a_page_has_its_own_name(
@@ -2496,6 +2517,16 @@ GA_FIRST_ROWS = sum(
     if row["year"] == RECORDED["/v1/states/GA"]["data"][0]["year"]
 )
 
+
+def _n2_first_allotment(body: dict[str, Any]) -> None:
+    """Doctor Georgia's first N2 row's allotment (#641): its every figure on
+    ``/states`` then reads unrecognized, as it would on Georgia's own page."""
+    ga = min(
+        (r for r in body["data"] if r["state_usps"] == "GA"), key=lambda r: r["year"]
+    )
+    ga["state_electoral_votes"] = SENTINEL
+
+
 #: Each doctored render, by page key and, after a ``?``, the query it renders under.
 DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     "/elections": (
@@ -2525,6 +2556,8 @@ DOCTORED: dict[str, tuple[dict[str, str], dict[str, Any]]] = {
     ),
     # The headline totals' national fields (#601), which no table shows, doctored on
     # the first row too, so each total reads its own field's value.
+    # The history table on /states (#641, D123): one state's allotment.
+    "/states": ({}, {"/v1/elections/states": _n2_first_allotment}),
     "/candidate/<slug>": (
         {"slug": "andrew-jackson"},
         {
@@ -2592,6 +2625,8 @@ UNRECOGNIZED_CELLS = {
         "state-per-capita": len(PER_CAPITA_ROW_FIELDS),
         "state-per-capita-metrics": 2,
     },
+    # The doctored allotment makes the state's four figures read it (#641, D123).
+    "/states": {"states-history": 4},
     # Each doctored national field makes its own total alone read it (#601, D115).
     "/candidate/<slug>": {
         "candidate-history": len(STATE_ROW_FIELDS) + 1,

@@ -537,6 +537,7 @@ def table(
     notes: tuple[str, ...] = (),
     empty: str = NO_ROWS,
     page_only: tuple[tuple[str, str], ...] = (),
+    null_line: str = export.NULL_LINE,
 ) -> list[Any]:
     """A table, its CSV download and its notes (#309).
 
@@ -560,11 +561,15 @@ def table(
     marked :data:`PAGE_ONLY_CLASS`, with ``sources`` (the served fields it is built
     from) as its tooltip; they follow the ``fields`` headers, and ``render_row``
     writes their cells last. The CSV is built from ``fields`` and ``extra`` alone.
+
+    ``null_line`` is the file's last preamble line, what an empty cell means:
+    :data:`explore.export.NULL_LINE` unless the table's empty cell means something else
+    (the ``/states`` history table's, #641, D123).
     """
     shown = [html.P(note, className="note") for note in notes]
     if not rows:
         return [html.P(empty, className="empty"), *shown]
-    text = export.csv_text((*fields, *extra), rows, download, notes)
+    text = export.csv_text((*fields, *extra), rows, download, notes, null_line)
     return [
         # Wider than a phone: the table scrolls sideways inside its box, the page never.
         html.Div(

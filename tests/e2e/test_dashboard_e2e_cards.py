@@ -44,7 +44,7 @@ pytestmark = pytest.mark.e2e
 #: many cards it shows (the unit suite's ``CARD_COUNTS``).
 CARD_PAGES: dict[str, tuple[str, int]] = {
     "/": (HOME_SUCCESS, 1),
-    "/states": ("#states", 1),
+    "/states": ("#states", 2),  # the history table (#641), then the list
     "/elections": (ELECTIONS_SUCCESS, 1),
     "/elections/majority": (MAJORITY_SUCCESS, 1),
     "/elections/over-time": (OVER_TIME_SUCCESS, 1),
@@ -157,17 +157,19 @@ def test_space_separates_every_card(page: Page, path: str, width: int) -> None:
 
 
 @pytest.mark.parametrize("width", WIDTHS)
-@pytest.mark.parametrize("path", ["/", "/states"])
+@pytest.mark.parametrize(
+    ("path", "tables"), [("/", ()), ("/states", ("#states-history",))]
+)
 def test_every_width_keeps_order_measure_and_tables(
-    page: Page, path: str, width: int
+    page: Page, path: str, tables: tuple[str, ...], width: int
 ) -> None:
-    """Home and the States list take the layout checks every other page's own suite
-    runs (#567's 360 px criterion; neither had a layout test). Their success markers
-    are the lists inside their cards, so the checks root at ``main``, which holds the
-    card, its heading, home's browse links and the footer (#567's review, round 2).
-    Neither shows a table, so the table check has nothing to hold."""
+    """Home and the States page take the layout checks every other page's own suite
+    runs (#567's 360 px criterion; neither had a layout test). The checks root at
+    ``main``, which holds the cards, their headings, home's browse links and the footer
+    (#567's review, round 2). Home shows no table; the States page shows its history
+    table since #641, which the table check holds."""
     open_page(page, path, width)
-    assert_layout_holds(page, "main", (), width, tables_expected=False)
+    assert_layout_holds(page, "main", tables, width, tables_expected=bool(tables))
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])

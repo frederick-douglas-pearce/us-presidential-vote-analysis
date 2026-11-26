@@ -3943,6 +3943,8 @@ PAGE_API_NAMES = {
     "CANDIDATES_PATH",
     # N1, read by the three elections pages (#434, #437, #436; #562).
     "SUMMARY_PATH",
+    # N2, read by /states' history table (#641, D123, amending D107).
+    "ELECTION_STATES_PATH",
     "Validate",
     "accepted",
     # A constant pair a page registers as ``not_found=`` (#325); reads nothing.
