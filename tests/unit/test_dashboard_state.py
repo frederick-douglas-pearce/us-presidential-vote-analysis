@@ -3714,10 +3714,11 @@ def n2_records() -> dict[str, list[dict[str, Any]]]:
 
 
 class TestHistoryFiguresOnN2:
-    """``state_view.history_figures`` is the one computation the ``/states`` map
-    shares (#621, D120; #623): N2 serves one row per state-year with the fields it
-    reads, and each state's rows pass the page's own collapse (:func:`n2_records`,
-    #640), so the map's values equal each state page's."""
+    """``state_view.history_figures`` is the one computation the ``/states`` table
+    and map are to share (#621, D120; #641, #623): N2 serves one row per state-year
+    with the fields it reads, and each state's rows pass the page's own row check and
+    collapse (:func:`n2_records`, #640), so the map's values are to equal each state
+    page's."""
 
     def test_it_is_total_over_every_state_and_spreads_as_planned(self) -> None:
         # The plan's falsifier, on the recording: 13 states lost electors from their
@@ -4465,7 +4466,7 @@ class TestSharedCollapse:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # The page cannot fork the collapse: its render calls ``state_view.collapsed``
-        # on ``state_view.electors`` with its checked rows (architect Q4).
+        # on ``state_view.electors`` with its checked rows (architect Q4),
         # and ``history_figures`` reads the very records that call returned (AC1).
         calls: list[tuple[Any, Any]] = []
         electors_rows: list[Any] = []
