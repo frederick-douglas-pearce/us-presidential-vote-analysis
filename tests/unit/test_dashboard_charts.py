@@ -1237,6 +1237,8 @@ class TestMapRamp:
             ({"tickvals": None}, "data[0].colorbar.tickvals: not two or more"),
             ({"tickvals": [4, 50]}, "data[0].colorbar.tickvals: not from zmin"),
             ({"tickvals": [3, 49]}, "data[0].colorbar.tickvals: not from zmin"),
+            # Past zmax as well as short of it (#623's acceptance gate).
+            ({"tickvals": [3, 51]}, "data[0].colorbar.tickvals: not from zmin"),
             ({"tickvals": [0, 3, 50]}, "data[0].colorbar.tickvals: not from zmin"),
             # One distinct label for each tick.
             ({"ticktext": None}, "data[0].colorbar.ticktext:"),

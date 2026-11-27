@@ -851,6 +851,31 @@ class TestC11:
             value="50",
         )
 
+    def test_the_hover_escapes_a_served_state_name(self) -> None:
+        """A roster name holding markup reaches the hover escaped by
+        :func:`explore.charts.escaped` (D091), never as markup (#623's acceptance
+        gate, a surviving mutant)."""
+        states = [("GA", "<b>Geo&rgia (x)</b>")]
+        figures = {"GA": change_of(3)}
+        figure = PICKER_MOD["c11_figure"]("state_electors_change", states, figures)
+        assert figure is not None
+        hover = figure["data"][0]["hovertext"][0]
+        assert hover.startswith(charts.escaped("<b>Geo&rgia (x)</b>") + "<br>")
+        assert "<b>" not in hover and "(x)" not in hover
+
+    def test_the_hover_escapes_the_cell(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The cell's text reaches the hover escaped too, so no label or served
+        string can write markup or a ``var(--token)`` there (#623's acceptance gate,
+        a surviving mutant)."""
+        monkeypatch.setitem(PICKER_MOD, "cell_text", lambda *_: "<i>3</i> (x)")
+        figure = PICKER_MOD["c11_figure"](
+            "state_electors_change", [("GA", "Georgia")], {"GA": change_of(3)}
+        )
+        assert figure is not None
+        hover = figure["data"][0]["hovertext"][0]
+        assert hover.endswith(": " + charts.escaped("<i>3</i> (x)"))
+        assert "<i>" not in hover
+
     @pytest.mark.parametrize("metric", METRICS)
     def test_the_caption_then_the_pointer(self, metric: str) -> None:
         figure = c11_element(page(metric=metric))
