@@ -15,7 +15,14 @@ D107; D072's prefetch extent unchanged), and computes every state's figures thro
 :func:`explore.state_view.states_history`, the path each state's own page takes, so a
 cell equals that page's figure. A failed or malformed N2 degrades that section alone
 (D096(d)'s rule): the list of states, the heading, the lede and the success marker
-stay. Chart C11's map (#623) is to join the section.
+stay.
+
+Chart C11 (#623, D121 as amended by D124) sits in that section, between its intro and
+the table: a US map shading every state by one of the four figures, read by the same
+path as the table's cells (:func:`explore.state_view.history_values`), and chosen by
+the one query key ``metric`` (:func:`parse_metric`, a closed vocabulary). A change of
+figure writes the query and the router re-renders the page from the cache, with no
+request to the API; the table and its download do not change.
 """
 
 from __future__ import annotations
@@ -23,9 +30,9 @@ from __future__ import annotations
 from typing import Any
 
 import dash
-from dash import dcc, html
+from dash import Input, Output, State, callback, dcc, html, no_update
 
-from explore import api, components, export, labels, state_view
+from explore import api, charts, components, export, labels, query, state_view
 from explore.config import CANONICAL_HOST, SITE_TITLE
 
 #: The wrapper every successful render carries: the list of states.
@@ -39,8 +46,23 @@ HISTORY_TABLE_ID = "states-history"
 HISTORY_GLOSSARY_ID = "states-history-glossary"
 HISTORY_UNAVAILABLE_ID = "states-history-unavailable"
 
-#: The page's wording (#641; ba spec, approved at its plan gate, 2026-11-25). The lede
-#: is true on every state the page renders, the section's degraded one included.
+#: Chart C11 (#623): its registry ID, the sentence in its place when no state has a
+#: number for the figure chosen, the page's own URL and the figure's control (distinct
+#: from every other page's, since Dash registers callbacks app-wide, keyed by output).
+C11_ID = "C11"
+C11_NO_FIGURES_ID = "states-map-no-figures"
+URL_ID = "states-url"
+METRIC_ID = "states-metric"
+#: The query key choosing C11's figure, and its values: the four metric keys
+#: (:data:`explore.state_view.HISTORY_KEYS`), the first the default, which the query
+#: never names (D073).
+METRIC = "metric"
+DEFAULT_METRIC = state_view.HISTORY_KEYS[0]
+
+#: The page's wording (#641; ba spec, approved at its plan gate, 2026-11-25; #623's,
+#: re-run 2026-11-27, approved at its plan gate). The lede is true on every state the
+#: page renders, the section's degraded one included; the filter sentence follows it
+#: only where the figure's control renders (#419).
 LEDE = (
     "Every state and DC in this dataset, and how their histories in it compare. "
     "Each state also has pages of its own."
@@ -50,16 +72,22 @@ DESCRIPTION = (
     "appointed, first election, elections with a popular vote to choose electors, and "
     "change in electors appointed, with a link to each state's pages."
 )
+FILTER_SENTENCE = "Choose the figure the map shows; the table always shows all four."
+#: C11's control: its label, and its placeholder, which never shows (the control
+#: cannot be cleared) but is read as page text.
+METRIC_LABEL = "Show on the map"
+METRIC_PLACEHOLDER = "Choose a figure"
 STATES_HISTORY_HEADING = "State histories compared"
 STATES_HISTORY_INTRO = (
     "The figures each state's own history page shows, side by side for every state "
     "and DC. They cover only the elections in this dataset."
 )
-#: The section's sentence when N2 cannot be read or is malformed: never
-#: ``UNAVAILABLE_MESSAGE``'s wording, which means the whole page.
+#: The section's sentence when N2 cannot be read or is malformed, in place of the
+#: map and the table (#623): never ``UNAVAILABLE_MESSAGE``'s wording, which means the
+#: whole page.
 STATES_HISTORY_UNAVAILABLE = (
-    "The table of each state's history figures can't be shown right now. Please try "
-    "again in a minute."
+    "The map and table of each state's history figures can't be shown right now. "
+    "Please try again in a minute."
 )
 #: Under the table while a state's row reads :data:`explore.labels.UNAVAILABLE_CELL`.
 STATES_HISTORY_UNAVAILABLE_NOTE = (
@@ -112,6 +140,46 @@ PAGE_ONLY = (
     ),
 )
 
+
+def parse_metric(params: Any) -> list[tuple[str, str]]:
+    """The page's one query key (#623), ``metric``, kept only as a metric key C11 can
+    show other than the default (:data:`DEFAULT_METRIC`, which the query never names,
+    D073): a closed vocabulary, so any other value, or one given twice with two
+    values, is dropped. Every other key is dropped. Total and API-free."""
+    if not isinstance(params, dict):
+        return []
+    value = query.single(params.get(METRIC))
+    if value in state_view.HISTORY_KEYS and value != DEFAULT_METRIC:
+        return [(METRIC, value)]
+    return []
+
+
+def chosen_metric(pairs: list[tuple[str, str]]) -> str:
+    """The metric key C11 shows for ``pairs`` (:func:`parse_metric`'s)."""
+    return dict(pairs).get(METRIC, DEFAULT_METRIC)
+
+
+def search_for(metric: Any) -> str:
+    """The query string for the control's value, in the normal form ``og:url`` uses
+    (``""`` or ``?…``): the default figure is omitted."""
+    return query.encode_search(
+        parse_metric({METRIC: metric} if isinstance(metric, str) else {})
+    )
+
+
+@callback(
+    Output(URL_ID, "search"),
+    Input(METRIC_ID, "value"),
+    State(URL_ID, "search"),
+    prevent_initial_call=True,
+)
+def on_metric_change(metric: Any, current: Any) -> Any:
+    """A change of figure becomes a URL change; the router re-renders from the cache,
+    so it reads no API. An unchanged search is left alone."""
+    search = search_for(metric)
+    return no_update if search == (current or "") else search
+
+
 dash.register_page(
     __name__,
     path="/states",
@@ -120,6 +188,7 @@ dash.register_page(
     prefetch=(api.ELECTIONS_PATH,),
     on_miss=(api.ROSTER_PATH, api.ELECTION_STATES_PATH),
     success=PAGE_ID,
+    query=parse_metric,
     # The site navigation link this page marks (#448):
     # the state picker marks its own link.
     nav="states",
@@ -147,28 +216,186 @@ def link_text(usps: str, name: str) -> str:
     return name if labels.has_text(name) else usps
 
 
-def figure_cell(figures: state_view.HistoryFigures | None, key: str) -> Any:
-    """One figure's cell (#641): :data:`explore.labels.UNAVAILABLE_CELL` for a refused
+def cell_text(figures: state_view.HistoryFigures | None, key: str) -> str:
+    """One figure's cell text (#641), which the table's cell and C11's hover both show
+    (#623, D091, D123(e)): :data:`explore.labels.UNAVAILABLE_CELL` for a refused
     state, else the value half of the state page's figure
     (:func:`explore.state_view.history_cell`), the popular-vote count with its N
     (:data:`explore.labels.STATES_COUNT_OF`) where it has a figure: where
     :func:`explore.state_view.history_cell` gives it a rest, which
     :func:`explore.labels.metric_count` does only for a recognized count with an N."""
     if figures is None:
-        return labels.cell(labels.UNAVAILABLE_CELL)
+        return labels.UNAVAILABLE_CELL
     value, rest = state_view.history_cell(figures, key)
     if key == "state_pv_elections_count" and rest is not None:
         pv = figures.popular_vote
         value = labels.STATES_COUNT_OF.format(count=pv.count, n=pv.n)
-    return labels.cell(value)
+    return value
 
 
-def history_section(n2: Any, states: list[tuple[str, str]], index: Any) -> list[Any]:
-    """The history section's children (#641, D123): its heading, then the table, its
-    notes and column-name list, or :data:`STATES_HISTORY_UNAVAILABLE` alone where N2
-    (``n2``, ``None`` when it could not be read) or its rows cannot be read.
-    Everything built from N2 is inside the ``try``; a chart (#623) is to sit outside
-    it (D095(f))."""
+def figure_cell(figures: state_view.HistoryFigures | None, key: str) -> Any:
+    """One figure's table cell (#641): :func:`cell_text` in a cell."""
+    return labels.cell(cell_text(figures, key))
+
+
+# --- chart C11 (#623, D121 as amended by D124) ----------------------------------------
+
+#: Each figure's ramp (D109): the three figures derived from the electoral allotment
+#: red, the count of elections with a popular vote held blue.
+C11_RAMPS = {
+    "state_elections_count": charts.MAP_RAMPS[0],
+    "state_first_election": charts.MAP_RAMPS[0],
+    "state_pv_elections_count": charts.MAP_RAMPS[1],
+    "state_electors_change": charts.MAP_RAMPS[0],
+}
+#: C11's height in px (D124, amending D121(h)'s height from the width, which the
+#: server does not know), and its colorbar's thickness, inside
+#: ``charts.MAP_COLORBAR_THICKNESS``.
+C11_HEIGHT_PX = 330
+C11_COLORBAR_PX = 12
+#: The figure's side margins, so the scale's end labels are drawn (D124's
+#: measurement: at 0 px plotly.js hid "1824" and "+50" at 390 and 360 px).
+C11_SIDE_PX = 16
+
+
+def tick_text(metric: str, value: int) -> str:
+    """A number on C11's scale, in the table's value format (ba, #623): a bare count,
+    a year with no separator, the change signed (:func:`explore.labels.signed`: "+",
+    U+2212, an unsigned "0"). Never the table's "{count} of {n}": a tick is a point on
+    the scale, not a state."""
+    return labels.signed(value) if metric == "state_electors_change" else str(value)
+
+
+def c11_figure(
+    metric: str,
+    states: list[tuple[str, str]],
+    figures: dict[str, state_view.HistoryFigures | None],
+) -> dict[str, Any] | None:
+    """C11's figure for ``metric`` (#623, D124), or ``None`` where no state has a
+    number for it. One choropleth trace over every roster state whose value
+    (:func:`explore.state_view.history_values`, the table's path) is a number; a state
+    with none (refused, unrecognized or no figure) is left out, drawn in outline only
+    (D121(f), D123(f)). ``z`` is the value itself, on a linear scale from the lowest
+    drawn value to the highest (one above the lowest where all are equal), in the
+    figure's ramp, its low end nearest the page. The colorbar runs along the top with
+    numbered ticks at both ends, and at 0 for the change where the scale spans it. The
+    hover writes the state, the figure's header and the table's cell, escaped (D091).
+    No ``layout.geo``: the template's."""
+    drawn = [
+        (usps, name, value)
+        for usps, name in states
+        if (value := state_view.history_values(figures[usps])[metric]) is not None
+    ]
+    if not drawn:
+        return None
+    values = [value for _, _, value in drawn]
+    low, high = min(values), max(values)
+    if high == low:
+        high = low + 1
+    ticks = [low, high]
+    if metric == "state_electors_change" and low < 0 < high:
+        ticks = [low, 0, high]
+    header = labels.STATES_HISTORY_HEADERS[metric]
+    hovers = [
+        labels.C11_HOVER.format(
+            state=charts.escaped(link_text(usps, name)),
+            figure=charts.escaped(header),
+            value=charts.escaped(cell_text(figures[usps], metric)),
+        )
+        for usps, name, _ in drawn
+    ]
+    trace = {
+        "type": "choropleth",
+        "name": header,
+        "locationmode": "USA-states",
+        "locations": [usps for usps, _, _ in drawn],
+        "z": values,
+        "zmin": low,
+        "zmax": high,
+        "colorscale": charts.map_colorscale(C11_RAMPS[metric]),
+        "showscale": True,
+        "colorbar": {
+            "orientation": "h",
+            "thickness": C11_COLORBAR_PX,
+            "tickmode": "array",
+            "tickvals": ticks,
+            "ticktext": [tick_text(metric, tick) for tick in ticks],
+            "outlinewidth": 0,
+        },
+        "marker": {"line": {"color": charts.MAP_BORDER}},
+        "hovertext": hovers,
+        "hovertemplate": "%{hovertext}<extra></extra>",
+    }
+    # The side margins hold half of an end tick's label: plotly.js hides a colorbar
+    # label that would cross the figure's edge, and the bar starts 10 px in.
+    layout = {
+        "title": {"text": labels.C11_TITLES[metric]},
+        "height": C11_HEIGHT_PX,
+        "margin": {"l": C11_SIDE_PX, "r": C11_SIDE_PX, "t": 8, "b": 0},
+    }
+    return {"data": [trace], "layout": layout}
+
+
+def c11(
+    metric: str,
+    states: list[tuple[str, str]],
+    figures: dict[str, state_view.HistoryFigures | None],
+) -> list[Any]:
+    """C11 for ``metric``, or :data:`explore.labels.C11_NO_FIGURES` in its place where
+    no state has a number for it. Its caption: :data:`explore.labels.C11_CAPTION`, the
+    figure's :data:`explore.labels.C11_BASIS`, then
+    :data:`explore.labels.C11_OUTLINES_CREDIT` (``components.chart`` adds the table
+    pointer). Its key, page text inside its figure: the color note, the outline-only
+    entry where a state is left out, then the phone note."""
+    figure = c11_figure(metric, states, figures)
+    if figure is None:
+        return [html.P(labels.C11_NO_FIGURES, id=C11_NO_FIGURES_ID, className="note")]
+    left_out = len(figure["data"][0]["locations"]) < len(states)
+    key = [
+        html.P(labels.C11_COLOR_NOTE),
+        *([html.P(labels.C11_NO_FIGURE_KEY)] if left_out else []),
+        html.P(labels.C11_PHONE_NOTE),
+    ]
+    caption = " ".join(
+        (labels.C11_CAPTION, labels.C11_BASIS[metric], labels.C11_OUTLINES_CREDIT)
+    )
+    return [
+        components.chart(C11_ID, figure, HISTORY_TABLE_ID, caption, legend_key=key)
+    ]
+
+
+def metric_control(metric: str) -> html.Div:
+    """C11's control: one figure at a time, never cleared, its options the table's
+    headers in :data:`explore.state_view.HISTORY_KEYS`' order (a closed vocabulary,
+    not sorted)."""
+    options = [
+        {"label": labels.STATES_HISTORY_HEADERS[key], "value": key}
+        for key in state_view.HISTORY_KEYS
+    ]
+    return html.Div(
+        [
+            components.dropdown_filter(
+                METRIC_ID,
+                METRIC_LABEL,
+                options,
+                metric,
+                METRIC_PLACEHOLDER,
+                clearable=False,
+            )
+        ],
+        className="filters wrapped-choice",
+    )
+
+
+def history_section(
+    n2: Any, states: list[tuple[str, str]], index: Any, metric: str = DEFAULT_METRIC
+) -> tuple[list[Any], bool]:
+    """The history section's children (#641, D123), and whether C11's control shows:
+    its heading, intro, the control, C11 for ``metric`` (#623), then the table, its
+    notes and column-name list; or :data:`STATES_HISTORY_UNAVAILABLE` alone, with no
+    control, where N2 (``n2``, ``None`` when it could not be read) or its rows cannot
+    be read. Everything read from N2 is inside the ``try``; the chart and its control
+    are built after it, from the checked figures (D095(f))."""
     heading = html.H2(STATES_HISTORY_HEADING)
     try:
         if n2 is None:
@@ -224,26 +451,36 @@ def history_section(n2: Any, states: list[tuple[str, str]], index: Any) -> list[
             html.P(
                 STATES_HISTORY_UNAVAILABLE, id=HISTORY_UNAVAILABLE_ID, className="note"
             ),
-        ]
+        ], False
     return [
         heading,
         html.P(STATES_HISTORY_INTRO),
+        metric_control(metric),
+        *c11(metric, states, figures),
         *table,
         labels.glossary(HISTORY_FIELDS, ident=HISTORY_GLOSSARY_ID, page_only=PAGE_ONLY),
-    ]
+    ], True
 
 
 def render(
-    body: dict[str, Any], year: int, n2: Any = None, index: Any = None
-) -> html.Div:
-    """The page body for the roster response of ``year``: the history section (#641)
-    first, from N2's response ``n2`` and the index, then the list of states, each in
-    its own card (#567, D111), so the table, and later the map, is not under 51 links on
-    a phone (owner, #641's plan gate)."""
+    body: dict[str, Any],
+    year: int,
+    n2: Any = None,
+    index: Any = None,
+    metric: str = DEFAULT_METRIC,
+) -> tuple[html.Div, bool]:
+    """The page body for the roster response of ``year``, and whether C11's control
+    shows: the history section (#641) first, from N2's response ``n2`` and the index,
+    with C11 drawing ``metric`` (#623), then the list of states, each in its own card
+    (#567, D111), so the map and the table are not under 51 links on a phone (owner,
+    #641's plan gate). The page's URL control renders only with C11's control."""
     states = roster(body, year)
+    section, chooser = history_section(n2, states, index, metric)
+    location = [dcc.Location(id=URL_ID, refresh="callback-nav")] if chooser else []
     return html.Div(
         [
-            components.card(history_section(n2, states, index)),
+            *location,
+            components.card(section),
             components.card(
                 [
                     html.Ul(
@@ -261,10 +498,14 @@ def render(
             components.provenance_footer(body["meta"]["provenance"]),
         ],
         id=PAGE_ID,
-    )
+    ), chooser
 
 
-def layout(**_query: Any) -> html.Div:
+def layout(**params: Any) -> html.Div:
+    """The page. On success its lede is followed by :data:`FILTER_SENTENCE` only where
+    C11's control renders: never on the whole page's or the section's degraded
+    state."""
+    lede = LEDE
     try:
         with api.CLIENT.view() as view:
             # From the cached index, never from the query (``?year_max=`` included).
@@ -276,13 +517,21 @@ def layout(**_query: Any) -> html.Div:
                 n2 = view.get(api.ELECTION_STATES_PATH)
             except api.ApiUnavailable:
                 n2 = None
-        content = render(body, int(year_max["year_max"]), n2, index)
+        content, chooser = render(
+            body,
+            int(year_max["year_max"]),
+            n2,
+            index,
+            chosen_metric(parse_metric(params)),
+        )
+        if chooser:
+            lede = f"{LEDE} {FILTER_SENTENCE}"
     except (api.ApiUnavailable, KeyError, TypeError):
         content = components.unavailable()
     return html.Div(
         [
             html.H1("States"),
-            html.P(LEDE, className="lede"),
+            html.P(lede, className="lede"),
             content,
         ]
     )

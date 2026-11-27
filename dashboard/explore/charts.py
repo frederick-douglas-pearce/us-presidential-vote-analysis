@@ -30,8 +30,8 @@ import json
 import math
 import re
 from collections.abc import Iterator, Mapping
-from itertools import combinations
-from typing import Any, NamedTuple
+from itertools import combinations, pairwise
+from typing import Any, NamedTuple, TypeGuard
 
 from dash import dcc
 
@@ -41,15 +41,16 @@ class Chart(NamedTuple):
     its companion table (the table on that page holding its values), whether its ID
     is retired, whether its value axis writes its numbers short
     (:data:`SHORT_TICKFORMAT`; C5, #596, D110, and C10, #582, D113, the two exceptions
-    to the numbers-in-full rule), and whether it is the binned map (``map_bins``,
-    D121(b), #639: the one chart whose figure is a choropleth, :func:`map_problems`).
+    to the numbers-in-full rule), and whether it is the map (``map_ramp``, D121(b),
+    #639, renamed from ``map_bins`` by #623, D124: the one chart whose figure is a
+    choropleth shaded on a continuous ramp, :func:`map_problems`).
     A retired ID is never built and never reused."""
 
     page: str
     table: str
     retired: bool = False
     short_value_ticks: bool = False
-    map_bins: bool = False
+    map_ramp: bool = False
 
 
 #: A chart ID: ``C1``, ``C2``, …, issued in order of story filing.
@@ -59,8 +60,8 @@ ID_RE = re.compile(r"C[1-9][0-9]*")
 #: issued when its chart story registers it, is never renumbered or reused, and stays
 #: here once retired. C1 (#433) was the first, C3 (#435) the second, C2 (#434) the
 #: third, C4 and C5 (#436) the fourth and fifth, C7 (#560) the sixth, C10 (#582) the
-#: seventh and C9 (#563) the eighth: IDs follow the stories' filing order, and C6 (#550)
-#: and C8 (#561) are filed but not yet registered.
+#: seventh, C9 (#563) the eighth and C11 (#623) the ninth: IDs follow the stories'
+#: filing order, and C6 (#550) and C8 (#561) are filed but not yet registered.
 #: ``components.chart`` reads it by attribute at call time. ``ISSUED``, a hand-written
 #: literal of every issued ID with its whole row, must equal this
 #: (``TestChartRegistry`` in ``test_dashboard_charts.py`` reads it), and
@@ -96,6 +97,10 @@ CHARTS: Mapping[str, Chart] = {
     # elections, narrowed by its year filters (D110), above T1, its companion table
     # (#563, D116).
     "C9": Chart("/elections", "elections-table"),
+    # Every state shaded by one of its four history figures, chosen from a list, on a
+    # US map on the list of states, above the table of those figures, its companion
+    # table (#623, D121 as amended by D124): the one chart drawn as a map.
+    "C11": Chart("/states", "states-history", map_ramp=True),
 }
 
 
@@ -114,7 +119,7 @@ def registry_problems(registry: Mapping[str, Chart]) -> list[str]:
             and chart.table
             and isinstance(chart.retired, bool)
             and isinstance(chart.short_value_ticks, bool)
-            and isinstance(chart.map_bins, bool)
+            and isinstance(chart.map_ramp, bool)
         ):
             problems.append(f"{chart_id!r}: not a chart row")
     return problems
@@ -186,7 +191,7 @@ FONT_TOKEN = "--font-body"
 #: ``colorscale``), and in a scatter's ``fillgradient``; ``zmid`` and ``zauto`` are on
 #: no allowed trace type, and are here so that every refusal D121(a) makes for the map
 #: is in this one set. ``zmin`` and ``zmax`` are not, since the map sets them.
-#: The one exception is the map's (#639, D121(b)): under ``map_bins``, while
+#: The one exception is the map's (#639, D121(b)): under ``map_ramp``, while
 #: ``data[0]`` is a choropleth (:func:`_is_map`), :data:`MAP_COLOR_PATHS` on its
 #: ``data[0]`` only.
 _REFUSED_KEY_RE = re.compile(
@@ -195,14 +200,14 @@ _REFUSED_KEY_RE = re.compile(
 )
 
 #: The refused keys the map may set (#639, D121(b), the #645 amendment), each at
-#: exactly this path on ``data[0]`` and only under ``map_bins``: the colorscale (its
+#: exactly this path on ``data[0]`` and only under ``map_ramp``: the colorscale (its
 #: stops, which inherit its key through :func:`_walk`, are skipped with it and checked
 #: by :func:`map_problems`), the colorbar (its own keys are still checked, so its color
 #: keys hold tokens) and ``showscale``.
 MAP_COLOR_PATHS = ("data[0].colorscale", "data[0].colorbar", "data[0].showscale")
 
 #: Where the map's colorscale sits: it and every path under it are skipped by
-#: :func:`color_problems` under ``map_bins``, while ``data[0]`` is a choropleth
+#: :func:`color_problems` under ``map_ramp``, while ``data[0]`` is a choropleth
 #: (:func:`_is_map`).
 _MAP_COLORSCALE = MAP_COLOR_PATHS[0]
 
@@ -225,36 +230,40 @@ EC_COLOR = "var(--chart-ec)"
 PV_COLOR = "var(--chart-pv)"
 HYBRID_COLOR = "var(--chart-hybrid)"
 
-#: The map's bin colors (#639, D121(e)): one ramp of three per measure, bin 0 first,
-#: the bins running from nearest the page to farthest from it. A metric derived from the
-#: electoral allotment takes the red ramp, the count of popular votes held the blue
-#: one. The tokens are the map's alone, never a series token, so a series color change
-#: never moves a bin (owner, #639's plan gate). ``CHART_BINS`` in
-#: ``test_dashboard_theme.py``, a hand-written literal, must equal this, and measures
-#: each bin there.
+#: The map's ramps (#639, D121(e); a continuous ramp since #623, D124): one per
+#: measure, three stop tokens each, the first nearest the page and the last farthest
+#: from it, so the lowest number on the map is drawn nearest the page's color and the
+#: highest farthest, in both palettes. A metric derived from the electoral allotment
+#: takes the red ramp, the count of popular votes held the blue one. The tokens are
+#: the map's alone, never a series token, so a series color change never moves the
+#: map (owner, #639's plan gate). ``CHART_BINS`` in ``test_dashboard_theme.py``, a
+#: hand-written literal, must equal this, and measures each stop and the colors
+#: plotly.js draws between them there.
 MAP_RAMPS: tuple[tuple[str, ...], ...] = (
     ("var(--chart-bin-ec-1)", "var(--chart-bin-ec-2)", "var(--chart-bin-ec-3)"),
     ("var(--chart-bin-pv-1)", "var(--chart-bin-pv-2)", "var(--chart-bin-pv-3)"),
 )
 
-#: How many bins the map draws (D121(e): three for every metric).
-MAP_BIN_COUNT = 3
-
 #: The map's state borders (D121(c)): the trace's ``marker.line.color``, in the page's
-#: color, since adjacent bins do not contrast with each other (WCAG 1.4.11);
-#: ``test_dashboard_theme.py`` measures every bin against it.
+#: color, since neighboring states' shades do not contrast with each other (WCAG
+#: 1.4.11); ``test_dashboard_theme.py`` measures every shade the ramps draw against it.
 MAP_BORDER = "var(--page)"
+
+#: The bounds of the map's colorbar ``thickness``, in px (#623, D124), measured in
+#: Chromium at 390 and 360 px: ``thickness: 0`` would hide the scale, and a thick one
+#: would push the map down on a phone.
+MAP_COLORBAR_THICKNESS = (8, 30)
 
 
 def map_colorscale(ramp: tuple[str, ...]) -> list[list[Any]]:
-    """The stepwise colorscale that draws each of ``ramp``'s bins as one flat color
-    (D121(a)): for bin ``b`` of ``k``, two stops at ``b / k`` and ``(b + 1) / k``, both
-    its token. The one builder: :func:`map_problems` requires the map's colorscale to
-    equal its output for one of :data:`MAP_RAMPS`, and the map is built from it."""
-    k = len(ramp)
-    return [
-        [position / k, token] for b, token in enumerate(ramp) for position in (b, b + 1)
-    ]
+    """The continuous colorscale through ``ramp``'s tokens (#623, D124, replacing
+    D121(a)'s stepwise one): one stop per token, evenly spaced from 0 to 1, which
+    plotly.js interpolates between in RGB. The one builder: :func:`map_problems`
+    requires the map's colorscale to equal its output for one of :data:`MAP_RAMPS`, so
+    no stop is off a ramp's tokens or the page's color, and the map is built from
+    it."""
+    last = len(ramp) - 1
+    return [[index / last, token] for index, token in enumerate(ramp)]
 
 
 TEMPLATE: dict[str, Any] = {
@@ -497,20 +506,20 @@ def _is_token(value: Any) -> bool:
     return isinstance(value, str) and TOKEN_RE.fullmatch(value) is not None
 
 
-def _is_map(figure: Mapping[str, Any], map_bins: Any) -> bool:
+def _is_map(figure: Mapping[str, Any], map_ramp: Any) -> bool:
     """Whether the map's exception applies (#639, D121(b)): the chart's registry row
-    sets ``map_bins`` (only ``True``) and ``data[0]`` is a choropleth. The one statement
+    sets ``map_ramp`` (only ``True``) and ``data[0]`` is a choropleth. The one statement
     of it, which :func:`trace_type_problems` and :func:`color_problems` both read."""
     data = figure.get("data")
     first = data[0] if isinstance(data, list) and data else None
     return (
-        map_bins is True
+        map_ramp is True
         and isinstance(first, dict)
         and first.get("type") == "choropleth"
     )
 
 
-def color_problems(figure: Mapping[str, Any], *, map_bins: bool = False) -> list[str]:
+def color_problems(figure: Mapping[str, Any], *, map_ramp: bool = False) -> list[str]:
     """Where ``figure`` names a color that is not a token reference (#432).
 
     The allowlist: a key ending ``color``, ``colors`` or ``colorway`` holds a token
@@ -524,14 +533,14 @@ def color_problems(figure: Mapping[str, Any], *, map_bins: bool = False) -> list
     ``style.css`` is the tests' to check (this module reads no file):
     ``TestEveryChart`` for every rendered chart, ``TestTemplate`` for the template.
 
-    With ``map_bins`` (the map's registry row, #639, D121(b); only ``True``) a refused
+    With ``map_ramp`` (the map's registry row, #639, D121(b); only ``True``) a refused
     key is admitted at exactly the paths :data:`MAP_COLOR_PATHS` names, and the
     colorscale's stops are skipped with it, :func:`map_problems` checking them; a
     colorbar's own keys are still read, and a refused key at any other path is still
     refused. The exception holds only while ``data[0]`` is a choropleth
     (:func:`_is_map`), the same test :func:`trace_type_problems` admits it by.
     """
-    admitted = _is_map(figure, map_bins)
+    admitted = _is_map(figure, map_ramp)
     problems = []
     for path, key, value in _walk(figure):
         if admitted and (
@@ -835,11 +844,11 @@ _CONTROL_LAYOUT_KEYS = ("updatemenus", "sliders")
 
 
 def trace_type_problems(
-    figure: Mapping[str, Any], *, map_bins: bool = False
+    figure: Mapping[str, Any], *, map_ramp: bool = False
 ) -> list[str]:
     """Each trace whose type is not in :data:`TRACE_TYPES` (D121(b′), #638): another
     string, a case or spacing variant of an allowed one, or a value that is no string.
-    With ``map_bins`` (only ``True``, #639) ``data[0]`` may also be a ``choropleth``,
+    With ``map_ramp`` (only ``True``, #639) ``data[0]`` may also be a ``choropleth``,
     whose shape :func:`map_problems` pins; anywhere else it is refused.
     A trace that is not an object is :func:`hover_problems`'. And each way a figure
     could draw a trace its ``data`` does not hold, so that ``data`` is every trace the
@@ -850,7 +859,7 @@ def trace_type_problems(
         if not isinstance(trace, dict):
             continue
         kind = trace.get("type", "scatter")
-        if index == 0 and _is_map(figure, map_bins):
+        if index == 0 and _is_map(figure, map_ramp):
             continue
         if not (isinstance(kind, str) and kind in TRACE_TYPES):
             problems.append(
@@ -965,7 +974,7 @@ def bar_problems(figure: Mapping[str, Any]) -> list[str]:
 
 
 #: The keys the map's one trace may hold (#639, D121(a)–(d), fail closed as
-#: :data:`TRACE_TYPES` does): no ``marker.opacity`` (a bin blended with the page), no
+#: :data:`TRACE_TYPES` does): no ``marker.opacity`` (a shade blended with the page), no
 #: ``selectedpoints``, ``selected`` or ``unselected`` (states dimmed by plotly), no
 #: ``geojson`` or ``featureidkey`` (outlines from elsewhere), and the rest.
 MAP_TRACE_KEYS = frozenset(
@@ -991,16 +1000,26 @@ MAP_TRACE_KEYS = frozenset(
 )
 
 
-#: The keys the map's colorbar may hold (#639, D121(d); code review round 1's scope
-#: ruling): one tick per bin with its written range, a title, and no outline
-#: (``outlinewidth`` 0, since plotly's default outline is ``#444``, no token). A key
-#: that could hide or rewrite the labels (``showticklabels``, ``ticklabelstep``,
-#: ``labelalias``, ``tickprefix``, …) stays refused, since the written ranges are how a
-#: bin's meaning reaches a reader without color (D121(d)). A placement or size key
-#: (``orientation``, ``len``, ``thickness``, ``x``, ``y``, …) is #623's to add, with
-#: its bounds, as a chart that needs another slot widens it in its own story.
+#: The keys the map's colorbar may hold (#639, D121(d); #623, D124): numbered ticks,
+#: a title, no outline (``outlinewidth`` 0, since plotly's default outline is
+#: ``#444``, no token), and the two placement and size keys #623 measured at 390 and
+#: 360 px: ``orientation``, only ``"h"`` (the bar above the map at full width), and
+#: ``thickness`` inside :data:`MAP_COLORBAR_THICKNESS`. A key that could hide or
+#: rewrite the labels (``showticklabels``, ``ticklabelstep``, ``labelalias``,
+#: ``tickprefix``, …) stays refused, since the numbered ticks are how a shade's number
+#: reaches a reader without color (D124), and so does every other placement or size
+#: key (``len``, ``x``, ``y``, …), as a chart that needs another slot widens it in its
+#: own story.
 MAP_COLORBAR_KEYS = frozenset(
-    {"tickmode", "tickvals", "ticktext", "title", "outlinewidth"}
+    {
+        "tickmode",
+        "tickvals",
+        "ticktext",
+        "title",
+        "outlinewidth",
+        "orientation",
+        "thickness",
+    }
 )
 
 
@@ -1016,30 +1035,43 @@ def _exactly(value: Any, expected: Any) -> bool:
     return type(value) is type(expected) and value == expected
 
 
+def _is_json_number(value: Any) -> TypeGuard[int | float]:
+    """Whether ``value`` is a JSON number: an ``int`` or a ``float``, never a ``bool``,
+    which is an ``int`` to Python. :func:`map_problems` guards every comparison it
+    makes by it, so it stays total."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _numbers(value: Any) -> TypeGuard[list[int | float]]:
+    """Whether ``value`` is a non-empty list of numbers (:func:`_is_json_number`)."""
+    return isinstance(value, list) and bool(value) and all(map(_is_json_number, value))
+
+
 def map_problems(figure: Mapping[str, Any]) -> list[str]:
-    """Each way ``figure`` departs from the map's one shape (#639, D121(a), (c), (d)),
-    which :func:`figure_problems` checks only on a chart whose registry row sets
-    ``map_bins``: exactly one trace, a ``choropleth`` with ``locationmode``
-    ``"USA-states"`` holding only :data:`MAP_TRACE_KEYS`; ``z`` a bin index from 0 to
-    k − 1 for each of ``locations``, distinct strings (a state with no figure is not
-    among them, D121(f)); its colorscale :func:`map_colorscale` of one of
-    :data:`MAP_RAMPS` (so every stop is a bin token, and k is
-    :data:`MAP_BIN_COUNT`); ``zmin`` −0.5 and ``zmax`` k − 0.5; a colorbar shown,
-    holding only :data:`MAP_COLORBAR_KEYS`, with a tick at each bin written as page
-    text (``tickmode`` ``"array"``, ``tickvals`` the bin indexes, ``ticktext`` one
-    non-blank string per bin, no two alike), no outline (``outlinewidth`` 0), and a
-    ``title``, where it has one, holding only its ``text``; and borders in
-    :data:`MAP_BORDER` (``marker`` holding only ``line``, which holds only that
-    ``color``). The keys D121(a) refuses (``coloraxis``, ``autocolorscale``,
-    ``reversescale``, ``zmid``, ``zauto``) are :func:`color_problems`'. Total: it guards
-    each kind it reads into."""
+    """Each way ``figure`` departs from the map's one shape (#639, D121(a), (c), (d), as
+    D124 amends them for #623's continuous ramp), which :func:`figure_problems` checks
+    only on a chart whose registry row sets ``map_ramp``: exactly one trace, a
+    ``choropleth`` with ``locationmode`` ``"USA-states"`` holding only
+    :data:`MAP_TRACE_KEYS`; ``locations`` distinct strings (a state with no figure is
+    not among them, D121(f)), with one number in ``z`` for each; ``zmin`` and ``zmax``
+    numbers, ``zmin`` below ``zmax``, and every ``z`` between them; its colorscale
+    :func:`map_colorscale` of one of :data:`MAP_RAMPS` (so every stop is a ramp
+    token); a colorbar shown, holding only :data:`MAP_COLORBAR_KEYS`, with numbered
+    ticks written as page text (``tickmode`` ``"array"``; ``tickvals`` two or more
+    numbers, rising, from ``zmin`` to ``zmax``; ``ticktext`` one non-blank string for
+    each, no two alike), no outline (``outlinewidth`` 0), ``orientation`` ``"h"`` and
+    ``thickness`` inside :data:`MAP_COLORBAR_THICKNESS` where set, and a ``title``,
+    where it has one, holding only its ``text``; and borders in :data:`MAP_BORDER`
+    (``marker`` holding only ``line``, which holds only that ``color``). The keys
+    D121(a) refuses (``coloraxis``, ``autocolorscale``, ``reversescale``, ``zmid``,
+    ``zauto``) are :func:`color_problems`'. Total: it guards the kind of each value it
+    reads into or compares before it compares (a ``bool`` is no number here)."""
     data = figure.get("data") or []
     if len(data) != 1:
         return [f"data: {len(data)} traces, not the map's one"]
     trace = data[0]
     if not isinstance(trace, dict):
         return []  # hover_problems': not a trace
-    k = MAP_BIN_COUNT
     problems = [
         f"data[0].{key}: not a key of the map's trace"
         for key in trace
@@ -1050,10 +1082,20 @@ def map_problems(figure: Mapping[str, Any]) -> list[str]:
     if trace.get("locationmode") != "USA-states":
         problems.append('data[0].locationmode: the map\'s is "USA-states"')
     z, locations = trace.get("z"), trace.get("locations")
-    if not (
-        isinstance(z, list) and z and all(type(b) is int and 0 <= b < k for b in z)
+    zmin, zmax = trace.get("zmin"), trace.get("zmax")
+    for key, value in (("zmin", zmin), ("zmax", zmax)):
+        if not _is_json_number(value):
+            problems.append(f"data[0].{key}: not a number")
+    if _is_json_number(zmin) and _is_json_number(zmax) and not zmin < zmax:
+        problems.append("data[0].zmax: not above zmin")
+    if not _numbers(z):
+        problems.append("data[0].z: not a non-empty list of numbers")
+    elif (
+        _is_json_number(zmin)
+        and _is_json_number(zmax)
+        and not all(zmin <= value <= zmax for value in z)
     ):
-        problems.append(f"data[0].z: not a list of bin indexes from 0 to {k - 1}")
+        problems.append("data[0].z: a value outside zmin to zmax")
     if not (
         isinstance(locations, list)
         and all(isinstance(code, str) for code in locations)
@@ -1061,50 +1103,18 @@ def map_problems(figure: Mapping[str, Any]) -> list[str]:
     ):
         problems.append("data[0].locations: not a list of distinct strings")
     elif not (isinstance(z, list) and len(z) == len(locations)):
-        problems.append("data[0].locations: not one for each bin index in z")
+        problems.append("data[0].locations: not one for each value in z")
     if not any(
         _exactly(trace.get("colorscale"), map_colorscale(ramp)) for ramp in MAP_RAMPS
     ):
-        problems.append("data[0].colorscale: not the stepwise scale of a map ramp")
-    for key, bound in (("zmin", -0.5), ("zmax", k - 0.5)):
-        if not _exactly(trace.get(key), bound):
-            problems.append(f"data[0].{key}: not {bound}")
+        problems.append("data[0].colorscale: not the scale of a map ramp")
     if trace.get("showscale") is not True:
         problems.append("data[0].showscale: the map shows its colorbar")
     colorbar = trace.get("colorbar")
     if not isinstance(colorbar, dict):
         problems.append("data[0].colorbar: the map's colorbar is an object")
     else:
-        problems += [
-            f"data[0].colorbar.{key}: not a key of the map's colorbar"
-            for key in colorbar
-            if key not in MAP_COLORBAR_KEYS
-        ]
-        if not _exactly(colorbar.get("outlinewidth"), 0):
-            problems.append("data[0].colorbar.outlinewidth: the map's colorbar is 0")
-        title = colorbar.get("title")
-        if "title" in colorbar and not (
-            isinstance(title, dict)
-            and set(title) == {"text"}
-            and isinstance(title.get("text"), str)
-        ):
-            problems.append("data[0].colorbar.title: only its text")
-        if colorbar.get("tickmode") != "array":
-            problems.append('data[0].colorbar.tickmode: the map\'s is "array"')
-        if not _exactly(colorbar.get("tickvals"), list(range(k))):
-            problems.append(
-                f"data[0].colorbar.tickvals: not the bin indexes 0 to {k - 1}"
-            )
-        ticktext = colorbar.get("ticktext")
-        if not (
-            isinstance(ticktext, list)
-            and len(ticktext) == k
-            and all(isinstance(t, str) and t.strip() for t in ticktext)
-            and len({t.strip() for t in ticktext}) == k
-        ):
-            problems.append(
-                f"data[0].colorbar.ticktext: not {k} distinct labels the page wrote"
-            )
+        problems += _colorbar_problems(colorbar, zmin, zmax)
     marker = trace.get("marker")
     line = marker.get("line") if isinstance(marker, dict) else None
     if not (
@@ -1115,6 +1125,63 @@ def map_problems(figure: Mapping[str, Any]) -> list[str]:
         and line.get("color") == MAP_BORDER
     ):
         problems.append(f"data[0].marker: not only line.color {MAP_BORDER}")
+    return problems
+
+
+def _colorbar_problems(colorbar: dict[str, Any], zmin: Any, zmax: Any) -> list[str]:
+    """:func:`map_problems`' colorbar half: each way ``colorbar`` departs from the
+    map's, its ticks read against the trace's ``zmin`` and ``zmax``. Total, as
+    :func:`map_problems` is."""
+    problems = [
+        f"data[0].colorbar.{key}: not a key of the map's colorbar"
+        for key in colorbar
+        if key not in MAP_COLORBAR_KEYS
+    ]
+    if not _exactly(colorbar.get("outlinewidth"), 0):
+        problems.append("data[0].colorbar.outlinewidth: the map's colorbar is 0")
+    title = colorbar.get("title")
+    if "title" in colorbar and not (
+        isinstance(title, dict)
+        and set(title) == {"text"}
+        and isinstance(title.get("text"), str)
+    ):
+        problems.append("data[0].colorbar.title: only its text")
+    if "orientation" in colorbar and colorbar["orientation"] != "h":
+        problems.append('data[0].colorbar.orientation: the map\'s is "h"')
+    low, high = MAP_COLORBAR_THICKNESS
+    thickness = colorbar.get("thickness")
+    if "thickness" in colorbar and not (
+        _is_json_number(thickness) and low <= thickness <= high
+    ):
+        problems.append(f"data[0].colorbar.thickness: not {low} to {high} px")
+    if colorbar.get("tickmode") != "array":
+        problems.append('data[0].colorbar.tickmode: the map\'s is "array"')
+    tickvals = colorbar.get("tickvals")
+    if not (
+        _numbers(tickvals)
+        and len(tickvals) >= 2
+        and all(a < b for a, b in pairwise(tickvals))
+    ):
+        problems.append("data[0].colorbar.tickvals: not two or more rising numbers")
+    elif not (
+        _is_json_number(zmin)
+        and _is_json_number(zmax)
+        and tickvals[0] == zmin
+        and tickvals[-1] == zmax
+    ):
+        problems.append("data[0].colorbar.tickvals: not from zmin to zmax")
+    ticktext = colorbar.get("ticktext")
+    count = len(tickvals) if isinstance(tickvals, list) else None
+    if not (
+        isinstance(ticktext, list)
+        and len(ticktext) == count
+        and all(isinstance(t, str) and t.strip() for t in ticktext)
+        and len({t.strip() for t in ticktext}) == count
+    ):
+        problems.append(
+            "data[0].colorbar.ticktext: not one distinct label the page wrote for "
+            "each tick"
+        )
     return problems
 
 
@@ -1161,7 +1228,7 @@ SLOT_KINDS: Mapping[str, Mapping[str, frozenset[str]]] = {
         "customdata": LIST,
         "marker": OBJECT,
         "line": OBJECT,
-        # The map's (#639, D121(b)): map_problems reads them under map_bins, and
+        # The map's (#639, D121(b)): map_problems reads them under map_ramp, and
         # slot_problems types them on every chart's traces, as every slot here is.
         "locationmode": STRING,
         "locations": STRING_LIST,
@@ -1182,6 +1249,8 @@ SLOT_KINDS: Mapping[str, Mapping[str, frozenset[str]]] = {
         "ticktext": STRING_LIST,
         "title": OBJECT,
         "outlinewidth": NUMBER,
+        "orientation": STRING,
+        "thickness": NUMBER,
     },
     "colorbar_title": {"text": STRING},
     "layout": {"legend": OBJECT, "annotations": LIST, "geo": OBJECT},
@@ -1277,7 +1346,7 @@ def slot_problems(figure: Mapping[str, Any]) -> list[str]:
 
 
 def figure_problems(
-    figure: Any, *, short_value_ticks: bool = False, map_bins: bool = False
+    figure: Any, *, short_value_ticks: bool = False, map_ramp: bool = False
 ) -> list[str]:
     """Everything that keeps ``figure`` from being a chart's (#432): it is a plain dict
     with a list of traces, each a ``scatter`` or a ``bar`` (:data:`TRACE_TYPES`, #638;
@@ -1288,7 +1357,7 @@ def figure_problems(
     and dashes rather than numbering them and names every scatter trace's mode, writes
     its own hover text with no number format, sets no bar's width or offset, and never
     tells two traces apart by color alone. ``short_value_ticks`` is the chart's
-    registry row's (#596, D110): see :func:`override_problems`. So is ``map_bins``
+    registry row's (#596, D110): see :func:`override_problems`. So is ``map_ramp``
     (#639, D121(b)): only ``True`` admits the map's choropleth and its colorscale,
     colorbar and ``showscale`` (:func:`trace_type_problems`, :func:`color_problems`),
     and then the figure must be the map (:func:`map_problems`).
@@ -1309,9 +1378,9 @@ def figure_problems(
         return structural
     problems = [
         *slot_problems(figure),
-        *trace_type_problems(figure, map_bins=map_bins),
-        *color_problems(figure, map_bins=map_bins),
-        *(map_problems(figure) if map_bins is True else []),
+        *trace_type_problems(figure, map_ramp=map_ramp),
+        *color_problems(figure, map_ramp=map_ramp),
+        *(map_problems(figure) if map_ramp is True else []),
         *markup_problems(figure),
         *override_problems(figure, short_value_ticks=short_value_ticks),
         *number_problems(figure),

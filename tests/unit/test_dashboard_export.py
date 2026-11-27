@@ -155,6 +155,7 @@ CALLBACK_OUTPUTS = {
     "state-per-capita-url.search",
     "state-history-url.search",
     "candidate-url.search",
+    "states-url.search",
 }
 
 HOST = "https://explore.us-presidential-election-center.org"
@@ -529,6 +530,16 @@ CHART_QUERIES: dict[str, list[tuple[dict[str, str], str, str]]] = {
         ({"usps": "GA"}, "year_from=1700", "absent"),
         ({"usps": "TX"}, "year_from=1840&year_to=1870", "filtered"),
     ],
+    # #623 (D124): C11's figure, ``metric``, chooses what the map draws (SERIES_KEYS)
+    # and narrows no table: each non-default figure, then the default named (which the
+    # parser drops, D073) and a value outside the closed vocabulary.
+    "/states": [
+        ({}, "metric=state_first_election", "filtered"),
+        ({}, "metric=state_pv_elections_count", "filtered"),
+        ({}, "metric=state_electors_change", "filtered"),
+        ({}, "metric=state_elections_count", "absent"),
+        ({}, "metric=zz_sentinel", "absent"),
+    ],
 }
 
 #: The tables each chart page's filters reach, and the query keys that reach each
@@ -562,9 +573,10 @@ FILTERED_TABLES: dict[str, dict[str, tuple[str, ...]]] = {
 #: these keys; every other chart reduces to the empty query, which is D093(a)'s "a
 #: filter never narrows a chart". Hand-written.
 SERIES_KEYS: dict[str, tuple[str, ...]] = {
-    # Empty since #562 (D107): C4 and C5's state key retired with their one-state
-    # mode, so D100(b)'s branch is visibly vacuous until a chart's filter chooses a
-    # series again.
+    # C11's figure (#623, D124): the map draws the figure ``metric`` chooses, and its
+    # companion table, which shows all four, does not change. (Empty from #562, D107,
+    # when C4 and C5's state key retired with their one-state mode, until #623.)
+    charts.dom_id("C11"): ("metric",),
 }
 
 
@@ -602,6 +614,23 @@ ROW_AXES: dict[str, str] = {
     charts.dom_id("C10"): "xaxis",
     charts.dom_id("C9"): "xaxis",
 }
+
+
+def series_keys(page: str) -> set[str]:
+    """The query keys that choose a series of some live chart on ``page``
+    (:data:`SERIES_KEYS`)."""
+    return {
+        k
+        for chart_id, row in charts.CHARTS.items()
+        if not row.retired and row.page == page
+        for k in SERIES_KEYS.get(charts.dom_id(chart_id), ())
+    }
+
+
+def chart_of(dom: str) -> str:
+    """The chart ID whose DOM id is ``dom``."""
+    (chart_id,) = [c for c in charts.CHARTS if charts.dom_id(c) == dom]
+    return chart_id
 
 
 def chart_figures(tree: Any) -> dict[str, dict[str, Any]]:
@@ -694,8 +723,13 @@ class TestEveryChart:
         success = page.get("success", "")
         parser = page.get("query")
         if parser is not None:
-            # Not vacuous: the page's own parser keeps the query's filter.
-            assert parser(parse(query)), (key, query)
+            if kind == "absent" and set(parse(query)) <= series_keys(key):
+                # A closed vocabulary's absent value (C11's ``metric``, #623): the
+                # parser drops it, so the render is the default's.
+                assert parser(parse(query)) == [], (key, query)
+            else:
+                # Not vacuous: the page's own parser keeps the query's filter.
+                assert parser(parse(query)), (key, query)
         tree, built = chart_render(
             lambda: render(key, monkeypatch, query, **values)[0], monkeypatch
         )
@@ -766,18 +800,22 @@ class TestEveryChart:
             ]
             assert kept == reduced["data"], (key, query, dom)
             assert not [t for t in default["data"] if t.get("name") == name]
-            # The rows or years axis is the unfiltered render's, ticks and all; never
-            # vacuous, since every such axis names its ticks (#558, architect I-3).
-            axis = ROW_AXES[dom]
-            shown_axis = figure["layout"][axis]
-            assert shown_axis.get("ticktext"), (key, query, dom)
-            for part in ("ticktext", "tickvals", "range", "type"):
-                assert shown_axis.get(part) == default["layout"][axis].get(part), (
-                    key,
-                    query,
-                    dom,
-                    part,
-                )
+            if charts.CHARTS[chart_of(dom)].map_ramp:
+                # The map (#623, D124) has no rows or years axis, nor a geo of its
+                # own: its scale is its colorbar, which follows the figure drawn.
+                layout = figure.get("layout", {})
+                assert not {"xaxis", "yaxis", "geo"} & set(layout), (key, query, dom)
+            else:
+                # The rows or years axis is the unfiltered render's, ticks and all;
+                # never vacuous, since every such axis names its ticks (#558,
+                # architect I-3).
+                axis = ROW_AXES[dom]
+                shown_axis = figure["layout"][axis]
+                assert shown_axis.get("ticktext"), (key, query, dom)
+                for part in ("ticktext", "tickvals", "range", "type"):
+                    assert shown_axis.get(part) == default["layout"][axis].get(
+                        part
+                    ), (key, query, dom, part)
             if selects and name is not None:
                 assert len(marks) == 1 and len(marks[0]["x"]) == 1, (key, query, dom)
             else:
@@ -809,14 +847,14 @@ class TestEveryChart:
             shown = table_row_count(tree, row.table)
             assert shown > 0, (key, query, row.table)
             assert shown == table_row_count(plain, row.table), (key, query, row.table)
-            if parser is None:
-                # A page that reads no filter (the overview): the whole file, view
-                # URL included, is the unfiltered one.
-                assert table_csv(tree, row.table) == table_csv(plain, row.table), (
-                    key,
-                    query,
-                    row.table,
-                )
+            # The whole file, view URL included, is the unfiltered one: on a page
+            # that reads no filter (the overview), and on one whose filter reaches
+            # no table (``/states``' figure, #623, which chooses only C11's series).
+            assert table_csv(tree, row.table) == table_csv(plain, row.table), (
+                key,
+                query,
+                row.table,
+            )
 
     def test_every_chart_page_with_a_filter_lists_its_queries(self) -> None:
         """#435, D093(c): every live chart page whose page reads filters (a ``query=``
@@ -831,7 +869,10 @@ class TestEveryChart:
             parser = page_of(row.page).get("query")
             if parser is not None:
                 assert {"filtered", "absent"} <= kinds, (chart_id, row.page)
-                assert FILTERED_TABLES.get(row.page), (chart_id, row.page)
+                # A filter reaches a table, or chooses a chart's series (C11, #623).
+                assert FILTERED_TABLES.get(row.page) or SERIES_KEYS.get(
+                    charts.dom_id(chart_id)
+                ), (chart_id, row.page)
                 # Every key a table or a series reads is kept by some filtered query
                 # (#436's review, D100(b)), so no key's reach goes unchecked.
                 kept = {
@@ -840,7 +881,9 @@ class TestEveryChart:
                     if kind == "filtered"
                     for k, _ in parser(parse(query))
                 }
-                keys = {k for ks in FILTERED_TABLES[row.page].values() for k in ks}
+                keys = {
+                    k for ks in FILTERED_TABLES.get(row.page, {}).values() for k in ks
+                }
                 keys |= set(SERIES_KEYS.get(charts.dom_id(chart_id), ()))
                 assert keys <= kept, (chart_id, row.page, keys - kept)
             else:
@@ -2952,6 +2995,12 @@ def _leader_of(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
     ]
 
 
+def _state_rows(usps: str) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
+    """Every N2 row of one state (#623): its figures are computed over all of them,
+    so doctoring one row alone would read as a disagreeing year rather than a value."""
+    return lambda body: [row for row in body["data"] if row["state_usps"] == usps]
+
+
 def _item_of(year: int) -> Callable[[dict[str, Any]], list[dict[str, Any]]]:
     """N1's ``elections`` item of one year (#564)."""
     return lambda body: [item for item in body["elections"] if item["year"] == year]
@@ -2994,6 +3043,11 @@ SERVED_ROWS: dict[str, list[Served]] = {
             ("candidate", "national_electoral_votes", "national_electoral_votes_counted"),
         )
     ],
+    # #623: every N2 row of Georgia, from which its four figures, and so its value on
+    # the map, are computed. A field the figures read leaves Georgia out of the map
+    # (its own fault, D123(c)) or degrades the section; ``state_usps`` names no roster
+    # state, a body fault (D123(c)).
+    "C11": [Served({}, "", api.ELECTION_STATES_PATH, _state_rows("GA"))],
 }
 
 #: What a chart's section shows when its own read fails, where it has one: C2's (#434),
@@ -3008,6 +3062,8 @@ SECTION_UNAVAILABLE = {
     "C7": "state-electors-unavailable",
     "C10": "state-popular-total-unavailable",
     "C9": "elections-c9-unavailable",
+    # #623: the map and table's one sentence when N2 cannot be read (D095(f)).
+    "C11": "states-history-unavailable",
 }
 
 #: The unexpected kinds a served field is doctored to (#484).

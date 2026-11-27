@@ -648,3 +648,11 @@ fieldset.filter legend { padding: 0; }
    shown. */
 .chart summary { cursor: pointer; }
 .chart summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The map (#623, D124): its drawing is capped in width, since its height is fixed and
+   a map wider than its height allows only adds page color at its sides. The class is
+   set by components.chart from the registry row's map_ramp. */
+.chart-map .chart-graph { max-width: 36rem; }
+/* A dropdown whose options are long names (#623: /states' choice of the figure C11
+   shows): the chosen option wraps rather than being cut with an ellipsis at phone
+   width, as its options in the open list already wrap. */
+.wrapped-choice .dash-dropdown-value { white-space: normal; overflow: visible; text-overflow: clip; }

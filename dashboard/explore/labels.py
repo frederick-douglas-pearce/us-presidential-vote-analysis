@@ -1064,6 +1064,84 @@ C9_UNAVAILABLE = (
     "be shown right now. Please try again in a minute."
 )
 
+# --- Chart C11 (#623, D124): ba spec, re-run 2026-11-27, approved at #623's plan gate -
+
+#: C11's title for each figure it can show, by metric key (``state_view.HISTORY_KEYS``):
+#: :data:`STATES_HISTORY_HEADERS`' header with ", by state".
+C11_TITLES = {
+    "state_elections_count": "Elections with electors appointed, by state",
+    "state_first_election": (
+        "First election in this dataset with electors appointed, by state"
+    ),
+    "state_pv_elections_count": (
+        "Elections with a popular vote to choose electors, by state"
+    ),
+    "state_electors_change": (
+        "Change in electors appointed by state, first election in this dataset to "
+        "latest"
+    ),
+}
+#: A state's hover: its link text, the figure's header and the table's cell for it,
+#: the same string (D091, D123(e)).
+C11_HOVER = "{state}<br>{figure}: {value}"
+#: The caption's first sentence: how a shade reads, with no "darker" or "lighter",
+#: since the high end is darkest in Light and lightest in Dark.
+C11_CAPTION = (
+    "Each state's color shows where its number sits on the scale with the map: the "
+    "higher the number, the more the color stands out from the page's background. "
+    "The table on this page gives each state's figure."
+)
+#: The caption's second part, by metric key: what the figure counts.
+C11_BASIS = {
+    "state_elections_count": (
+        "An election in which a state appointed no electors is left out of its count, "
+        "as on its history page."
+    ),
+    "state_first_election": (
+        "The year is the first election in this dataset in which the state appointed "
+        "electors. This dataset begins with the 1824 election, so it holds no earlier "
+        "one for any state. The later the year, the more the color stands out."
+    ),
+    "state_pv_elections_count": (
+        "A state's color goes by its count of these elections, not its share of them: "
+        "a state with fewer elections in this dataset can sit lower on the scale even "
+        "if every one of them had a popular vote. This counts how electors were "
+        "chosen, not the elections this dataset has popular-vote totals for, which "
+        "begin much later."
+    ),
+    "state_electors_change": (
+        "The number compares the electors a state appointed in its latest election "
+        "with those in its first election in this dataset. It compares those two "
+        "elections only and says nothing about the years in between. On this map a "
+        "state with a few more electors and one with a few fewer look almost alike; "
+        "the table gives each state's change with its sign."
+    ),
+}
+#: The caption's last sentence before the table pointer: the outlines' source.
+C11_OUTLINES_CREDIT = (
+    "State outlines are from Natural Earth, which is in the public domain."
+)
+#: The map's key, page text inside the chart's figure: the measure colors, then (only
+#: where a state is left out) the outline-only entry, then the phone sentence
+#: (D121(f), (g)).
+C11_COLOR_NOTE = (
+    "Red is this site's color for figures about electors, and blue for figures about "
+    "the popular vote; neither stands for a party."
+)
+C11_NO_FIGURE_KEY = (
+    "A state shown only in outline has no number to show on this map. Its row in the "
+    "table says why."
+)
+C11_PHONE_NOTE = (
+    "On a small screen, DC and the smallest states are hard to see or tap on the map. "
+    "The table on this page has every state and DC."
+)
+#: In place of the chart when no state has a number for the figure chosen.
+C11_NO_FIGURES = (
+    "No state has a number to show on this map for this figure. Each state's row in "
+    "the table says why."
+)
+
 # --- Charts C4 and C5 (#436, D100): ba spec, approved at #436's plan gate -------------
 
 #: C4's title, and the one-state form C7 shares (#560; C4 draws all states only since

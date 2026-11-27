@@ -323,8 +323,10 @@ def dropdown_filter(
     options: Sequence[dict[str, Any]],
     value: str | None,
     placeholder: str,
+    *,
+    clearable: bool = True,
 ) -> html.Div:
-    """A dropdown filter (#475): ``label`` above a clearable single-choice dropdown,
+    """A dropdown filter (#475): ``label`` above a single-choice dropdown,
     in one ``filter`` box. Every dashboard dropdown filter is built here, so a fix to
     its markup is made once. ``TestDropdownFilter`` (in
     ``test_dashboard_elections.py``) checks it by scanning source, in
@@ -335,7 +337,10 @@ def dropdown_filter(
     options' labels; a list of names takes its options from
     :func:`label_sorted_options`), so this function holds no wording of its own.
     ``value`` is the option applied, or ``None`` for none. No ``persistence``: it would
-    override the URL, which is where the value lives.
+    override the URL, which is where the value lives. ``clearable`` (default
+    ``True``) lets a reader clear it, back to every option; a dropdown with no "every
+    option" to go back to, such as ``/states``' choice of the figure its map shows
+    (#623), passes ``False``.
     """
     return html.Div(
         [
@@ -345,7 +350,7 @@ def dropdown_filter(
                 options=options,
                 value=value,
                 placeholder=placeholder,
-                clearable=True,
+                clearable=clearable,
             ),
         ],
         className="filter",
@@ -607,6 +612,7 @@ def chart(
     caption: str,
     *,
     collapsed: bool = True,
+    legend_key: Sequence[Any] = (),
 ) -> html.Figure:
     """A chart (#432): the one way to build one, as :func:`table` is for tables.
 
@@ -629,7 +635,12 @@ def chart(
     on load and opened by its summary, :data:`labels.CHART_CAPTION_SUMMARY`, with the
     pointer after it, outside it and always shown. ``collapsed=False`` keeps a caption
     open, for a chart whose caption is its only cue apart from color (C1's bar order,
-    WCAG 1.4.1). The mount point is rendered empty, never with a ``dcc.Graph``
+    WCAG 1.4.1). ``legend_key`` is a key written as page text (#623, D121(f)): its
+    children, in a ``chart-key`` box inside the figure, after the drawing and before
+    the caption, in the drawn and the not-drawn render alike, so it survives a blocked
+    CDN as the title does (D088). The figure takes the class ``chart-map`` where the
+    chart's registry row sets ``map_ramp`` (#623), which ``style.css`` caps the map's
+    width by. The mount point is rendered empty, never with a ``dcc.Graph``
     (#452): ``charts.CHART_MOUNT_CALLBACK`` puts the graph in it, hidden and with no
     figure, only once plotly.js has loaded, and ``charts.CHART_CALLBACK`` then draws it
     in the theme in effect and shows it, so it never flashes plotly's own colors and a
@@ -692,8 +703,12 @@ def chart(
         )
     else:
         pointer = html.Figcaption([caption, " ", link, "."])
+    key = (
+        [html.Div(list(legend_key), className="chart-key")] if legend_key else []
+    )
+    classes = "chart chart-map" if row.map_ramp else "chart"
     problems = problems or charts.figure_problems(
-        source, short_value_ticks=row.short_value_ticks, map_bins=row.map_bins
+        source, short_value_ticks=row.short_value_ticks, map_ramp=row.map_ramp
     )
     if problems:
         log.error(
@@ -704,7 +719,9 @@ def chart(
             problems[:LOGGED_PROBLEMS],
             extra={"chart_id": chart_id},
         )
-        return html.Figure([heading, pointer], id=dom, className="chart", **named)
+        return html.Figure(
+            [heading, *key, pointer], id=dom, className=classes, **named
+        )
     return html.Figure(
         [
             heading,
@@ -715,10 +732,11 @@ def chart(
                 **named,
             ),
             dcc.Store(id=charts.source_id(dom), data=source),
+            *key,
             pointer,
         ],
         id=dom,
-        className="chart",
+        className=classes,
         # Named by its title, not its figcaption (#593's review): a closed caption's
         # text is left out of the name, which would leave every chart's figure named
         # by the same summary and pointer.
