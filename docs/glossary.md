@@ -2287,6 +2287,7 @@ articles and announcements). Every rule binds all three unless the rule states a
 - **Source:** #623 acceptance criteria; the owner's redirect at its plan gate (continuous ramp, linear scale, 2026-11-27); D121 as amended by D124 (#623); D109; D123(f); D073; reader wording: `ba` spec for #623 (re-run 2026-11-27); the 0-tick spacing rule: owner, PR #652 code review (r1.code-review.4), 2026-11-27.
 - **Not:** A party map ("red states", "blue states"). Ranges or bins (D121's first design, replaced before it shipped). A share, rate or rank. Any one election's results. "Darker" or "lighter" meaning more. A record of any state before 1824. The record itself: that is the table. "Figure" for the chart.
 - **Status:** settled. (Owner approved the wording at #623's plan gate, 2026-11-27; the change map's `C11_BASIS` third sentence is confirmed at the owner's by-eye check before merge.)
+
 ### Theme choice (Dark, Auto or Light)
 - **Plain:** How the site looks: dark pages, light pages, or Auto, which follows the light or
   dark setting of the reader's device. Auto is the starting choice. A choice is remembered in
