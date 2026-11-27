@@ -693,7 +693,7 @@ def chart(
     else:
         pointer = html.Figcaption([caption, " ", link, "."])
     problems = problems or charts.figure_problems(
-        source, short_value_ticks=row.short_value_ticks
+        source, short_value_ticks=row.short_value_ticks, map_bins=row.map_bins
     )
     if problems:
         log.error(

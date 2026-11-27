@@ -55,6 +55,12 @@ TOKENS: tuple[str, ...] = (
     "--chart-axis",
     "--chart-grid",
     "--chart-reference",
+    "--chart-bin-ec-1",
+    "--chart-bin-ec-2",
+    "--chart-bin-ec-3",
+    "--chart-bin-pv-1",
+    "--chart-bin-pv-2",
+    "--chart-bin-pv-3",
 )
 
 #: The tokens whose role the header declares "decorative, exempt from 3:1": what each
@@ -1095,6 +1101,14 @@ CHART_TEXT = ("--text", "--text-secondary")
 #: gridlines (``--chart-grid``) are decoration under the marks, so they are exempt.
 CHART_MARKS = (*CHART_SERIES, "--chart-axis", "--chart-reference")
 
+#: The map's bin ramps (#639, D121(e)), one per measure, bin 1 (the lowest) first:
+#: written by hand, and must equal ``charts.MAP_RAMPS``. Not series: a bin never shares
+#: a chart with C1–C10's series, so the pairwise floor holds within a ramp only.
+CHART_BINS = (
+    ("--chart-bin-ec-1", "--chart-bin-ec-2", "--chart-bin-ec-3"),
+    ("--chart-bin-pv-1", "--chart-bin-pv-2", "--chart-bin-pv-3"),
+)
+
 #: The color-vision floor: every pair of series tokens at a CIEDE2000 difference of at
 #: least this, unsimulated and under each simulation, in both palettes.
 CVD_FLOOR = 10.0
@@ -1309,6 +1323,8 @@ class TestChartColors:
 
         layout = charts.TEMPLATE["layout"]
         assert {layout["paper_bgcolor"], layout["plot_bgcolor"]} == {"var(--page)"}
+        # The map's background (#639, D121(c)), which the bgcolor branch below passes.
+        assert layout["geo"]["bgcolor"] == "var(--page)"
         backgrounds = {"var(--page)", layout["hoverlabel"]["bgcolor"]}
         assert backgrounds == {"var(--page)", "var(--surface)"}
         seen: set[str] = set()
@@ -1319,7 +1335,7 @@ class TestChartColors:
             seen.add(path)
             if path.endswith(".font.color") or path.endswith("tickfont.color"):
                 assert token in CHART_TEXT, path
-            elif key in ("linecolor", "tickcolor", "zerolinecolor"):
+            elif key in ("linecolor", "tickcolor", "zerolinecolor", "subunitcolor"):
                 assert token in CHART_MARKS, path
             elif key == "gridcolor":
                 assert token == "--chart-grid", path
@@ -1351,7 +1367,8 @@ class TestChartColors:
 
     def test_every_chart_token_but_the_grid_is_checked(self) -> None:
         charted = {t for t in TOKENS if t.startswith("--chart-")}
-        assert charted == set(CHART_MARKS) | {"--chart-grid"}
+        bins = {t for ramp in CHART_BINS for t in ramp}
+        assert charted == set(CHART_MARKS) | {"--chart-grid"} | bins
 
     def test_the_series_tokens_are_hex(self) -> None:
         # The contrast and CIEDE2000 math here composites no alpha over the page, so a
@@ -1361,6 +1378,72 @@ class TestChartColors:
             for token in TOKENS:
                 if token.startswith("--chart-"):
                     assert re.fullmatch(r"#[0-9a-f]{6}", palette[token]), (key, token)
+
+    def test_the_bins_are_the_map_s_ramps(self) -> None:
+        from explore import charts
+
+        assert (
+            tuple(tuple(f"var({token})" for token in ramp) for ramp in CHART_BINS)
+            == charts.MAP_RAMPS
+        )
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("token", [t for ramp in CHART_BINS for t in ramp])
+    def test_each_bin_meets_3_to_1_on_the_page_and_its_border(
+        self, theme: str, token: str
+    ) -> None:
+        """D121(e): a bin is a mark, at 3:1 on the page; and on its border, the map's
+        ``marker.line.color`` (D121(c), WCAG 1.4.11, since adjacent bins do not contrast
+        with each other), read from ``charts.MAP_BORDER``, so moving the border moves
+        this test."""
+        from explore import charts
+
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        bin_color = parse_color(palette[token])
+        page = contrast(bin_color, parse_color(palette["--page"]))
+        assert page >= NON_TEXT, (theme, token, round(page, 2))
+        border = parse_color(resolve(charts.MAP_BORDER, palette))
+        edge = contrast(bin_color, border)
+        assert edge >= NON_TEXT, (theme, token, round(edge, 2))
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    @pytest.mark.parametrize("kind", [None, *MACHADO])
+    def test_the_bins_stay_apart_within_their_ramp(
+        self, theme: str, kind: str | None
+    ) -> None:
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        for ramp in CHART_BINS:
+            for first, second in itertools.combinations(ramp, 2):
+                gap = separation(palette[first], palette[second], kind)
+                assert gap >= CVD_FLOOR, (theme, kind, first, second, round(gap, 2))
+
+    def test_each_bin_is_its_decided_color(self) -> None:
+        """#639's plan gate: D121(e)'s measured values, bin 1 nearest the page."""
+        expected = {
+            LIGHT: ("#d17e76", "#c62f2f", "#602d29", "#6898cb", "#486d95", "#273e56"),
+            EXPLICIT_DARK: (
+                "#c6001d",
+                "#e8605a",
+                "#ffd9d4",
+                "#406392",
+                "#3f86e3",
+                "#bacce5",
+            ),
+        }
+        tokens = [t for ramp in CHART_BINS for t in ramp]
+        for key in PALETTE_BLOCKS:
+            palette = block(key)
+            want = expected[LIGHT if key == LIGHT else EXPLICIT_DARK]
+            assert tuple(palette[t] for t in tokens) == want, key
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    def test_each_ramp_runs_away_from_the_page(self, theme: str) -> None:
+        """Bin 1 nearest the page, bin 3 farthest (owner, #639's plan gate)."""
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        page = parse_color(palette["--page"])
+        for ramp in CHART_BINS:
+            ratios = [contrast(parse_color(palette[t]), page) for t in ramp]
+            assert ratios == sorted(ratios), (theme, ramp, ratios)
 
     @pytest.mark.parametrize("theme", ["light", "dark"])
     @pytest.mark.parametrize("kind", [None, *MACHADO])

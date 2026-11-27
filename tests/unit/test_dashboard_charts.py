@@ -40,20 +40,20 @@ from tests.unit.test_dashboard_theme import (
 )
 
 #: Every chart ID ever issued, live and retired, with its whole row (page, companion
-#: table, retired, short value ticks — #596, D110): written by hand, never derived from the registry, so a renumbered,
+#: table, retired, short value ticks — #596, D110, map bins — #639, D121(b)): written by hand, never derived from the registry, so a renumbered,
 #: reused, un-retired or deleted ID fails. An ID is issued when its chart story
 #: registers it: C1 by #433 and C3 by #435; C2, C4 and C5 are assigned to #434 and
 #: #436 by their issues, C7 to #560 and C10 to #582 by their own (C6, #550's, is not yet
 #: registered).
-ISSUED: dict[str, tuple[str, str, bool, bool]] = {
-    "C1": ("/election/<year>", "election-nation", False, False),
-    "C3": ("/election/<year>/per-capita", "election-per-capita", False, False),
-    "C2": ("/elections/majority", "elections-leader-table", False, False),
-    "C4": ("/elections/over-time", "elections-over-time-table", False, False),
-    "C5": ("/elections/over-time", "elections-over-time-table", False, True),
-    "C7": ("/state/<usps>", "state-electors", False, False),
-    "C10": ("/state/<usps>", "state-electors", False, True),
-    "C9": ("/elections", "elections-table", False, False),
+ISSUED: dict[str, tuple[str, str, bool, bool, bool]] = {
+    "C1": ("/election/<year>", "election-nation", False, False, False),
+    "C3": ("/election/<year>/per-capita", "election-per-capita", False, False, False),
+    "C2": ("/elections/majority", "elections-leader-table", False, False, False),
+    "C4": ("/elections/over-time", "elections-over-time-table", False, False, False),
+    "C5": ("/elections/over-time", "elections-over-time-table", False, True, False),
+    "C7": ("/state/<usps>", "state-electors", False, False, False),
+    "C10": ("/state/<usps>", "state-electors", False, True, False),
+    "C9": ("/elections", "elections-table", False, False, False),
 }
 
 #: A registry with one live and one retired row, for the builder's tests.
@@ -64,11 +64,11 @@ REGISTRY = {
 
 
 def issued_problems(
-    literal: dict[str, tuple[str, str, bool, bool]], registry: Any
+    literal: dict[str, tuple[str, str, bool, bool, bool]], registry: Any
 ) -> list[str]:
     """How ``registry`` differs from the hand-written ``literal`` of issued IDs: an ID
-    missing from either, or a row whose page, table, retired flag or short value
-    ticks changed."""
+    missing from either, or a row whose page, table, retired flag, short value ticks
+    or map bins changed."""
     problems = [f"{c}: issued but not registered" for c in literal if c not in registry]
     problems += [
         f"{c}: registered but not issued" for c in registry if c not in literal
@@ -114,8 +114,8 @@ class TestChartRegistry:
 
     def test_the_comparison_fails_every_drift(self) -> None:
         literal = {
-            "C1": ("/elections", "elections-table", False, False),
-            "C2": ("/elections", "elections-table", True, False),
+            "C1": ("/elections", "elections-table", False, False, False),
+            "C2": ("/elections", "elections-table", True, False, False),
         }
         assert issued_problems(literal, REGISTRY) == []
         assert issued_problems(literal, {"C1": REGISTRY["C1"]}) == [
@@ -126,14 +126,14 @@ class TestChartRegistry:
         ]
         moved = {**REGISTRY, "C1": charts.Chart("/states", "elections-table")}
         assert issued_problems(literal, moved) == [
-            "C1: row ('/states', 'elections-table', False, False) is not "
-            "('/elections', 'elections-table', False, False)"
+            "C1: row ('/states', 'elections-table', False, False, False) is not "
+            "('/elections', 'elections-table', False, False, False)"
         ]
         # A retired ID brought back, or an ID reused for another table.
         revived = {**REGISTRY, "C2": charts.Chart("/elections", "elections-table")}
         assert issued_problems(literal, revived) == [
-            "C2: row ('/elections', 'elections-table', False, False) is not "
-            "('/elections', 'elections-table', True, False)"
+            "C2: row ('/elections', 'elections-table', False, False, False) is not "
+            "('/elections', 'elections-table', True, False, False)"
         ]
         reused = {**REGISTRY, "C1": charts.Chart("/elections", "another-table")}
         assert len(issued_problems(literal, reused)) == 1
@@ -143,8 +143,17 @@ class TestChartRegistry:
             "C1": charts.Chart("/elections", "elections-table", short_value_ticks=True),
         }
         assert issued_problems(literal, shortened) == [
-            "C1: row ('/elections', 'elections-table', False, True) is not "
-            "('/elections', 'elections-table', False, False)"
+            "C1: row ('/elections', 'elections-table', False, True, False) is not "
+            "('/elections', 'elections-table', False, False, False)"
+        ]
+        # The map's flag granted to a chart the literal does not grant (#639).
+        mapped = {
+            **REGISTRY,
+            "C1": charts.Chart("/elections", "elections-table", map_bins=True),
+        }
+        assert issued_problems(literal, mapped) == [
+            "C1: row ('/elections', 'elections-table', False, False, True) is not "
+            "('/elections', 'elections-table', False, False, False)"
         ]
 
     def test_the_literal_is_written_by_hand(self) -> None:
@@ -179,6 +188,7 @@ class TestChartRegistry:
                 "C01": charts.Chart("/a", "t"),
                 "C3": charts.Chart("a", "t"),
                 "C4": ("/a", "t"),  # type: ignore[dict-item]
+                "C5": charts.Chart("/a", "t", map_bins=1),  # type: ignore[arg-type]
             }
         ) == [
             "'C0': not a chart ID",
@@ -186,6 +196,7 @@ class TestChartRegistry:
             "'C01': not a chart ID",
             "'C3': not a chart row",
             "'C4': not a chart row",
+            "'C5': not a chart row",
         ]
 
     def test_the_dom_id_is_the_id_in_lower_case(self) -> None:
@@ -721,6 +732,46 @@ LAYOUT_KEYS: dict[str, Any] = {"coloraxis": {}, "coloraxis2": {}, "colorscale": 
 REFUSED_KEYS = sorted({*MARKER_KEYS, *TRACE_KEYS})
 
 
+#: The map's base (#639, D121(a)–(d)): a figure in the one shape ``map_bins`` admits,
+#: holding every slot :data:`charts.SLOT_KINDS` declares for the map, which no other
+#: chart may hold; it passes every rule with the flag on. Written by hand, so its stops
+#: are not :func:`charts.map_colorscale`'s output.
+EC_BINS = ("var(--chart-bin-ec-1)", "var(--chart-bin-ec-2)", "var(--chart-bin-ec-3)")
+MAP_BASE: dict[str, Any] = {
+    "data": [
+        {
+            "type": "choropleth",
+            "locationmode": "USA-states",
+            "locations": ["GA", "TX"],
+            "z": [0, 2],
+            "zmin": -0.5,
+            "zmax": 2.5,
+            "colorscale": [
+                [0.0, EC_BINS[0]],
+                [1 / 3, EC_BINS[0]],
+                [1 / 3, EC_BINS[1]],
+                [2 / 3, EC_BINS[1]],
+                [2 / 3, EC_BINS[2]],
+                [1.0, EC_BINS[2]],
+            ],
+            "showscale": True,
+            "colorbar": {
+                "tickmode": "array",
+                "tickvals": [0, 1, 2],
+                "ticktext": ["low", "middle", "high"],
+                "title": {"text": "t", "font": {"color": "var(--text)"}},
+                "tickfont": {"color": "var(--text-secondary)"},
+            },
+            "marker": {"line": {"color": "var(--page)"}},
+            "hovertemplate": "%{hovertext}<extra></extra>",
+            "hovertext": ["Georgia", "Texas"],
+            "name": "M",
+        }
+    ],
+    "layout": {"font": {"family": "var(--font-body)"}, "geo": {}},
+}
+
+
 def colored(kind: str) -> dict[str, Any]:
     """A valid ``scatter`` or ``bar`` trace with a ``marker`` and a ``marker.line``."""
     fields: dict[str, Any] = {"mode": "markers"} if kind == "scatter" else {}
@@ -787,6 +838,369 @@ class TestRefusedColorKeys:
         assert charts.figure_problems(figure) == [
             f"layout.{key}: no colorscale or colorbar"
         ]
+
+    # Under the map's flag (#639, the #645 amendment): the same cases, read by
+    # color_problems itself, since a scatter or bar figure is no map and
+    # map_problems refuses it whole.
+
+    @pytest.mark.parametrize("kind", ["scatter", "bar"])
+    @pytest.mark.parametrize(
+        ("holder", "key", "value"),
+        [
+            *[("marker", k, v) for k, v in MARKER_KEYS.items()],
+            *[("marker.line", k, v) for k, v in LINE_KEYS.items()],
+            *[("", k, v) for k, v in TRACE_KEYS.items()],
+        ],
+    )
+    def test_a_trace_key_is_still_refused_under_the_map_flag(
+        self, holder: str, key: str, value: Any, kind: str
+    ) -> None:
+        figure = {"data": [colored(kind)]}
+        target = figure["data"][0]
+        for part in holder.split(".") if holder else []:
+            target = target[part]
+        target[key] = value
+        path = ".".join(p for p in ("data[0]", holder, key) if p)
+        assert charts.color_problems(figure, map_bins=True) == [
+            f"{path}: no colorscale or colorbar"
+        ]
+
+    @pytest.mark.parametrize(("key", "value"), list(LAYOUT_KEYS.items()))
+    def test_a_layout_key_is_still_refused_under_the_map_flag(
+        self, key: str, value: Any
+    ) -> None:
+        figure = {"data": [colored("bar")], "layout": {key: value}}
+        assert charts.color_problems(figure, map_bins=True) == [
+            f"layout.{key}: no colorscale or colorbar"
+        ]
+
+    def test_zmin_and_zmax_pass_end_to_end(self) -> None:
+        """#645's amendment: ``zmin`` and ``zmax`` are in no refused set, through
+        ``figure_problems`` on a scatter and a bar and on the map."""
+        for kind in ("scatter", "bar"):
+            figure = {"data": [{**colored(kind), "zmin": 0, "zmax": 1}]}
+            assert charts.figure_problems(figure) == [], kind
+        assert charts.figure_problems(map_figure(), map_bins=True) == []
+
+
+def map_figure(**changes: Any) -> dict[str, Any]:
+    """:data:`MAP_BASE`'s map with its trace changed by ``changes`` (``None`` drops a
+    key)."""
+    figure = copy.deepcopy(MAP_BASE)
+    trace = figure["data"][0]
+    for key, value in changes.items():
+        if value is None:
+            trace.pop(key, None)
+        else:
+            trace[key] = value
+    return figure
+
+
+class TestMapBins:
+    """#639 (D121(a)–(f)): the binned map, admitted only on a chart whose registry row
+    sets ``map_bins``, and only in its one shape."""
+
+    def test_the_map_passes_under_the_flag_only(self) -> None:
+        assert charts.figure_problems(map_figure(), map_bins=True) == []
+        problems = charts.figure_problems(map_figure())
+        assert (
+            "data[0].type: 'choropleth', not a chart trace type (scatter or bar)"
+            in (problems)
+        )
+        assert "data[0].colorscale: no colorscale or colorbar" in problems
+
+    @pytest.mark.parametrize("flag", [1, "yes", None, False])
+    def test_only_true_admits_it(self, flag: Any) -> None:
+        problems = charts.figure_problems(map_figure(), map_bins=flag)
+        assert "data[0].colorscale: no colorscale or colorbar" in problems
+        assert any(p.startswith("data[0].type:") for p in problems)
+
+    def test_a_choropleth_is_admitted_at_data_0_only(self) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        figure["data"] = [colored("bar"), figure["data"][0]]
+        problems = charts.trace_type_problems(figure, map_bins=True)
+        assert problems == [
+            "data[1].type: 'choropleth', not a chart trace type (scatter or bar)"
+        ]
+
+    def test_scatter_and_bar_stay_admitted_under_the_flag(self) -> None:
+        figure = {"data": [colored("scatter"), colored("bar")]}
+        assert charts.trace_type_problems(figure, map_bins=True) == []
+
+    def test_a_figure_under_the_flag_is_the_map(self) -> None:
+        """The flag means the chart is the map: a plain chart under it is refused."""
+        assert "data: 2 traces, not the map's one" in charts.figure_problems(
+            TEST_FIGURE, map_bins=True
+        )
+        problems = charts.figure_problems({"data": [colored("bar")]}, map_bins=True)
+        assert "data[0].type: the map is a choropleth" in problems
+
+    def test_the_admitted_paths_are_exactly_three(self) -> None:
+        assert charts.MAP_COLOR_PATHS == (
+            "data[0].colorscale",
+            "data[0].colorbar",
+            "data[0].showscale",
+        )
+        assert charts.color_problems(MAP_BASE, map_bins=True) == []
+        # Without the flag the same paths, and the stops under the colorscale, are
+        # each refused.
+        refused = {p.split(":")[0] for p in charts.color_problems(MAP_BASE)}
+        assert set(charts.MAP_COLOR_PATHS) <= refused
+        assert {p for p in refused if p not in charts.MAP_COLOR_PATHS} and all(
+            p.startswith("data[0].colorscale[")
+            for p in refused
+            if p not in charts.MAP_COLOR_PATHS
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "value", "problem"),
+        [
+            # A refused key at an off-list path (#645's scope ruling).
+            (
+                ("hoverlabel",),
+                {"showscale": True},
+                "data[0].hoverlabel.showscale: no colorscale or colorbar",
+            ),
+            (
+                ("marker", "colorscale"),
+                "Viridis",
+                "data[0].marker.colorscale: no colorscale or colorbar",
+            ),
+            (
+                ("colorbar", "colorscale"),
+                [],
+                "data[0].colorbar.colorscale: no colorscale or colorbar",
+            ),
+            (
+                ("colorbar", "showscale"),
+                True,
+                "data[0].colorbar.showscale: no colorscale or colorbar",
+            ),
+            (
+                ("coloraxis",),
+                "coloraxis",
+                "data[0].coloraxis: no colorscale or colorbar",
+            ),
+            # A non-token color inside the admitted colorbar: its subtree is read.
+            (
+                ("colorbar", "tickcolor"),
+                "#000000",
+                "data[0].colorbar.tickcolor: '#000000' is not a color token reference",
+            ),
+            (
+                ("colorbar", "tickfont"),
+                {"color": "red"},
+                "data[0].colorbar.tickfont.color: 'red' is not a color token reference",
+            ),
+            # Matched exactly, never by prefix (#639's architect review, M2).
+            (
+                ("colorscale",),
+                {"color": "#000000"},
+                "data[0].colorscale.color: '#000000' is not a color token reference",
+            ),
+        ],
+    )
+    def test_the_exception_reaches_no_other_path(
+        self, path: tuple[str, ...], value: Any, problem: str
+    ) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        holder = figure["data"][0]
+        for part in path[:-1]:
+            holder = holder[part]
+        holder[path[-1]] = value
+        assert problem in charts.color_problems(figure, map_bins=True)
+
+    def test_a_second_trace_s_colorbar_is_refused(self) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        figure["data"].append({**colored("bar"), "colorbar": {}})
+        assert charts.color_problems(figure, map_bins=True) == [
+            "data[1].colorbar: no colorscale or colorbar"
+        ]
+
+    def test_the_colorscale_is_built_from_a_ramp(self) -> None:
+        assert charts.MAP_BIN_COUNT == 3
+        assert all(len(ramp) == charts.MAP_BIN_COUNT for ramp in charts.MAP_RAMPS)
+        assert (
+            charts.map_colorscale(charts.MAP_RAMPS[0])
+            == MAP_BASE["data"][0]["colorscale"]
+        )
+        for ramp in charts.MAP_RAMPS:
+            figure = map_figure(colorscale=charts.map_colorscale(ramp))
+            assert charts.figure_problems(figure, map_bins=True) == []
+
+    @pytest.mark.parametrize(
+        ("changes", "problem"),
+        [
+            ({"type": "choropleth "}, "data[0].type: the map is a choropleth"),
+            ({"locationmode": "country names"}, "data[0].locationmode:"),
+            ({"locationmode": None}, "data[0].locationmode:"),
+            ({"z": [0, 3]}, "data[0].z:"),
+            ({"z": [0, -1]}, "data[0].z:"),
+            ({"z": [0, 1.0]}, "data[0].z:"),
+            ({"z": [0, True]}, "data[0].z:"),
+            ({"z": []}, "data[0].z:"),
+            ({"z": None}, "data[0].z:"),
+            ({"z": [0]}, "data[0].locations: not one for each bin index in z"),
+            ({"locations": ["GA", "GA"]}, "data[0].locations:"),
+            ({"locations": ["GA", 7]}, "data[0].locations:"),
+            ({"locations": None}, "data[0].locations:"),
+            ({"zmin": -1}, "data[0].zmin: not -0.5"),
+            ({"zmin": None}, "data[0].zmin: not -0.5"),
+            ({"zmax": 3}, "data[0].zmax: not 2.5"),
+            ({"showscale": False}, "data[0].showscale:"),
+            ({"showscale": None}, "data[0].showscale:"),
+            ({"colorbar": None}, "data[0].colorbar:"),
+            ({"marker": None}, "data[0].marker:"),
+            ({"marker": {"line": {"color": "var(--text)"}}}, "data[0].marker:"),
+            (
+                {"marker": {"line": {"color": "var(--page)", "width": 0}}},
+                "data[0].marker:",
+            ),
+            (
+                {"marker": {"line": {"color": "var(--page)"}, "opacity": 0.5}},
+                "data[0].marker:",
+            ),
+            ({"selectedpoints": [0]}, "data[0].selectedpoints: not a key"),
+            ({"unselected": {}}, "data[0].unselected: not a key"),
+            ({"geojson": {}}, "data[0].geojson: not a key"),
+            ({"featureidkey": "id"}, "data[0].featureidkey: not a key"),
+        ],
+        ids=lambda v: str(v)[:40],
+    )
+    def test_each_departure_from_the_shape_is_refused(
+        self, changes: dict[str, Any], problem: str
+    ) -> None:
+        problems = charts.figure_problems(map_figure(**changes), map_bins=True)
+        assert any(p.startswith(problem) for p in problems), problems
+
+    @pytest.mark.parametrize(
+        "stops",
+        [
+            # A stop that is not a token, or the font token, or a token outside the
+            # ramps (the page's color would draw a bin as a state with no figure).
+            [[0.0, "#ff0000"], *MAP_BASE["data"][0]["colorscale"][1:]],
+            [[0.0, "var(--font-body)"], *MAP_BASE["data"][0]["colorscale"][1:]],
+            [[0.0, "var(--page)"], *MAP_BASE["data"][0]["colorscale"][1:]],
+            # A ramp out of order, mixed, short, or a position moved.
+            [*MAP_BASE["data"][0]["colorscale"][::-1]],
+            [
+                *MAP_BASE["data"][0]["colorscale"][:4],
+                [2 / 3, "var(--chart-bin-pv-3)"],
+                [1.0, "var(--chart-bin-pv-3)"],
+            ],
+            MAP_BASE["data"][0]["colorscale"][:4],
+            [[0, EC_BINS[0]], *MAP_BASE["data"][0]["colorscale"][1:]],
+            [
+                [0.0, EC_BINS[0]],
+                [0.3, EC_BINS[0]],
+                *MAP_BASE["data"][0]["colorscale"][2:],
+            ],
+            [[0.0, EC_BINS[0], 1], *MAP_BASE["data"][0]["colorscale"][1:]],
+            "Viridis",
+            [],
+        ],
+        ids=lambda v: str(v)[:30],
+    )
+    def test_a_colorscale_not_from_a_ramp_is_refused(self, stops: Any) -> None:
+        problems = charts.figure_problems(map_figure(colorscale=stops), map_bins=True)
+        assert "data[0].colorscale: not the stepwise scale of a map ramp" in problems
+
+    @pytest.mark.parametrize(
+        ("changes", "problem"),
+        [
+            ({"tickmode": "auto"}, "data[0].colorbar.tickmode:"),
+            ({"tickmode": None}, "data[0].colorbar.tickmode:"),
+            ({"tickvals": [0, 1]}, "data[0].colorbar.tickvals:"),
+            ({"tickvals": [0.0, 1, 2]}, "data[0].colorbar.tickvals:"),
+            ({"tickvals": None}, "data[0].colorbar.tickvals:"),
+            ({"ticktext": None}, "data[0].colorbar.ticktext:"),
+            ({"ticktext": ["a", "b"]}, "data[0].colorbar.ticktext:"),
+            ({"ticktext": ["a", " ", "c"]}, "data[0].colorbar.ticktext:"),
+        ],
+        ids=lambda v: str(v)[:40],
+    )
+    def test_each_departure_from_the_colorbar_is_refused(
+        self, changes: dict[str, Any], problem: str
+    ) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        colorbar = figure["data"][0]["colorbar"]
+        for key, value in changes.items():
+            if value is None:
+                colorbar.pop(key)
+            else:
+                colorbar[key] = value
+        problems = charts.figure_problems(figure, map_bins=True)
+        assert any(p.startswith(problem) for p in problems), problems
+
+    @pytest.mark.parametrize(
+        "key", ["coloraxis", "autocolorscale", "reversescale", "zmid", "zauto"]
+    )
+    def test_the_keys_d121a_refuses_stay_refused(self, key: str) -> None:
+        problems = charts.figure_problems(map_figure(**{key: 0}), map_bins=True)
+        assert f"data[0].{key}: no colorscale or colorbar" in problems
+
+    def test_a_state_with_no_figure_is_left_out(self) -> None:
+        """D121(f): a state reading *No figure* is not in ``locations``, so a map over
+        fewer states than are served passes."""
+        codes = [f"S{i:02d}" for i in range(50)]
+        figure = map_figure(
+            locations=codes,
+            z=[i % 3 for i in range(50)],
+            hovertext=codes,
+        )
+        assert charts.figure_problems(figure, map_bins=True) == []
+
+    @pytest.mark.parametrize("key", [*charts.FIXED_GEO_KEYS, "visible", "subunitwidth"])
+    def test_a_figure_sets_no_geo_key(self, key: str) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        figure["layout"]["geo"] = {key: False}
+        problems = charts.override_problems(figure)
+        if key in charts.FIXED_GEO_KEYS:
+            assert problems == [f"layout.geo.{key}: fixed by the template"]
+        else:
+            assert problems == [f"layout.geo.{key}: the map's geo is the template's"]
+
+    def test_a_second_geo_is_refused(self) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        figure["layout"]["geo2"] = {}
+        figure["data"][0]["geo"] = "geo2"
+        assert charts.override_problems(figure) == [
+            "data[0].geo: 'geo2', not the template's geo",
+            "layout.geo2: a second geo, which the template does not reach",
+        ]
+        figure["data"][0]["geo"] = "geo"
+        del figure["layout"]["geo2"]
+        assert charts.override_problems(figure) == []
+
+    def test_components_chart_reads_the_row(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: Any
+    ) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        figure["layout"]["title"] = {"text": "A map"}
+        monkeypatch.setattr(
+            charts,
+            "CHARTS",
+            {"C1": charts.Chart("/elections", "elections-table", map_bins=True)},
+        )
+        drawn = components.chart("C1", figure, "elections-table", "A caption.")
+        assert not [r for r in caplog.records if "C1" in r.getMessage()]
+        assert mount_points(drawn)
+
+    @pytest.mark.expected_chart_failure("C1", count=1)
+    def test_the_map_on_a_row_without_the_flag_is_not_drawn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        figure = copy.deepcopy(MAP_BASE)
+        figure["layout"]["title"] = {"text": "A map"}
+        monkeypatch.setattr(
+            charts, "CHARTS", {"C1": charts.Chart("/elections", "elections-table")}
+        )
+        assert not mount_points(
+            components.chart("C1", figure, "elections-table", "A caption.")
+        )
+
+    def test_only_true_in_the_registry_row(self) -> None:
+        assert not [c for c, row in charts.CHARTS.items() if row.map_bins]
 
 
 class TestMarkupNumbersAndOverrides:
@@ -1117,7 +1531,30 @@ class TestTemplate:
         for axis in ("xaxis", "yaxis"):
             for key in charts.FIXED_AXIS_KEYS:
                 assert key in layout[axis], (axis, key)
+        # The map's geo (#639, D121(c)): every key the template sets there is fixed.
+        assert set(charts.FIXED_GEO_KEYS) == set(layout["geo"])
         assert charts.override_problems({"data": [], "layout": {}}) == []
+
+    def test_the_map_s_geo(self) -> None:
+        """D121(c): the shipped file's scope, projection and resolution, on the page's
+        color, never re-zoomed, with only the states' outlines drawn, in a line token
+        held to 3:1 on the page (``CHART_MARKS``)."""
+        assert charts.TEMPLATE["layout"]["geo"] == {
+            "scope": "usa",
+            "projection": {"type": "albers usa"},
+            "resolution": 110,
+            "fitbounds": False,
+            "bgcolor": "var(--page)",
+            "showland": False,
+            "showlakes": False,
+            "showrivers": False,
+            "showcountries": False,
+            "showcoastlines": False,
+            "showframe": False,
+            "showocean": False,
+            "showsubunits": True,
+            "subunitcolor": "var(--chart-axis)",
+        }
 
     def test_the_config(self) -> None:
         assert charts.CHART_CONFIG == {
@@ -1710,6 +2147,9 @@ BASE: dict[str, Any] = {
     },
 }
 
+#: Each base with the ``map_bins`` value it passes under.
+BASES: tuple[tuple[dict[str, Any], bool], ...] = ((BASE, False), (MAP_BASE, True))
+
 #: Each JSON value kind a slot is replaced by (AC1 of #484): strings empty, holding
 #: ``var(``, ``<`` and ``%{``, and very long; a number of each kind, a boolean, null; a
 #: list and an object, nested.
@@ -1780,8 +2220,8 @@ def dotted(path: SlotPath) -> str:
     return text
 
 
-def is_total(figure: Any) -> bool:
-    problems = charts.figure_problems(figure)
+def is_total(figure: Any, map_bins: bool = False) -> bool:
+    problems = charts.figure_problems(figure, map_bins=map_bins)
     return isinstance(problems, list) and all(isinstance(p, str) for p in problems)
 
 
@@ -1813,9 +2253,11 @@ class TestTotality:
     (``test_every_slot_read_by_name_is_declared``, ``test_the_base_passes``)."""
 
     def test_the_base_passes(self) -> None:
-        """And holds every declared slot, so the sweeps below change each one."""
+        """And holds every declared slot, so the sweeps below change each one: the
+        map's under its flag (#639)."""
         assert charts.figure_problems(BASE) == []
-        held = {normalized(dotted(p)) for p in slots(BASE)}
+        assert charts.figure_problems(MAP_BASE, map_bins=True) == []
+        held = {normalized(dotted(p)) for base, _ in BASES for p in slots(base)}
         assert {
             f"{ANCHOR_PATHS[anchor]}.{key}"
             for anchor, table in EXPECTED_KINDS.items()
@@ -1826,11 +2268,16 @@ class TestTotality:
         assert set(EXPECTED_KINDS["any"]) <= keys
 
     @pytest.mark.parametrize("kind", list(KINDS))
-    def test_every_slot_of_the_base_holding_each_kind(self, kind: str) -> None:
+    @pytest.mark.parametrize(("base", "map_bins"), BASES, ids=["chart", "map"])
+    def test_every_slot_of_the_base_holding_each_kind(
+        self, kind: str, base: dict[str, Any], map_bins: bool
+    ) -> None:
+        """Each base under its own flag: the map's with ``map_bins`` on, so the map's
+        own check is swept too (#639)."""
         raised = []
-        for path in slots(BASE):
+        for path in slots(base):
             try:
-                total = is_total(replaced(BASE, path, KINDS[kind]))
+                total = is_total(replaced(base, path, KINDS[kind]), map_bins)
             except Exception as error:  # noqa: BLE001 - the finding to report
                 raised.append(f"{dotted(path)}: {type(error).__name__}")
             else:
@@ -1873,14 +2320,19 @@ class TestTotality:
         deepest = dotted(path) + "[0]" * allowed
         assert problems == [f"{deepest}: nested deeper than {charts.MAX_DEPTH}"]
 
-    @pytest.mark.parametrize("path", slots(BASE), ids=dotted)
+    @pytest.mark.parametrize(
+        ("map_bins", "path"),
+        [(flag, path) for base, flag in BASES for path in slots(base)],
+        ids=lambda v: dotted(v) if isinstance(v, tuple) else ("map" if v else "chart"),
+    )
     def test_a_value_deeper_than_the_recursion_limit_is_refused(
-        self, path: SlotPath
+        self, map_bins: bool, path: SlotPath
     ) -> None:
         deep = nested(5_000)
         with pytest.raises(RecursionError):  # the premise: a recursive walk fails
             copy.deepcopy(deep)
-        problems = charts.figure_problems(replaced(BASE, path, deep))
+        base = MAP_BASE if map_bins else BASE
+        problems = charts.figure_problems(replaced(base, path, deep), map_bins=map_bins)
         assert problems and all("nested deeper than" in p for p in problems)
 
     @pytest.mark.parametrize(
@@ -1961,11 +2413,29 @@ EXPECTED_KINDS: dict[str, dict[str, set[str]]] = {
         "customdata": {"a list", "a list of strings"},
         "marker": {"an object"},
         "line": {"an object"},
+        "locationmode": {"a string"},
+        "locations": {"a list of strings"},
+        "z": {"a list", "a list of strings"},
+        "zmin": {"a number"},
+        "zmax": {"a number"},
+        "colorscale": {"a list", "a list of strings"},
+        "showscale": {"a boolean"},
+        "colorbar": {"an object"},
     },
-    "marker": {"symbol": {"a string"}, "pattern": {"an object"}},
+    "marker": {"symbol": {"a string"}, "pattern": {"an object"}, "line": {"an object"}},
     "pattern": {"shape": {"a string"}},
+    "marker_line": {"color": {"a string"}},
     "line": {"dash": {"a string"}},
-    "layout": {"legend": {"an object"}, "annotations": {"a list", "a list of strings"}},
+    "colorbar": {
+        "tickmode": {"a string"},
+        "tickvals": {"a list", "a list of strings"},
+        "ticktext": {"a list of strings"},
+    },
+    "layout": {
+        "legend": {"an object"},
+        "annotations": {"a list", "a list of strings"},
+        "geo": {"an object"},
+    },
     "axis": {"tickformat": {"a string"}},
     "annotation": {"text": {"a string"}},
     "any": {
@@ -1975,6 +2445,15 @@ EXPECTED_KINDS: dict[str, dict[str, set[str]]] = {
     },
 }
 EXPECTED_ANCHOR_KINDS = {"axis": {"an object"}, "annotation": {"an object"}}
+
+#: Where each anchor sits in :data:`MAP_BASE` (#639), checked under ``map_bins``.
+MAP_ANCHORS: dict[str, list[SlotPath]] = {
+    "trace": [("data", 0)],
+    "marker": [("data", 0, "marker")],
+    "marker_line": [("data", 0, "marker", "line")],
+    "colorbar": [("data", 0, "colorbar")],
+    "layout": [("layout",)],
+}
 
 #: Where each anchor sits in :data:`BASE`, one path or more.
 ANCHORS: dict[str, list[SlotPath]] = {
@@ -2013,6 +2492,7 @@ OTHER_READS = {
     "layout.updatemenus",
     "layout.sliders",
     "data[i].legend",
+    "data[i].geo",
     "data[i].width",
     "data[i].offset",
     "data[i].hovertemplate",
@@ -2029,7 +2509,9 @@ ANCHOR_PATHS = {
     "trace": "data[i]",
     "marker": "data[i].marker",
     "pattern": "data[i].marker.pattern",
+    "marker_line": "data[i].marker.line",
     "line": "data[i].line",
+    "colorbar": "data[i].colorbar",
     "layout": "layout",
     "axis": "layout.<axis>",
     "annotation": "layout.annotations[i]",
@@ -2115,11 +2597,22 @@ class TestSlotKinds:
         self, anchor: str, key: str
     ) -> None:
         expected = EXPECTED_KINDS[anchor][key]
-        for base_path in ANCHORS[anchor]:
+        cases = [
+            (base, flag, base_path)
+            for base, flag, anchors in (
+                (BASE, False, ANCHORS),
+                (MAP_BASE, True, MAP_ANCHORS),
+            )
+            for base_path in anchors.get(anchor, [])
+        ]
+        assert cases
+        for base, flag, base_path in cases:
             path = (*base_path, key)
             for kind, values in SAMPLES.items():
                 for value in values:
-                    problems = charts.figure_problems(replaced(BASE, path, value))
+                    problems = charts.figure_problems(
+                        replaced(base, path, value), map_bins=flag
+                    )
                     if kind in expected:
                         assert kind_refusals(problems, path) == [], (path, value)
                     else:
@@ -2158,6 +2651,14 @@ class TestSlotKinds:
         ]
         for figure in figures:
             charts.figure_problems(recording(figure, "", log))
+        # The map's base and its cases under the flag (#639).
+        maps = [MAP_BASE] + [
+            replaced(MAP_BASE, path, value)
+            for path in slots(MAP_BASE)
+            for value in ("s", 7, None, ["s"], {"a": "b"})
+        ]
+        for figure in maps:
+            charts.figure_problems(recording(figure, "", log), map_bins=True)
         read = {normalized(p) for p in log}
         declared = {
             f"{ANCHOR_PATHS[anchor]}.{key}"

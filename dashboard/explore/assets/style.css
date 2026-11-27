@@ -57,6 +57,17 @@
      --chart-axis      axis lines and ticks
      --chart-grid      gridlines, decoration under the marks (exempt from 3:1)
      --chart-reference  a reference line, such as a majority line
+   The map's bins (#639, D121(e)): one sequential ramp of three per measure, bin 1
+   nearest the page and bin 3 farthest from it, each at 3:1 on --page (also its border,
+   charts.MAP_BORDER) and apart within its ramp (CHART_BINS in
+   tests/unit/test_dashboard_theme.py, which must equal charts.MAP_RAMPS). They are the
+   map's alone, never a series token, so a series change never moves a bin:
+     --chart-bin-ec-1  the map's lowest electoral-vote-derived bin (red)
+     --chart-bin-ec-2  the map's middle electoral-vote-derived bin (red)
+     --chart-bin-ec-3  the map's highest electoral-vote-derived bin (red)
+     --chart-bin-pv-1  the map's lowest popular-vote-derived bin (blue)
+     --chart-bin-pv-2  the map's middle popular-vote-derived bin (blue)
+     --chart-bin-pv-3  the map's highest popular-vote-derived bin (blue)
 
    Three palette blocks, each declaring every token. Light is the bare :root below.
    Dark is two identical blocks, so that an explicit choice wins in both directions:
@@ -122,6 +133,12 @@
   --chart-axis: #767676;
   --chart-grid: #e6e6e6;
   --chart-reference: #595959;
+  --chart-bin-ec-1: #d17e76;
+  --chart-bin-ec-2: #c62f2f;
+  --chart-bin-ec-3: #602d29;
+  --chart-bin-pv-1: #6898cb;
+  --chart-bin-pv-2: #486d95;
+  --chart-bin-pv-3: #273e56;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -148,6 +165,12 @@
     --chart-axis: #8a8a8a;
     --chart-grid: #2e2e2e;
     --chart-reference: #a6a6a6;
+    --chart-bin-ec-1: #c6001d;
+    --chart-bin-ec-2: #e8605a;
+    --chart-bin-ec-3: #ffd9d4;
+    --chart-bin-pv-1: #406392;
+    --chart-bin-pv-2: #3f86e3;
+    --chart-bin-pv-3: #bacce5;
     --Dash-Text-Strong: var(--text);
     --Dash-Text-Primary: var(--text);
     --Dash-Text-Weak: var(--text-muted);
@@ -188,6 +211,12 @@
   --chart-axis: #8a8a8a;
   --chart-grid: #2e2e2e;
   --chart-reference: #a6a6a6;
+  --chart-bin-ec-1: #c6001d;
+  --chart-bin-ec-2: #e8605a;
+  --chart-bin-ec-3: #ffd9d4;
+  --chart-bin-pv-1: #406392;
+  --chart-bin-pv-2: #3f86e3;
+  --chart-bin-pv-3: #bacce5;
   --Dash-Text-Strong: var(--text);
   --Dash-Text-Primary: var(--text);
   --Dash-Text-Weak: var(--text-muted);
