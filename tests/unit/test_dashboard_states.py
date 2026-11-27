@@ -720,19 +720,54 @@ def key_paths(value: Any, path: str = "") -> set[str]:
     return found
 
 
+def figure_number(text: str, metric: str) -> int:
+    """The number a state page's figure text leads with, read independently of the
+    map's path: the count before " of " for the popular-vote count, the signed change
+    ("+", U+2212 or an unsigned "0") for the change, and the leading integer of the
+    other two (its count of elections, its first election's year)."""
+    head = text.split(",")[0].split(" ")[0]
+    if metric == "state_pv_elections_count":
+        head = text.split(" of ")[0]
+    if metric == "state_electors_change":
+        if head.startswith("+"):
+            return int(head[1:])
+        if head.startswith("\u2212"):
+            return -int(head[1:])
+    return int(head)
+
+
+def change_of(delta: int) -> state_view.HistoryFigures:
+    """A state's history figures whose change in electors is ``delta``: two elections,
+    from 100 electors in 1824 to ``100 + delta`` in 2024."""
+    return state_view.history_figures(
+        [
+            {"year": y, "state_electoral_votes": v, "pv_status": "popular_vote"}
+            for y, v in ((1824, 100), (2024, 100 + delta))
+        ]
+    )
+
+
 class TestC11:
     def test_the_default_view_draws_every_state_s_elections_count(self) -> None:
-        tree = page()
         trace = c11_trace()
         assert DEFAULT == "state_elections_count"
         assert trace["locations"] == ROSTER_STATES
         assert len(trace["locations"]) == 51
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_title_names_the_figure(self, metric: str) -> None:
+        # The figure's ``layout.title``, which ``components.chart`` writes as the
+        # chart's page title, in a render of ``?metric=<metric>``.
+        figure = built(metric)
+        assert figure is not None
+        assert figure["layout"]["title"] == {"text": labels.C11_TITLES[metric]}
+        tree = page(metric=metric)
         (title,) = [
             p.children
             for p in of_type(c11_element(tree), "P")
             if getattr(p, "className", None) == "chart-title"
         ]
-        assert title == labels.C11_TITLES[DEFAULT]
+        assert title == labels.C11_TITLES[metric]
 
     @pytest.mark.parametrize("metric", METRICS)
     def test_each_figure_draws_in_its_measure_s_ramp(self, metric: str) -> None:
@@ -742,6 +777,10 @@ class TestC11:
 
     @pytest.mark.parametrize("metric", METRICS)
     def test_z_is_each_state_s_own_figure(self, metric: str) -> None:
+        """``z`` is the table's path for every drawn state (one value per location, an
+        ``int``). This is the map against the table's own function; the check against
+        an independent oracle, each state page's figure text, is
+        ``TestC11Reconciliation.test_z_equals_the_state_page_s_figure``."""
         trace = c11_trace(metric)
         figures = history(n2())
         assert trace["z"] == [
@@ -883,6 +922,31 @@ class TestC11Reconciliation:
         assert figures_of(usps)[metric].startswith(hover), (metric, hover)
 
     @pytest.mark.parametrize("metric", METRICS)
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_z_equals_the_state_page_s_figure(self, usps: str, metric: str) -> None:
+        # AC3's value half: the number the map shades by, against the state page's
+        # figure text (from /v1/states/{usps}), never the table's path.
+        trace = c11_trace(metric)
+        drawn = trace["z"][trace["locations"].index(usps)]
+        assert drawn == figure_number(figures_of(usps)[metric], metric)
+
+    @pytest.mark.parametrize(
+        ("text", "metric", "number"),
+        [
+            ("50 elections (1824\u20132024)", "state_elections_count", 50),
+            ("1848, with 4 electors appointed", "state_first_election", 1848),
+            ("49 of 50 elections (1824\u20132024)", "state_pv_elections_count", 49),
+            ("+7, from 9 in 1824 to 16 in 2024", "state_electors_change", 7),
+            ("\u22123, from 9 in 1824 to 6 in 2024", "state_electors_change", -3),
+            ("0, from 9 in 1824 to 9 in 2024", "state_electors_change", 0),
+        ],
+    )
+    def test_the_oracle_reads_each_figure_s_number(
+        self, text: str, metric: str, number: int
+    ) -> None:
+        assert figure_number(text, metric) == number
+
+    @pytest.mark.parametrize("metric", METRICS)
     def test_the_locations_are_the_states_with_a_figure_and_have_outlines(
         self, metric: str
     ) -> None:
@@ -939,6 +1003,45 @@ class TestC11Reconciliation:
         assert "GA" not in change["data"][0]["locations"]  # type: ignore[index]
         count = c11_store(page(body))
         assert "GA" in count["data"][0]["locations"]  # type: ignore[index]
+
+    def test_the_zero_tick_s_least_share_is_a_tenth(self) -> None:
+        assert PICKER_MOD["C11_ZERO_TICK_MIN_FRACTION"] == 0.1
+
+    @pytest.mark.parametrize(
+        ("low", "high", "ticks"),
+        [
+            # 0 a fifty-first of the bar from its low end: the ends only.
+            (-1, 50, [-1, 50]),
+            # The recording's change: 0 well inside.
+            (-11, 50, [-11, 0, 50]),
+            # 0 at exactly a tenth from the low end (0.1 and 0.9): kept.
+            (-10, 90, [-10, 0, 90]),
+            # 0 at exactly a tenth from the high end: kept.
+            (-90, 10, [-90, 0, 10]),
+            # Just under a tenth from either end: dropped.
+            (-10, 91, [-10, 91]),
+            (-91, 10, [-91, 10]),
+            # 0 at an end or off the scale: the ends only.
+            (0, 50, [0, 50]),
+            (-50, 0, [-50, 0]),
+            (3, 50, [3, 50]),
+        ],
+    )
+    def test_the_change_keeps_its_zero_tick_only_a_tenth_from_each_end(
+        self, low: int, high: int, ticks: list[int]
+    ) -> None:
+        """D124(e) as amended (owner, PR #652's code review): the change map's 0 tick
+        only where 0 sits at least ``C11_ZERO_TICK_MIN_FRACTION`` of the bar from each
+        end, so it never crowds an end label."""
+        metric = "state_electors_change"
+        states = [("GA", "Georgia"), ("TX", "Texas")]
+        values = {"GA": change_of(low), "TX": change_of(high)}
+        figure = PICKER_MOD["c11_figure"](metric, states, values)
+        assert figure["data"][0]["z"] == [low, high]
+        colorbar = figure["data"][0]["colorbar"]
+        assert colorbar["tickvals"] == ticks
+        assert colorbar["ticktext"] == [labels.signed(t) for t in ticks]
+        assert charts.figure_problems(figure, map_ramp=True) == []
 
     def test_one_value_puts_the_top_one_above_it(self) -> None:
         """D124: where every drawn value is equal, ``zmax`` is one above ``zmin``,

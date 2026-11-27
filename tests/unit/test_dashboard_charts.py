@@ -1318,8 +1318,9 @@ class TestMapRamp:
         assert charts.figure_problems(figure, map_ramp=True) == []
 
     def test_the_thickness_bounds_are_the_measured_ones(self) -> None:
-        """D124: the bounds #623's e2e measurement at 390 and 360 px set, written here
-        by hand."""
+        """D124: the 8–30 px bounds come from a dated hand measurement at 390 and
+        360 px (2026-11-27, recorded in D124(f)), written here by hand. The e2e holds
+        C11's 12 px only; an e2e of the bounds themselves is #655."""
         assert charts.MAP_COLORBAR_THICKNESS == (8, 30)
 
     @pytest.mark.parametrize(

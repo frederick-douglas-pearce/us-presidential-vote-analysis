@@ -256,6 +256,10 @@ C11_COLORBAR_PX = 12
 #: The figure's side margins, so the scale's end labels are drawn (D124's
 #: measurement: at 0 px plotly.js hid "1824" and "+50" at 390 and 360 px).
 C11_SIDE_PX = 16
+#: The least share of the colorbar's length the change map's 0 tick must keep from
+#: each end, so it never crowds an end label (owner, PR #652's code review; D124(e)
+#: as amended): below it, the ticks are the two ends only.
+C11_ZERO_TICK_MIN_FRACTION = 0.1
 
 
 def tick_text(metric: str, value: int) -> str:
@@ -278,9 +282,10 @@ def c11_figure(
     (D121(f), D123(f)). ``z`` is the value itself, on a linear scale from the lowest
     drawn value to the highest (one above the lowest where all are equal), in the
     figure's ramp, its low end nearest the page. The colorbar runs along the top with
-    numbered ticks at both ends, and at 0 for the change where the scale spans it. The
-    hover writes the state, the figure's header and the table's cell, escaped (D091).
-    No ``layout.geo``: the template's."""
+    numbered ticks at both ends, and at 0 for the change where the scale spans it and 0
+    sits at least ``C11_ZERO_TICK_MIN_FRACTION`` of the scale from each end (else the
+    two ends only). The hover writes the state, the figure's header and the table's
+    cell, escaped (D091). No ``layout.geo``: the template's."""
     drawn = [
         (usps, name, value)
         for usps, name in states
@@ -293,7 +298,12 @@ def c11_figure(
     if high == low:
         high = low + 1
     ticks = [low, high]
-    if metric == "state_electors_change" and low < 0 < high:
+    if (
+        metric == "state_electors_change"
+        and low < 0 < high
+        and (0 - low) / (high - low) >= C11_ZERO_TICK_MIN_FRACTION
+        and (high - 0) / (high - low) >= C11_ZERO_TICK_MIN_FRACTION
+    ):
         ticks = [low, 0, high]
     header = labels.STATES_HISTORY_HEADERS[metric]
     hovers = [

@@ -18,7 +18,7 @@ It also holds the state history's per-year collapse, :func:`electors` read throu
 (#641). The ``/states`` table (#641, D123) reads every state's N2 rows through
 :func:`states_history`, which checks them with :func:`rows` first and then calls the
 same functions, so it refuses the same rows and computes exactly what each state's
-page shows; C11's map (#623) is to call it too. The rule of an election with electors
+page shows; C11's map (#623) calls it too. The rule of an election with electors
 appointed and the popular-vote flag live here, the arithmetic in
 :mod:`explore.metrics`.
 
@@ -402,7 +402,7 @@ UNRECOGNIZED_HISTORY = HistoryFigures(
 def history_figures(records: list[dict[str, Any]]) -> HistoryFigures:
     """The state history's figures over one state's per-year ``records`` (``year``,
     ``state_electoral_votes``, ``pv_status``), the one computation the history page
-    (#621) and the ``/states`` table (#641, D123) share, and C11's map (#623) is to,
+    (#621) and the ``/states`` table (#641, D123) share, and C11's map (#623) too,
     so the two cannot disagree (D120).
 
     **One record per year.** The page passes C7's collapse, :func:`electors` read
@@ -533,7 +533,7 @@ def states_history(
     path; #641, D123), keyed by USPS code in ``roster_states``' order: ``None`` for a
     state whose rows are refused, the third cell state beside *No figure* and
     *Unrecognized value* (D120's residual (2)). The ``/states`` table reads it, and
-    C11's map (#623) is to, leaving a refused state out as it does those two (D123,
+    C11's map (#623) does too, leaving a refused state out as it does those two (D123,
     amending D121(f)).
 
     Raises ``TypeError`` where the body itself cannot be read, so the whole section

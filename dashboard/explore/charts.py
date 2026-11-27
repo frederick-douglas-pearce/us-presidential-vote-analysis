@@ -237,8 +237,10 @@ HYBRID_COLOR = "var(--chart-hybrid)"
 #: takes the red ramp, the count of popular votes held the blue one. The tokens are
 #: the map's alone, never a series token, so a series color change never moves the
 #: map (owner, #639's plan gate). ``CHART_BINS`` in ``test_dashboard_theme.py``, a
-#: hand-written literal, must equal this, and measures each stop and the colors
-#: plotly.js draws between them there.
+#: hand-written literal, must equal this, and measures each stop there and
+#: a linear-RGB model of the colors plotly.js draws between them, checked against
+#: plotly.js's own fills by the e2e tests in ``test_dashboard_e2e_states.py`` (Texas,
+#: and each ramp's two ends).
 MAP_RAMPS: tuple[tuple[str, ...], ...] = (
     ("var(--chart-bin-ec-1)", "var(--chart-bin-ec-2)", "var(--chart-bin-ec-3)"),
     ("var(--chart-bin-pv-1)", "var(--chart-bin-pv-2)", "var(--chart-bin-pv-3)"),

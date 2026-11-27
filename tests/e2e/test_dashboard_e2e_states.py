@@ -6,9 +6,10 @@ entry, all inside the width and none over another, the page key inside the width
 the long option wrapping; a drag that does not pan and a touch swipe that scrolls the
 page; a hover and a click on Texas. A change of figure (URL, title, Texas's fill, the
 table unchanged, only Dash's update requests), back and forward, and a document load
-of ``?metric=``; a theme switch redrawing Texas in the resolved tokens' interpolation
-with no request; a blocked CDN and a blocked outline file each leaving the title,
-caption, pointer, page key, control and table; and one outline request across a load,
+of ``?metric=``; a theme switch redrawing Texas in the resolved tokens' interpolation,
+and the lowest- and highest-valued states in the ramp's end stops, with no request; a
+blocked CDN and a blocked outline file each leaving the title, caption, pointer, page
+key, control and table; and one outline request across a load,
 a change, back and forward. No console error and no off-host request are asserted for
 every test by ``conftest._browser_guard``.
 """
@@ -75,13 +76,18 @@ def drawn(page: Page) -> dict[str, Any]:
     return found
 
 
+def state_path(page: Page, usps: str) -> Any:
+    """``usps``' drawn path."""
+    index: int = page.eval_on_selector_all(
+        C11_PATHS, "(els, usps) => els.findIndex(el => el.__data__.loc === usps)", usps
+    )
+    assert index >= 0, usps
+    return page.locator(C11_PATHS).nth(index)
+
+
 def texas(page: Page) -> Any:
     """Texas's drawn path."""
-    index: int = page.eval_on_selector_all(
-        C11_PATHS, "els => els.findIndex(el => el.__data__.loc === 'TX')"
-    )
-    assert index >= 0
-    return page.locator(C11_PATHS).nth(index)
+    return state_path(page, "TX")
 
 
 def fill(locator: Any) -> tuple[int, int, int]:
@@ -97,14 +103,19 @@ def hex_rgb(value: str) -> tuple[float, float, float]:
     return float(r), float(g), float(b)
 
 
+def ramp_stops(page: Page, metric: str) -> list[tuple[float, float, float]]:
+    """``metric``'s ramp, its three tokens resolved in the theme in effect."""
+    ramp = charts.MAP_RAMPS[1 if metric == "state_pv_elections_count" else 0]
+    return [hex_rgb(token(page, t.removeprefix("var(").rstrip(")"))) for t in ramp]
+
+
 def expected_fill(page: Page, usps: str, metric: str) -> tuple[float, float, float]:
     """The color plotly.js should draw ``usps`` in: its value's position on the scale,
     the ramp's three resolved tokens interpolated linearly in RGB at it (D124)."""
     trace = drawn(page)
     value = trace["z"][trace["locations"].index(usps)]
     position = (value - trace["zmin"]) / (trace["zmax"] - trace["zmin"])
-    ramp = charts.MAP_RAMPS[1 if metric == "state_pv_elections_count" else 0]
-    stops = [hex_rgb(token(page, t.removeprefix("var(").rstrip(")"))) for t in ramp]
+    stops = ramp_stops(page, metric)
     segment = min(int(position * (len(stops) - 1)), len(stops) - 2)
     t = position * (len(stops) - 1) - segment
     low, high = stops[segment], stops[segment + 1]
@@ -114,8 +125,24 @@ def expected_fill(page: Page, usps: str, metric: str) -> tuple[float, float, flo
 
 def assert_fill_is(page: Page, usps: str, metric: str) -> None:
     want = expected_fill(page, usps, metric)
-    got = fill(texas(page))
+    got = fill(state_path(page, usps))
     assert all(abs(a - b) <= 1 for a, b in zip(got, want, strict=True)), (got, want)
+
+
+def assert_ends_are_the_end_stops(page: Page, metric: str) -> None:
+    """The lowest-valued drawn state's fill is the ramp's first stop and the
+    highest-valued one's its third, the resolved ``--chart-bin-*-1`` and ``-3``,
+    within 1 per channel."""
+    trace = drawn(page)
+    stops = ramp_stops(page, metric)
+    for bound, stop in ((trace["zmin"], stops[0]), (trace["zmax"], stops[-1])):
+        usps = trace["locations"][trace["z"].index(bound)]
+        got = fill(state_path(page, usps))
+        assert all(abs(a - b) <= 1 for a, b in zip(got, stop, strict=True)), (
+            usps,
+            got,
+            stop,
+        )
 
 
 def center(locator: Any) -> tuple[float, float]:
@@ -294,6 +321,14 @@ def test_a_hover_and_a_click_on_texas_name_it(page: Page, width: int) -> None:
     hover = page.locator(f"{C11} .hoverlayer .hovertext")
     expect(hover).to_contain_text("Texas")
     expect(hover).to_contain_text(labels.STATES_HISTORY_HEADERS[DEFAULT])
+    # The table's cell for Texas under the default figure, read from the page's table.
+    texas_row = page.locator(STATES_HISTORY_ROWS).filter(
+        has=page.locator("td:first-child", has_text="Texas")
+    )
+    expect(texas_row).to_have_count(1)
+    cell = texas_row.locator("td").nth(1 + METRICS.index(DEFAULT)).inner_text()
+    assert cell.strip()
+    expect(hover).to_contain_text(cell.strip())
     page.locator(GRAPH).evaluate(
         """gd => { window.__e2eClicks = [];
            gd.on('plotly_click', e => window.__e2eClicks.push(e.points[0].location)); }"""
@@ -377,10 +412,13 @@ def test_c11_redraws_on_a_theme_switch_with_no_reload_or_request(
     page: Page, metric: str
 ) -> None:
     """[R-6]: Texas's fill is the RGB interpolation of the ramp's resolved tokens at
-    its value's position, within 1 per channel, in Light and then in Dark, which the
-    switch draws with no request."""
+    its value's position, and the lowest- and highest-valued drawn states' fills the
+    ramp's first and third stops, within 1 per channel, in Light and then in Dark,
+    which the switch draws with no request. This ties the unit tests' linear-RGB model
+    of the ramp to the fills plotly.js draws (interior sampling is #654)."""
     open_map(page, metric)
     assert_fill_is(page, "TX", metric)
+    assert_ends_are_the_end_stops(page, metric)
     light = fill(texas(page))
     seen = requests_of(page)
     page.evaluate("window.__e2e_mark = 1")
@@ -391,6 +429,7 @@ def test_c11_redraws_on_a_theme_switch_with_no_reload_or_request(
             return getComputedStyle(tx).fill !== 'rgb({", ".join(map(str, light))})'; }}"""
     )
     assert_fill_is(page, "TX", metric)
+    assert_ends_are_the_end_stops(page, metric)
     page.wait_for_timeout(SETTLE_MS)
     assert seen == [], seen
     assert page.evaluate("window.__e2e_mark") == 1

@@ -3704,8 +3704,8 @@ class TestFurtherStateFigures:
 
 
 def n2_records() -> dict[str, list[dict[str, Any]]]:
-    """N2's rows, one state's at a time, along the path the ``/states`` table takes
-    (#641, D123) and C11's map (#623) is to (#640, D120): the page's row check,
+    """N2's rows, one state's at a time, along the path the ``/states`` table
+    (#641, D123) and C11's map (#623) take (#640, D120): the page's row check,
     ``state_view.rows``, then C7's per-year collapse, ``state_view.electors``, as the
     history page runs them. The collapse refuses a year whose rows disagree and a gap; it accepts a
     repeated identical row, so N2's one row per state-year is
@@ -3725,9 +3725,9 @@ def n2_records() -> dict[str, list[dict[str, Any]]]:
 
 class TestHistoryFiguresOnN2:
     """``state_view.history_figures`` is the one computation the ``/states`` table
-    shares (#621, D120; #641, D123), and C11's map (#623) is to: N2 serves one row per state-year
+    shares (#621, D120; #641, D123), and C11's map (#623) too: N2 serves one row per state-year
     with the fields it reads, and each state's rows pass the page's own row check and
-    collapse (:func:`n2_records`, #640), so the map's values are to equal each state
+    collapse (:func:`n2_records`, #640), so the map's values equal each state
     page's."""
 
     def test_it_is_total_over_every_state_and_spreads_as_planned(self) -> None:
@@ -3789,8 +3789,8 @@ class TestHistoryFiguresRefusals:
     ) -> None:
         # ge.4: a rule of the shared function. A float year passes C7's collapse
         # (``state_series`` reads 1824.0 as the served 1824); the page refuses it
-        # earlier, in ``state_view.rows``, and #641 is to check N2's rows the same
-        # way (#640, D120), so this is the backstop for a caller that does not.
+        # earlier, in ``state_view.rows``, and the ``/states`` table (#641) checks
+        # N2's rows the same way (#640, D120), so this is the backstop for a caller that does not.
         assert (
             state_view.history_figures(self.records((year, 9), (2024, 16)))
             == state_view.UNRECOGNIZED_HISTORY
@@ -4419,7 +4419,7 @@ class TestSharedCollapse:
     """C7's per-year collapse lives in ``state_view`` (#640, D120): the history page
     reads a state's rows through ``state_view.collapsed(state_view.electors, …)``, and
     the ``/states`` table reads N2's through the same call (#641, D123), as C11's map
-    (#623) is to. These tests feed both shapes of rows to it directly: each fault reads
+    (#623) does. These tests feed both shapes of rows to it directly: each fault reads
     as ``None`` (no figures) for both. That the ``/states`` render calls it is
     ``TestStatesHistory.test_the_render_reads_the_shared_path``
     (``test_dashboard_states.py``)."""
