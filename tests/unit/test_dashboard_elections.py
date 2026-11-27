@@ -1207,6 +1207,20 @@ class TestDropdownFilter:
         )
         assert as_json(built) == as_json(by_hand)
 
+    def test_clearable_is_true_unless_a_caller_says_otherwise(self) -> None:
+        """#623: ``/states``' choice of C11's figure has no "every option" to clear
+        to, so it passes ``clearable=False``, keyword only; every other caller keeps
+        the default."""
+        for kwargs, expected in (({}, True), ({"clearable": False}, False)):
+            built = components.dropdown_filter(
+                "the-id", "The label", self.OPTIONS, "AL", "P", **kwargs
+            )
+            assert built.children[1].clearable is expected
+        with pytest.raises(TypeError):
+            components.dropdown_filter(  # type: ignore[misc]
+                "the-id", "The label", self.OPTIONS, "AL", "P", False
+            )
+
     def test_each_argument_lands_on_its_prop(self) -> None:
         built = components.dropdown_filter(
             "the-id", "The label", self.OPTIONS, "AL", "The placeholder"

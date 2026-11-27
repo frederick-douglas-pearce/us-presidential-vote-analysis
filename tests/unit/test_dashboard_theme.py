@@ -465,6 +465,30 @@ def contrast(foreground: Color, background: Color) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+def ramp_shades(ramp: tuple[str, ...], palette: dict[str, str]) -> list[Color]:
+    """A linear-RGB model of the colors plotly.js draws along ``ramp`` (#623, D124):
+    each segment between two stops, as ``charts.map_colorscale`` spaces them,
+    interpolated linearly in RGB, at :data:`RAMP_SAMPLES` points with both ends
+    included. The model is checked against plotly.js's own fills by the e2e tests in
+    ``test_dashboard_e2e_states.py`` (Texas, and each ramp's two ends); sampling the
+    interior in a browser is #654."""
+    stops = [parse_color(palette[token]) for token in ramp]
+
+    def mix(lo: Color, hi: Color, t: float) -> Color:
+        return (
+            lo[0] + (hi[0] - lo[0]) * t,
+            lo[1] + (hi[1] - lo[1]) * t,
+            lo[2] + (hi[2] - lo[2]) * t,
+            1.0,
+        )
+
+    return [
+        mix(lo, hi, step / (RAMP_SAMPLES - 1))
+        for lo, hi in itertools.pairwise(stops)
+        for step in range(RAMP_SAMPLES)
+    ]
+
+
 def resolve(value: str, palette: dict[str, str]) -> str:
     match = re.fullmatch(r"var\((--[\w-]+)\)", value)
     return palette[match.group(1)] if match else value
@@ -1101,13 +1125,18 @@ CHART_TEXT = ("--text", "--text-secondary")
 #: gridlines (``--chart-grid``) are decoration under the marks, so they are exempt.
 CHART_MARKS = (*CHART_SERIES, "--chart-axis", "--chart-reference")
 
-#: The map's bin ramps (#639, D121(e)), one per measure, bin 1 (the lowest) first:
-#: written by hand, and must equal ``charts.MAP_RAMPS``. Not series: a bin never shares
-#: a chart with C1–C10's series, so the pairwise floor holds within a ramp only.
+#: The map's ramps (#639, D121(e); C11's continuous ramp since #623, D124), one per
+#: measure, its stop nearest the page first: written by hand, and must equal
+#: ``charts.MAP_RAMPS``. Not series: a ramp never shares a chart with C1–C10's
+#: series, so the pairwise floor holds within a ramp only. Named ``bin`` since #639.
 CHART_BINS = (
     ("--chart-bin-ec-1", "--chart-bin-ec-2", "--chart-bin-ec-3"),
     ("--chart-bin-pv-1", "--chart-bin-pv-2", "--chart-bin-pv-3"),
 )
+
+#: How many points of each segment between two ramp stops the tests of the ramps'
+#: linear-RGB model sample (#623, D124), both ends included.
+RAMP_SAMPLES = 64
 
 #: The color-vision floor: every pair of series tokens at a CIEDE2000 difference of at
 #: least this, unsimulated and under each simulation, in both palettes.
@@ -1438,12 +1467,42 @@ class TestChartColors:
 
     @pytest.mark.parametrize("theme", ["light", "dark"])
     def test_each_ramp_runs_away_from_the_page(self, theme: str) -> None:
-        """Bin 1 nearest the page, bin 3 farthest (owner, #639's plan gate)."""
+        """Stop 1 nearest the page, stop 3 farthest (owner, #639's plan gate), and,
+        since the map draws every shade between them (#623, D124), contrast with the
+        page never decreases anywhere along a linear-RGB model of the colors plotly.js
+        draws between them, checked against plotly.js's own fills by the e2e tests in
+        ``test_dashboard_e2e_states.py`` (Texas, and each ramp's two ends), so the
+        higher a number, the more its color stands out from the page
+        (``labels.C11_CAPTION``) in both palettes."""
         palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
         page = parse_color(palette["--page"])
         for ramp in CHART_BINS:
             ratios = [contrast(parse_color(palette[t]), page) for t in ramp]
             assert ratios == sorted(ratios), (theme, ramp, ratios)
+            along = [contrast(shade, page) for shade in ramp_shades(ramp, palette)]
+            assert all(a <= b for a, b in itertools.pairwise(along)), (theme, ramp)
+
+    @pytest.mark.parametrize("theme", ["light", "dark"])
+    def test_every_shade_a_ramp_draws_meets_3_to_1(self, theme: str) -> None:
+        """#623 (D124): plotly.js draws a state's color by interpolating the ramp's
+        stops, so a shade between two stops is a color no token holds. This checks a
+        linear-RGB model of the colors plotly.js draws (:func:`ramp_shades`,
+        :data:`RAMP_SAMPLES` points per segment), held to 3:1 on the page and on the
+        map's border (``charts.MAP_BORDER``), as each stop is; the e2e tests in
+        ``test_dashboard_e2e_states.py`` tie the model to drawn fills at Texas and at
+        each ramp's two ends (interior sampling is #654)."""
+        from explore import charts
+
+        palette = block(LIGHT if theme == "light" else EXPLICIT_DARK)
+        page = parse_color(palette["--page"])
+        border = parse_color(resolve(charts.MAP_BORDER, palette))
+        for ramp in CHART_BINS:
+            shades = ramp_shades(ramp, palette)
+            assert len(shades) == (len(ramp) - 1) * RAMP_SAMPLES  # the premise
+            for shade in shades:
+                for ground, name in ((page, "page"), (border, "border")):
+                    ratio = contrast(shade, ground)
+                    assert ratio >= NON_TEXT, (theme, ramp, name, shade, ratio)
 
     @pytest.mark.parametrize("theme", ["light", "dark"])
     @pytest.mark.parametrize("kind", [None, *MACHADO])

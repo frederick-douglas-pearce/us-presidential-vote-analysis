@@ -467,3 +467,26 @@ def assert_figures_inside(
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (
             choice
         )
+
+
+# --- the States list and chart C11, its map (#623, D124) --------------------------
+
+#: The States list's success marker, its history table's rows and C11's control.
+STATES_LIST_SUCCESS = "#states"
+STATES_HISTORY_ROWS = "#states-history tbody tr"
+STATES_METRIC = "#states-metric"
+#: Chart C11 and what plotly.js draws for it: the state paths, the geo frame (its
+#: background rect), the colorbar's group, its drawn bar and its tick labels; and the
+#: page key, page text inside the chart's figure.
+C11 = "#c11"
+C11_PATHS = f"{C11} .choroplethlocation"
+C11_FRAME = f"{C11} .geo .bg rect"
+C11_COLORBAR = f"{C11} .colorbar"
+C11_BAR = f"{C11} .colorbar .cbfill"
+C11_TICKS = f"{C11} .colorbar .cbaxis text"
+C11_KEY = f"{C11} .chart-key"
+#: The state outlines plotly.js fetches for the map, from the dashboard's own assets
+#: (D121(i)), and the console errors a refused fetch makes: Chrome's resource error
+#: once, then plotly.js's own line twice (#623's measurement, D124).
+TOPOJSON_PATH = "/assets/usa_110m.json"
+TOPOJSON_ERROR = "unexpected error while fetching topojson file at /assets/usa_110m.json"

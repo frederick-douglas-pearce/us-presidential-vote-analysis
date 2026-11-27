@@ -108,6 +108,10 @@ BREAKS: dict[str, Break] = {
     ),
     "pages.state_per_capita": Break("/v1/states/GA/per-capita"),
     "pages.candidate": Break("/v1/candidates/andrew-jackson"),
+    # C11's figure (#623, D124): a failed N2 degrades the history section alone, which
+    # takes the map, its control and the filter sentence with it; the list of states
+    # and the success marker stay.
+    "pages.states": Break(api.ELECTION_STATES_PATH, "states-history-unavailable"),
 }
 
 NAMES = sorted(BREAKS)

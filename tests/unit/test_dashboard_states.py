@@ -13,23 +13,29 @@ particular to the table.
 from __future__ import annotations
 
 import copy
+import html as html_lib
+import json
+from pathlib import Path
 from typing import Any
 
+import dash
 import pytest
 
-from explore import api, export, labels, metrics, state_view
+from explore import api, charts, export, labels, metrics, state_view
 from tests.dashboard_cards import every_card
 from tests.unit.test_dashboard_app import (
     RECORDED,
     _offline_process_client,  # noqa: F401  (autouse: no test reaches the network)
     cached_client,
     component_ids,
+    get,
     route,
     routed_ids,
     texts,
+    url,
 )
 from tests.unit.test_dashboard_elections import find, of_type
-from tests.unit.test_dashboard_export import body_rows, download
+from tests.unit.test_dashboard_export import body_rows, download, links
 from tests.unit.test_dashboard_state import (
     INDEX,
     MOD,
@@ -60,16 +66,19 @@ def n2() -> dict[str, Any]:
     return copy.deepcopy(RECORDED[N2_PATH])
 
 
-def page(n2_body: Any = None, roster: Any = None) -> Any:
+def page(n2_body: Any = None, roster: Any = None, metric: str | None = None) -> Any:
     """The page body for the recorded roster and ``n2_body`` (the recording unless
-    given; pass ``False`` for an unread N2)."""
+    given; pass ``False`` for an unread N2), C11 showing ``metric`` (the default
+    unless given)."""
     body = n2() if n2_body is None else (None if n2_body is False else n2_body)
-    return PICKER_MOD["render"](
+    content, _chooser = PICKER_MOD["render"](
         copy.deepcopy(ROSTER) if roster is None else roster,
         2024,
         body,
         copy.deepcopy(INDEX),
+        metric or PICKER_MOD["DEFAULT_METRIC"],
     )
+    return content
 
 
 def table_rows(tree: Any) -> dict[str, list[str]]:
@@ -570,7 +579,8 @@ class TestHistoryCell:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # D123(e) on /states (#647's review, r1.guard-efficacy.1): every state's four
-        # cells go through history_cell, in display order, with that state's figures.
+        # cells go through history_cell, in display order, with that state's figures;
+        # then C11's hovers (#623), one per drawn state for the figure the map shows.
         calls: list[tuple[Any, str]] = []
         real = state_view.history_cell
 
@@ -581,10 +591,13 @@ class TestHistoryCell:
         monkeypatch.setattr(state_view, "history_cell", spy)
         page()
         found = history(n2())
-        assert [key for _f, key in calls] == list(state_view.HISTORY_KEYS) * 51
-        assert [f for f, _key in calls] == [
+        table, hovers = calls[: 4 * 51], calls[4 * 51 :]
+        assert [key for _f, key in table] == list(state_view.HISTORY_KEYS) * 51
+        assert [f for f, _key in table] == [
             found[usps] for usps in ROSTER_STATES for _ in state_view.HISTORY_KEYS
         ]
+        default = PICKER_MOD["DEFAULT_METRIC"]
+        assert hovers == [(found[usps], default) for usps in ROSTER_STATES]
 
     def test_the_state_page_words_its_four_figures_through_it(
         self, monkeypatch: pytest.MonkeyPatch
@@ -618,3 +631,595 @@ def test_the_page_routes_with_its_table(monkeypatch: pytest.MonkeyPatch) -> None
     assert {PICKER["success"], TABLE_ID, PICKER_MOD["LIST_ID"]} <= ids
     assert UNAVAILABLE_ID not in ids
     assert calls == ["/v1/elections/2024", N2_PATH]
+
+
+# --- chart C11, the map (#623, D121 as amended by D124) ------------------------------
+
+#: The four figures C11 can show, the default first.
+METRICS = list(state_view.HISTORY_KEYS)
+DEFAULT = PICKER_MOD["DEFAULT_METRIC"]
+C11_DOM = charts.dom_id("C11")
+#: The state outlines the dashboard serves (D121(i)): the ids of their ``subunits``.
+OUTLINE_IDS = {
+    geometry["id"]
+    for geometry in json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "dashboard"
+            / "explore"
+            / "assets"
+            / "usa_110m.json"
+        ).read_text(encoding="utf-8")
+    )["objects"]["subunits"]["geometries"]
+}
+
+
+def c11_store(tree: Any) -> dict[str, Any] | None:
+    """C11's unresolved figure in ``tree`` (its source store's), or ``None``."""
+    found = [
+        s.data
+        for s in of_type(tree, "Store")
+        if getattr(s, "id", None) == {"type": charts.SOURCE_TYPE, "chart": C11_DOM}
+    ]
+    assert len(found) <= 1
+    return found[0] if found else None
+
+
+def c11_trace(metric: str = DEFAULT, n2_body: Any = None) -> dict[str, Any]:
+    figure = c11_store(page(n2_body, metric=metric))
+    assert figure is not None
+    trace: dict[str, Any] = figure["data"][0]
+    return trace
+
+
+def built(metric: str = DEFAULT, body: Any = None) -> dict[str, Any] | None:
+    """:func:`c11_figure`'s whole figure, title included, over the recorded roster."""
+    states = PICKER_MOD["roster"](copy.deepcopy(ROSTER), 2024)
+    figures = history(n2() if body is None else body)
+    result: dict[str, Any] | None = PICKER_MOD["c11_figure"](metric, states, figures)
+    return result
+
+
+def c11_element(tree: Any) -> Any:
+    (figure,) = [f for f in of_type(tree, "Figure") if getattr(f, "id", None) == C11_DOM]
+    return figure
+
+
+def key_texts(tree: Any) -> list[str]:
+    """The page key's sentences, inside C11's figure."""
+    (key,) = [
+        d
+        for d in of_type(c11_element(tree), "Div")
+        if getattr(d, "className", None) == "chart-key"
+    ]
+    return ["".join(texts(p)) for p in of_type(key, "P")]
+
+
+def hover_values(trace: dict[str, Any], metric: str) -> dict[str, str]:
+    """Each drawn state's hover value, unescaped, by USPS code: the text after the
+    figure's header."""
+    header = labels.STATES_HISTORY_HEADERS[metric]
+    found = {}
+    for usps, text in zip(trace["locations"], trace["hovertext"], strict=True):
+        _state, line = html_lib.unescape(text).split("<br>")
+        assert line.startswith(f"{header}: "), line
+        found[usps] = line.removeprefix(f"{header}: ")
+    return found
+
+
+def key_paths(value: Any, path: str = "") -> set[str]:
+    """Every key path under ``value``, a list's items as ``[i]``."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            here = f"{path}.{key}" if path else key
+            found |= {here, *key_paths(inner, here)}
+    elif isinstance(value, list):
+        for inner in value:
+            found |= key_paths(inner, f"{path}[i]")
+    return found
+
+
+def figure_number(text: str, metric: str) -> int:
+    """The number a state page's figure text leads with, read independently of the
+    map's path: the count before " of " for the popular-vote count, the signed change
+    ("+", U+2212 or an unsigned "0") for the change, and the leading integer of the
+    other two (its count of elections, its first election's year)."""
+    head = text.split(",")[0].split(" ")[0]
+    if metric == "state_pv_elections_count":
+        head = text.split(" of ")[0]
+    if metric == "state_electors_change":
+        if head.startswith("+"):
+            return int(head[1:])
+        if head.startswith("\u2212"):
+            return -int(head[1:])
+    return int(head)
+
+
+def change_of(delta: int) -> state_view.HistoryFigures:
+    """A state's history figures whose change in electors is ``delta``: two elections,
+    from 100 electors in 1824 to ``100 + delta`` in 2024."""
+    return state_view.history_figures(
+        [
+            {"year": y, "state_electoral_votes": v, "pv_status": "popular_vote"}
+            for y, v in ((1824, 100), (2024, 100 + delta))
+        ]
+    )
+
+
+class TestC11:
+    def test_the_default_view_draws_every_state_s_elections_count(self) -> None:
+        trace = c11_trace()
+        assert DEFAULT == "state_elections_count"
+        assert trace["locations"] == ROSTER_STATES
+        assert len(trace["locations"]) == 51
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_title_names_the_figure(self, metric: str) -> None:
+        # The figure's ``layout.title``, which ``components.chart`` writes as the
+        # chart's page title, in a render of ``?metric=<metric>``.
+        figure = built(metric)
+        assert figure is not None
+        assert figure["layout"]["title"] == {"text": labels.C11_TITLES[metric]}
+        tree = page(metric=metric)
+        (title,) = [
+            p.children
+            for p in of_type(c11_element(tree), "P")
+            if getattr(p, "className", None) == "chart-title"
+        ]
+        assert title == labels.C11_TITLES[metric]
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_each_figure_draws_in_its_measure_s_ramp(self, metric: str) -> None:
+        # D109: the allotment's three figures red, popular votes held blue.
+        ramp = charts.MAP_RAMPS[1 if metric == "state_pv_elections_count" else 0]
+        assert c11_trace(metric)["colorscale"] == charts.map_colorscale(ramp)
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_z_is_each_state_s_own_figure(self, metric: str) -> None:
+        """``z`` is the table's path for every drawn state (one value per location, an
+        ``int``). This is the map against the table's own function; the check against
+        an independent oracle, each state page's figure text, is
+        ``TestC11Reconciliation.test_z_equals_the_state_page_s_figure``."""
+        trace = c11_trace(metric)
+        figures = history(n2())
+        assert trace["z"] == [
+            state_view.history_values(figures[usps])[metric]
+            for usps in trace["locations"]
+        ]
+        assert all(type(v) is int for v in trace["z"])
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_bounds_are_the_drawn_values_lowest_and_highest(
+        self, metric: str
+    ) -> None:
+        trace = c11_trace(metric)
+        assert (trace["zmin"], trace["zmax"]) == (min(trace["z"]), max(trace["z"]))
+        assert trace["zmin"] < trace["zmax"]
+
+    @pytest.mark.parametrize(
+        ("metric", "ticks", "texts_"),
+        [
+            ("state_elections_count", [16, 51], ["16", "51"]),
+            ("state_first_election", [1824, 1964], ["1824", "1964"]),
+            ("state_pv_elections_count", [16, 51], ["16", "51"]),
+            ("state_electors_change", [-11, 0, 50], ["−11", "0", "+50"]),
+        ],
+    )
+    def test_the_ticks_are_numbered_in_the_table_s_value_format(
+        self, metric: str, ticks: list[int], texts_: list[str]
+    ) -> None:
+        """Hand values from the recording: the ends, and 0 for the change, written as
+        the table writes a value (a year with no separator, a signed change with
+        U+2212), never "{count} of {n}" (ba, #623)."""
+        colorbar = c11_trace(metric)["colorbar"]
+        assert colorbar["tickvals"] == ticks
+        assert colorbar["ticktext"] == texts_
+        assert colorbar["orientation"] == "h"
+        assert "title" not in colorbar
+        assert not any(" of " in t for t in colorbar["ticktext"])
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_figure_passes_the_map_s_rules_and_sets_no_geo(
+        self, metric: str
+    ) -> None:
+        figure = built(metric)
+        assert figure is not None
+        assert "geo" not in figure["layout"]
+        assert charts.figure_problems(figure, map_ramp=True) == []
+        assert charts.CHARTS["C11"].map_ramp is True
+        assert figure["layout"]["height"] == PICKER_MOD["C11_HEIGHT_PX"]
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_every_key_path_is_one_the_map_s_base_holds(self, metric: str) -> None:
+        """[A-C7]: the totality sweeps over ``MAP_BASE`` cover C11's real figure, since
+        every key path C11 sets is one ``MAP_BASE`` holds."""
+        from tests.unit.test_dashboard_charts import MAP_BASE
+
+        figure = built(metric)
+        assert key_paths(figure) <= key_paths(MAP_BASE), key_paths(figure) - key_paths(
+            MAP_BASE
+        )
+
+    def test_the_hover_writes_the_state_the_header_and_the_cell(self) -> None:
+        trace = c11_trace()
+        assert trace["hovertemplate"] == "%{hovertext}<extra></extra>"
+        georgia = trace["hovertext"][trace["locations"].index("GA")]
+        assert georgia == labels.C11_HOVER.format(
+            state="Georgia",
+            figure=labels.STATES_HISTORY_HEADERS[DEFAULT],
+            value="50",
+        )
+
+    def test_the_hover_escapes_a_served_state_name(self) -> None:
+        """A roster name holding markup reaches the hover escaped by
+        :func:`explore.charts.escaped` (D091), never as markup (#623's acceptance
+        gate, a surviving mutant)."""
+        states = [("GA", "<b>Geo&rgia (x)</b>")]
+        figures = {"GA": change_of(3)}
+        figure = PICKER_MOD["c11_figure"]("state_electors_change", states, figures)
+        assert figure is not None
+        hover = figure["data"][0]["hovertext"][0]
+        assert hover.startswith(charts.escaped("<b>Geo&rgia (x)</b>") + "<br>")
+        assert "<b>" not in hover and "(x)" not in hover
+
+    def test_the_hover_escapes_the_cell(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The cell's text reaches the hover escaped too, so no label or served
+        string can write markup or a ``var(--token)`` there (#623's acceptance gate,
+        a surviving mutant)."""
+        monkeypatch.setitem(PICKER_MOD, "cell_text", lambda *_: "<i>3</i> (x)")
+        figure = PICKER_MOD["c11_figure"](
+            "state_electors_change", [("GA", "Georgia")], {"GA": change_of(3)}
+        )
+        assert figure is not None
+        hover = figure["data"][0]["hovertext"][0]
+        assert hover.endswith(": " + charts.escaped("<i>3</i> (x)"))
+        assert "<i>" not in hover
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_caption_then_the_pointer(self, metric: str) -> None:
+        figure = c11_element(page(metric=metric))
+        (caption,) = [
+            p
+            for p in of_type(figure, "P")
+            if getattr(p, "className", None) == "chart-caption-text"
+        ]
+        assert caption.children == " ".join(
+            (labels.C11_CAPTION, labels.C11_BASIS[metric], labels.C11_OUTLINES_CREDIT)
+        )
+        (pointer,) = of_type(figure, "A")
+        assert pointer.children == labels.CHART_TABLE_POINTER
+        assert pointer.href == f"#{TABLE_ID}"
+
+    def test_the_key_is_inside_the_figure_with_no_outline_entry(self) -> None:
+        assert key_texts(page()) == [labels.C11_COLOR_NOTE, labels.C11_PHONE_NOTE]
+
+    def test_the_figure_takes_the_map_s_class(self) -> None:
+        assert c11_element(page()).className == "chart chart-map"
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_control_lists_the_four_headers_in_order(self, metric: str) -> None:
+        (control,) = [
+            d
+            for d in of_type(page(metric=metric), "Dropdown")
+            if d.id == PICKER_MOD["METRIC_ID"]
+        ]
+        assert control.options == [
+            {"label": labels.STATES_HISTORY_HEADERS[k], "value": k} for k in METRICS
+        ]
+        assert control.value == metric
+        assert control.clearable is False
+        assert control.placeholder == PICKER_MOD["METRIC_PLACEHOLDER"]
+        (label,) = [
+            lab
+            for lab in of_type(page(), "Label")
+            if lab.htmlFor == PICKER_MOD["METRIC_ID"]
+        ]
+        assert label.children == PICKER_MOD["METRIC_LABEL"]
+
+    def test_the_card_holds_heading_intro_control_map_then_the_table(self) -> None:
+        card = every_card(page())[0]
+        kinds = [type(c).__name__ for c in card.children]
+        assert kinds[:4] == ["H2", "P", "Div", "Figure"]
+        assert card.children[2].className == "filters wrapped-choice"
+        assert card.children[3].id == C11_DOM
+        ids = [getattr(c, "id", None) for c in card.children]
+        assert ids[-1] == GLOSSARY_ID
+        table_at = next(
+            i for i, c in enumerate(card.children) if TABLE_ID in component_ids(c)
+        )
+        assert table_at > 3
+
+
+class TestC11Reconciliation:
+    @pytest.mark.parametrize("metric", METRICS)
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_the_hover_equals_the_cell_and_the_state_page(
+        self, usps: str, metric: str
+    ) -> None:
+        # AC3's hover half: the map's hover, the table's cell (both from N2) and the
+        # state page's figure (from /v1/states/{usps}), as rendered text.
+        tree = page(metric=metric)
+        trace = c11_store(tree)["data"][0]  # type: ignore[index]
+        hover = hover_values(trace, metric)[usps]
+        cell = dict(zip(METRICS, table_rows(tree)[usps][1:], strict=True))[metric]
+        assert hover == cell
+        assert figures_of(usps)[metric].startswith(hover), (metric, hover)
+
+    @pytest.mark.parametrize("metric", METRICS)
+    @pytest.mark.parametrize("usps", ["GA", "TX"])
+    def test_z_equals_the_state_page_s_figure(self, usps: str, metric: str) -> None:
+        # AC3's value half: the number the map shades by, against the state page's
+        # figure text (from /v1/states/{usps}), never the table's path.
+        trace = c11_trace(metric)
+        drawn = trace["z"][trace["locations"].index(usps)]
+        assert drawn == figure_number(figures_of(usps)[metric], metric)
+
+    @pytest.mark.parametrize(
+        ("text", "metric", "number"),
+        [
+            ("50 elections (1824\u20132024)", "state_elections_count", 50),
+            ("1848, with 4 electors appointed", "state_first_election", 1848),
+            ("49 of 50 elections (1824\u20132024)", "state_pv_elections_count", 49),
+            ("+7, from 9 in 1824 to 16 in 2024", "state_electors_change", 7),
+            ("\u22123, from 9 in 1824 to 6 in 2024", "state_electors_change", -3),
+            ("0, from 9 in 1824 to 9 in 2024", "state_electors_change", 0),
+        ],
+    )
+    def test_the_oracle_reads_each_figure_s_number(
+        self, text: str, metric: str, number: int
+    ) -> None:
+        assert figure_number(text, metric) == number
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_locations_are_the_states_with_a_figure_and_have_outlines(
+        self, metric: str
+    ) -> None:
+        tree = page(metric=metric)
+        locations = set(c11_store(tree)["data"][0]["locations"])  # type: ignore[index]
+        figures = history(n2())
+        with_figure = {
+            usps
+            for usps in ROSTER_STATES
+            if state_view.history_values(figures[usps])[metric] is not None
+        }
+        assert locations == with_figure
+        assert locations <= OUTLINE_IDS
+
+    @pytest.mark.parametrize(
+        ("fault", "doctor"),
+        [
+            # An allotment no figure can read: every figure unrecognized.
+            (
+                "unrecognized",
+                lambda body: first_row(body, "GA").__setitem__(
+                    "state_electoral_votes", "x"
+                ),
+            ),
+            # A gap after its first election: the state is refused (D123(c)).
+            ("refused", lambda body: drop(body, "GA", middle_year("GA"))),
+        ],
+    )
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_a_state_with_no_number_is_left_out_with_the_key_entry(
+        self, metric: str, fault: str, doctor: Any
+    ) -> None:
+        body = n2()
+        doctor(body)
+        tree = page(body, metric=metric)
+        locations = c11_store(tree)["data"][0]["locations"]  # type: ignore[index]
+        assert "GA" not in locations
+        assert len(locations) == 50
+        assert key_texts(tree) == [
+            labels.C11_COLOR_NOTE,
+            labels.C11_NO_FIGURE_KEY,
+            labels.C11_PHONE_NOTE,
+        ]
+
+    def test_a_one_election_state_has_no_change_on_the_map(self) -> None:
+        # D121(f): one election with electors appointed reads No figure for the
+        # change, so the state is left out of the change's map alone.
+        body = n2()
+        first = first_row(body, "GA")["year"]
+        for row in body["data"]:
+            if row["state_usps"] == "GA" and row["year"] != first:
+                row["state_electoral_votes"] = 0
+        change = c11_store(page(body, metric="state_electors_change"))
+        assert "GA" not in change["data"][0]["locations"]  # type: ignore[index]
+        count = c11_store(page(body))
+        assert "GA" in count["data"][0]["locations"]  # type: ignore[index]
+
+    def test_the_zero_tick_s_least_share_is_a_tenth(self) -> None:
+        assert PICKER_MOD["C11_ZERO_TICK_MIN_FRACTION"] == 0.1
+
+    @pytest.mark.parametrize(
+        ("low", "high", "ticks"),
+        [
+            # 0 a fifty-first of the bar from its low end: the ends only.
+            (-1, 50, [-1, 50]),
+            # The recording's change: 0 well inside.
+            (-11, 50, [-11, 0, 50]),
+            # 0 at exactly a tenth from the low end (0.1 and 0.9): kept.
+            (-10, 90, [-10, 0, 90]),
+            # 0 at exactly a tenth from the high end: kept.
+            (-90, 10, [-90, 0, 10]),
+            # Just under a tenth from either end: dropped.
+            (-10, 91, [-10, 91]),
+            (-91, 10, [-91, 10]),
+            # 0 at an end or off the scale: the ends only.
+            (0, 50, [0, 50]),
+            (-50, 0, [-50, 0]),
+            (3, 50, [3, 50]),
+        ],
+    )
+    def test_the_change_keeps_its_zero_tick_only_a_tenth_from_each_end(
+        self, low: int, high: int, ticks: list[int]
+    ) -> None:
+        """D124(e) as amended (owner, PR #652's code review): the change map's 0 tick
+        only where 0 sits at least ``C11_ZERO_TICK_MIN_FRACTION`` of the bar from each
+        end, so it never crowds an end label."""
+        metric = "state_electors_change"
+        states = [("GA", "Georgia"), ("TX", "Texas")]
+        values = {"GA": change_of(low), "TX": change_of(high)}
+        figure = PICKER_MOD["c11_figure"](metric, states, values)
+        assert figure["data"][0]["z"] == [low, high]
+        colorbar = figure["data"][0]["colorbar"]
+        assert colorbar["tickvals"] == ticks
+        assert colorbar["ticktext"] == [labels.signed(t) for t in ticks]
+        assert charts.figure_problems(figure, map_ramp=True) == []
+
+    def test_one_value_puts_the_top_one_above_it(self) -> None:
+        """D124: where every drawn value is equal, ``zmax`` is one above ``zmin``,
+        so the scale is never empty; the last tick names that number."""
+        states = [("GA", "Georgia"), ("TX", "Texas")]
+        figures = history(n2())
+        same = {"GA": figures["GA"], "TX": figures["GA"]}
+        figure = PICKER_MOD["c11_figure"]("state_first_election", states, same)
+        trace = figure["data"][0]
+        assert (trace["zmin"], trace["zmax"]) == (1824, 1825)
+        assert trace["colorbar"]["tickvals"] == [1824, 1825]
+        assert trace["colorbar"]["ticktext"] == ["1824", "1825"]
+        assert charts.figure_problems(figure, map_ramp=True) == []
+
+    def test_no_state_with_a_number_shows_the_sentence_in_its_place(self) -> None:
+        states = PICKER_MOD["roster"](copy.deepcopy(ROSTER), 2024)
+        figures = dict.fromkeys((usps for usps, _ in states), None)
+        (note,) = PICKER_MOD["c11"](DEFAULT, states, figures)
+        assert note.id == PICKER_MOD["C11_NO_FIGURES_ID"]
+        assert note.children == labels.C11_NO_FIGURES
+        assert PICKER_MOD["c11_figure"](DEFAULT, states, figures) is None
+
+
+class TestMetricQuery:
+    @pytest.mark.parametrize(
+        ("params", "kept"),
+        [
+            ({}, []),
+            ({"metric": "state_first_election"}, [("metric", "state_first_election")]),
+            (
+                {"metric": ["state_electors_change", "state_electors_change"]},
+                [("metric", "state_electors_change")],
+            ),
+            # The default is never named (D073); a value off the vocabulary, two
+            # values, a non-string or another key is dropped.
+            ({"metric": DEFAULT}, []),
+            ({"metric": "STATE_FIRST_ELECTION"}, []),
+            ({"metric": "state_pv_elections_n"}, []),
+            ({"metric": ["state_first_election", "state_electors_change"]}, []),
+            ({"metric": 7}, []),
+            ({"year": "2016"}, []),
+            (None, []),
+        ],
+    )
+    def test_the_parser_keeps_a_known_non_default_figure_only(
+        self, params: Any, kept: list[tuple[str, str]]
+    ) -> None:
+        assert PICKER_MOD["parse_metric"](params) == kept
+
+    @pytest.mark.parametrize(
+        ("value", "current", "written"),
+        [
+            ("state_first_election", "", "?metric=state_first_election"),
+            (DEFAULT, "?metric=state_first_election", ""),
+            ("state_first_election", "?metric=state_first_election", None),
+            (DEFAULT, "", None),
+            (DEFAULT, None, None),
+            (None, "?metric=state_electors_change", ""),
+        ],
+    )
+    def test_a_change_writes_the_normalized_query(
+        self, value: Any, current: Any, written: str | None
+    ) -> None:
+        result = PICKER_MOD["on_metric_change"](value, current)
+        if written is None:
+            assert result is dash.no_update
+        else:
+            assert result == written
+
+    def test_og_url_names_the_chosen_figure_only(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cached_client(monkeypatch)
+        status, head, _ = get("/states?metric=state_first_election&junk=1")
+        assert status == 200
+        assert head.canonical == url("/states")
+        assert head.og_url == url("/states?metric=state_first_election")
+        for search in (f"?metric={DEFAULT}", "?metric=zz", ""):
+            _, head, _ = get(f"/states{search}")
+            assert head.og_url == url("/states"), search
+
+    @pytest.mark.parametrize("metric", METRICS[1:])
+    def test_a_change_of_figure_reads_nothing_and_leaves_the_table(
+        self, monkeypatch: pytest.MonkeyPatch, metric: str
+    ) -> None:
+        """AC2: the routed render for another figure redraws the map, makes no
+        request (the cache holds both reads), and leaves the table and its download
+        byte for byte."""
+        _, calls, _ = cached_client(monkeypatch)
+        first = route("/states")
+        assert calls == ["/v1/elections/2024", N2_PATH]
+        calls.clear()
+        second = route("/states", f"?metric={metric}")
+        assert calls == []
+        assert {TABLE_ID, C11_DOM} <= routed_ids(second)
+        assert first.get_json() != second.get_json()
+        default, chosen = page(), page(metric=metric)
+        assert table_rows(default) == table_rows(chosen)
+        assert links(default)[export.link_id(TABLE_ID)].href == (
+            links(chosen)[export.link_id(TABLE_ID)].href
+        )
+        assert c11_store(default) != c11_store(chosen)
+
+    @pytest.mark.parametrize("metric", METRICS)
+    def test_the_layout_draws_the_query_s_figure_and_the_filter_sentence(
+        self, monkeypatch: pytest.MonkeyPatch, metric: str
+    ) -> None:
+        cached_client(monkeypatch)
+        tree = PICKER_MOD["layout"](metric=metric)
+        trace = c11_store(tree)["data"][0]  # type: ignore[index]
+        assert trace["colorbar"] == c11_trace(metric)["colorbar"]
+        (lede,) = [
+            p for p in of_type(tree, "P") if getattr(p, "className", None) == "lede"
+        ]
+        assert lede.children == (
+            f"{PICKER_MOD['LEDE']} {PICKER_MOD['FILTER_SENTENCE']}"
+        )
+
+
+class TestC11Degraded:
+    def assert_no_map(self, tree: Any) -> None:
+        ids = component_ids(tree)
+        assert C11_DOM not in ids
+        assert PICKER_MOD["METRIC_ID"] not in ids
+        assert PICKER_MOD["URL_ID"] not in ids
+        assert c11_store(tree) is None
+        assert UNAVAILABLE_ID in ids
+        assert PICKER_MOD["LIST_ID"] in ids
+
+    def test_an_unread_n2_removes_the_map_and_its_control(self) -> None:
+        self.assert_no_map(page(False))
+
+    @pytest.mark.parametrize("fault", sorted(BODY_FAULTS))
+    def test_a_malformed_n2_removes_the_map_and_its_control(self, fault: str) -> None:
+        body = n2()
+        BODY_FAULTS[fault](body)
+        self.assert_no_map(page(body))
+
+    def test_the_degraded_lede_has_no_filter_sentence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, _, _ = cached_client(monkeypatch)
+        real = client._fetch
+
+        def fetch(path: str, timeout: float = api.FETCH_TIMEOUT_S) -> api.Response:
+            if path == N2_PATH:
+                raise api.ApiUnavailable("GET n2: HTTP 503")
+            return real(path, timeout)
+
+        monkeypatch.setattr(client, "_fetch", fetch)
+        tree = PICKER_MOD["layout"](metric="state_first_election")
+        self.assert_no_map(tree)
+        (lede,) = [
+            p for p in of_type(tree, "P") if getattr(p, "className", None) == "lede"
+        ]
+        assert lede.children == PICKER_MOD["LEDE"]
