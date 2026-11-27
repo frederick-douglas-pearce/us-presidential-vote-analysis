@@ -2237,7 +2237,8 @@ def figure_texts(figure: Any) -> list[str]:
     in ``customdata`` (which a ``%{customdata.…}`` placeholder shows), and annotations.
     The chart title reaches the page as HTML, so a built chart's title is scanned as
     ordinary children too, and shape labels (``layout.shapes[].label.text``, #436),
-    though C5 labels its band with annotations."""
+    though C5 labels its band with annotations, and a trace's colorbar ``title`` and
+    ``ticktext`` (the map's written bin ranges, #639, D121(d))."""
     if not isinstance(figure, dict):
         return []
     found: list[str] = []
@@ -2281,7 +2282,26 @@ def figure_texts(figure: Any) -> list[str]:
         group = trace.get("legendgrouptitle")
         if isinstance(group, dict) and isinstance(group.get("text"), str):
             found.append(group["text"])
+        colorbar = trace.get("colorbar")
+        if isinstance(colorbar, dict):
+            title(colorbar)
+            found += [str(t) for t in colorbar.get("ticktext") or []]
     return [text for text in found if text.strip()]
+
+
+def test_figure_texts_reads_the_colorbar() -> None:
+    """#639 (D121(d)): the map's colorbar title and its written bin ranges are page
+    text, as a plain string or under ``text``; a colorbar that is not an object, or
+    holds neither, adds nothing."""
+    figure = {
+        "data": [
+            {"colorbar": {"title": {"text": SENTINEL}, "ticktext": [SENTINEL, "x"]}},
+            {"colorbar": {"title": SENTINEL}},
+            {"colorbar": {"tickvals": [0]}},
+            {"colorbar": "x"},
+        ],
+    }
+    assert figure_texts(figure) == [SENTINEL, SENTINEL, "x", SENTINEL]
 
 
 def test_figure_texts_reads_shape_labels() -> None:
