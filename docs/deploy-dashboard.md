@@ -2062,3 +2062,74 @@ section-unavailable sentence, the table with 51 rows, each state's name linked t
 50, 1824, 49 of 50, +7, and Texas's 43, 1848, 43 of 43, +36, each equal to the four figures
 on `/state/GA` and `/state/TX`. §9's checks: `/election/%2531824` is a 404 with `noindex`,
 `/election/%31824` a 200, and the plotly.js path a 404.
+
+### Chart C11 on `/states` and its outline file, measured after deploy (2026-11-27, #623)
+
+#623 (D121 as amended by D124) drew C11, a map of one state history figure, above the
+`/states` table. Its outlines come from `explore/assets/usa_110m.json`, which plotly.js
+fetches by its plain URL through `CHART_CONFIG["topojsonURL"]`. D121(i) asked for that
+request measured through the front end, with a cache rule added only if the measurement
+shows a cost. The page's API fills are unchanged from #641 (the roster and N2 on a miss).
+
+Dashboard version `v-2372ffd2f261-r43-a1` (deploy run 46068907701 of 2372ffd, the merge of
+#652), snapshot `b09807fa…`. Measured 21:26–21:30Z. Today's canary had not yet run (its
+last run 2026-11-26 22:23Z), and no canary run started during the measurement.
+
+**The outline file through the front end.** The served bytes equal the repo's (sha256
+`9efbc3d8…`, 28,426 bytes). App Engine's front end compresses it per request and sends
+`cache-control: no-cache`, an ETag and `last-modified: Tue, 01 Jan 1980` (the deploy
+archive's timestamp), as it does for `style.css`:
+
+| Accept-Encoding | Content-Encoding | Bytes sent |
+|---|---|---|
+| `identity` | none | 28,426 |
+| `gzip` | gzip | 11,580 |
+| `br` | br | 10,434 |
+| Chromium's (`gzip, deflate, br, zstd`) | zstd | 10,857 transferred, headers included |
+
+`no-cache` means a repeat visit revalidates, and Chromium does: it sends `If-None-Match`
+with the ETag it was given (`"…:zstd"`) and `If-Modified-Since`. But **the front end
+answers 200 with the whole body, not 304**, on a reload and on a new navigation in the
+same browser (10,801 and 10,804 bytes). With curl, a weak gzip ETag (`W/"…"`) and
+`If-Modified-Since` alone each got a 304; the `:br` ETag got a 200 with the body. So a
+browser that negotiates br or zstd pays about 10.8 KB on every view of `/states`, never a
+304.
+
+**Decision for D121(i): no cache rule.** The cost is real but small: about 10.8 KB per
+view, fetched after plotly.js, and the map is drawn 2.5–2.8 s after first data (below),
+as C9 and C10 are with no outline file at all. So the fetch adds nothing visible at
+D071(g)'s 10 Mbps / 100 ms profile. A `max-age` rule would save the bytes, but the file has
+no fingerprint, so any rule long enough to matter could outlive a rebuilt file (D121(i)).
+Revisit if the file grows (a finer Natural Earth scale) or gains a fingerprinted URL.
+
+**D071(g) on `/states`** by #277's method (`scripts/measure_dashboard_cold_start.py`, 390 px,
+10 Mbps / 100 ms, a fresh browser context each run) with `--chart "#c11
+.choroplethlocation"`. That column is the time until the map's state shapes are drawn,
+which is not a D071(g) measure.
+
+- **A**, the deploy's new instance. The outline checks above had already visited
+  `/states`, so A had made both fills: three runs from the cache.
+- **B**, after a [restart](#restarting-the-instance-to-empty-its-cache) at 21:27:22Z.
+  Warmup ran as a loading request (1.87 s), and B was serving its snapshot (2 responses)
+  3 s after the delete. Its first visit was a genuine miss: its `api fetch
+  /v1/elections/2024` and `/v1/elections/states` lines were logged during it (21:27:59Z).
+
+| Run | Instance | TTFB (s) | First data (s) | Map drawn (s) |
+|---|---|---|---|---|
+| `/states`, from the cache (3 runs) | A | 0.10–0.20 | 1.05–1.12 | 3.64–3.75 |
+| `/states`, first visit | B | 0.16 | 1.60 | 4.04 |
+| `/states`, from the cache (3 runs) | B | 0.13–0.22 | 1.05–1.11 | 3.62–3.81 |
+
+- **TTFB met D071(g) on 7 of 7 runs** (0.10–0.22 s, against ≤ 1 s), and **first data on
+  7 of 7** (1.60 s on the first visit, 1.05–1.12 s from the cache, against ≤ 3 s). These
+  match #641's runs on the same page before the map.
+- **The map is drawn 2.4–2.7 s after first data**, in line with C9 and C10 (2.5–2.8 s).
+
+**Memory** (`instance.memoryUsage`): B, 130.2 MB, 34 % of F1's 384 MB, after 73 requests,
+as after #641 (129.9 MB). The version logged no warnings and no 5xx.
+
+**Checked on the deployed version** with a scripted browser at 360 and 390 px, light and
+dark: all four metrics (the default and `?metric=` for the other three), 16 renders, each
+with 51 state shapes and no sideways scroll; the change map's colorbar reads −11, 0, +50.
+§9's checks: `/election/%2531824` is a 404 with `noindex`, `/election/%31824` a 200, and
+the plotly.js path a 404.
