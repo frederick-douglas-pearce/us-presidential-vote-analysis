@@ -406,7 +406,9 @@ _AXIS_RE = re.compile(r"[xy]axis\d*")
 
 #: How deep a figure may nest (#484, D099), in containers counted from the root: the
 #: figure is 1, ``data`` 2, a trace 3, its ``marker`` 4 and a ``marker.pattern`` 5,
-#: which is as deep as any chart's figure (and :data:`TEMPLATE`) nests. Every check
+#: which is as deep as any chart's figure (and :data:`TEMPLATE`) nests; the map's
+#: colorscale stops, ``marker.line`` and ``colorbar.title`` (#639) are at 5 too, since
+#: :func:`map_problems` admits nothing under them but values. Every check
 #: below recurses, and so does the ``copy.deepcopy`` in ``components.chart``, so
 #: :func:`json_problems` refuses anything deeper before any of them runs.
 MAX_DEPTH = 16
@@ -493,6 +495,19 @@ def _is_token(value: Any) -> bool:
     return isinstance(value, str) and TOKEN_RE.fullmatch(value) is not None
 
 
+def _is_map(figure: Mapping[str, Any], map_bins: Any) -> bool:
+    """Whether the map's exception applies (#639, D121(b)): the chart's registry row
+    sets ``map_bins`` (only ``True``) and ``data[0]`` is a choropleth. The one statement
+    of it, which :func:`trace_type_problems` and :func:`color_problems` both read."""
+    data = figure.get("data")
+    first = data[0] if isinstance(data, list) and data else None
+    return (
+        map_bins is True
+        and isinstance(first, dict)
+        and first.get("type") == "choropleth"
+    )
+
+
 def color_problems(figure: Mapping[str, Any], *, map_bins: bool = False) -> list[str]:
     """Where ``figure`` names a color that is not a token reference (#432).
 
@@ -511,11 +526,13 @@ def color_problems(figure: Mapping[str, Any], *, map_bins: bool = False) -> list
     key is admitted at exactly the paths :data:`MAP_COLOR_PATHS` names, and the
     colorscale's stops are skipped with it, :func:`map_problems` checking them; a
     colorbar's own keys are still read, and a refused key at any other path is still
-    refused.
+    refused. The exception holds only while ``data[0]`` is a choropleth
+    (:func:`_is_map`), the same test :func:`trace_type_problems` admits it by.
     """
+    admitted = _is_map(figure, map_bins)
     problems = []
     for path, key, value in _walk(figure):
-        if map_bins is True and (
+        if admitted and (
             path in MAP_COLOR_PATHS or path.startswith(f"{_MAP_COLORSCALE}[")
         ):
             continue
@@ -831,7 +848,7 @@ def trace_type_problems(
         if not isinstance(trace, dict):
             continue
         kind = trace.get("type", "scatter")
-        if map_bins is True and index == 0 and kind == "choropleth":
+        if index == 0 and _is_map(figure, map_bins):
             continue
         if not (isinstance(kind, str) and kind in TRACE_TYPES):
             problems.append(
@@ -972,6 +989,18 @@ MAP_TRACE_KEYS = frozenset(
 )
 
 
+#: The keys the map's colorbar may hold (#639, D121(d); code review round 1's scope
+#: ruling): one tick per bin with its written range, a title, and no outline
+#: (``outlinewidth`` 0, since plotly's default outline is ``#444``, no token). A
+#: placement or size key (``orientation``, ``len``, ``thickness``, ``x``, ``y``, …) is
+#: #623's to add, with its bounds, as a chart that needs another slot widens it in its
+#: own story; and so is any key that could hide or rewrite the labels
+#: (``showticklabels``, ``ticklabelstep``, ``labelalias``, ``tickprefix``, …).
+MAP_COLORBAR_KEYS = frozenset(
+    {"tickmode", "tickvals", "ticktext", "title", "outlinewidth"}
+)
+
+
 def _exactly(value: Any, expected: Any) -> bool:
     """``value`` equals ``expected`` kind for kind (``True`` is not ``1``, ``0`` is not
     ``0.0``), through lists."""
@@ -992,9 +1021,11 @@ def map_problems(figure: Mapping[str, Any]) -> list[str]:
     k − 1 for each of ``locations``, distinct strings (a state with no figure is not
     among them, D121(f)); its colorscale :func:`map_colorscale` of one of
     :data:`MAP_RAMPS` (so every stop is a bin token, and k is
-    :data:`MAP_BIN_COUNT`); ``zmin`` −0.5 and ``zmax`` k − 0.5; a colorbar shown, with
-    a tick at each bin written as page text (``tickmode`` ``"array"``, ``tickvals`` the
-    bin indexes, ``ticktext`` one non-blank string per bin); and borders in
+    :data:`MAP_BIN_COUNT`); ``zmin`` −0.5 and ``zmax`` k − 0.5; a colorbar shown,
+    holding only :data:`MAP_COLORBAR_KEYS`, with a tick at each bin written as page
+    text (``tickmode`` ``"array"``, ``tickvals`` the bin indexes, ``ticktext`` one
+    non-blank string per bin, no two alike), no outline (``outlinewidth`` 0), and a
+    ``title``, where it has one, holding only its ``text``; and borders in
     :data:`MAP_BORDER` (``marker`` holding only ``line``, which holds only that
     ``color``). The keys D121(a) refuses (``coloraxis``, ``autocolorscale``,
     ``reversescale``, ``zmid``, ``zauto``) are :func:`color_problems`'. Total: it guards
@@ -1041,6 +1072,20 @@ def map_problems(figure: Mapping[str, Any]) -> list[str]:
     if not isinstance(colorbar, dict):
         problems.append("data[0].colorbar: the map's colorbar is an object")
     else:
+        problems += [
+            f"data[0].colorbar.{key}: not a key of the map's colorbar"
+            for key in colorbar
+            if key not in MAP_COLORBAR_KEYS
+        ]
+        if not _exactly(colorbar.get("outlinewidth"), 0):
+            problems.append("data[0].colorbar.outlinewidth: the map's colorbar is 0")
+        title = colorbar.get("title")
+        if "title" in colorbar and not (
+            isinstance(title, dict)
+            and set(title) == {"text"}
+            and isinstance(title.get("text"), str)
+        ):
+            problems.append("data[0].colorbar.title: only its text")
         if colorbar.get("tickmode") != "array":
             problems.append('data[0].colorbar.tickmode: the map\'s is "array"')
         if not _exactly(colorbar.get("tickvals"), list(range(k))):
@@ -1052,9 +1097,10 @@ def map_problems(figure: Mapping[str, Any]) -> list[str]:
             isinstance(ticktext, list)
             and len(ticktext) == k
             and all(isinstance(t, str) and t.strip() for t in ticktext)
+            and len({t.strip() for t in ticktext}) == k
         ):
             problems.append(
-                f"data[0].colorbar.ticktext: not {k} labels written by the page"
+                f"data[0].colorbar.ticktext: not {k} distinct labels the page wrote"
             )
     marker = trace.get("marker")
     line = marker.get("line") if isinstance(marker, dict) else None
@@ -1081,10 +1127,11 @@ BOOLEAN = frozenset({"a boolean"})
 #: Each slot a check reads by name, and the kinds that check expects there (#484,
 #: D099): any other kind is refused (:func:`slot_problems`), never passed silently.
 #: Keyed by where the slot sits: ``trace`` is each item of ``data``, ``marker``,
-#: ``pattern``, ``marker_line``, ``line`` and ``colorbar`` are a trace's ``marker``, its
-#: ``marker.pattern``, its ``marker.line``, its ``line`` and its ``colorbar`` (the
-#: map's, #639), ``axis`` is each layout key :data:`_AXIS_RE` matches, ``annotation``
-#: each item of ``layout.annotations``, and ``any`` a key at any depth. Not listed: the
+#: ``pattern``, ``marker_line``, ``line``, ``colorbar`` and ``colorbar_title`` are a
+#: trace's ``marker``, its ``marker.pattern``, its ``marker.line``, its ``line``, its
+#: ``colorbar`` and its ``colorbar.title`` (the map's, #639), ``axis`` is each layout
+#: key :data:`_AXIS_RE` matches, ``annotation`` each item of ``layout.annotations``,
+#: and ``any`` a key at any depth. Not listed: the
 #: slots whose own rule pins the value whatever its kind: a trace's ``legend`` and
 #: ``geo`` (refused unless exactly ``"legend"`` and ``"geo"``), a bar's ``width`` and
 #: ``offset``, the layout's fixed
@@ -1111,7 +1158,8 @@ SLOT_KINDS: Mapping[str, Mapping[str, frozenset[str]]] = {
         "customdata": LIST,
         "marker": OBJECT,
         "line": OBJECT,
-        # The map's (#639, D121(b)): read by map_problems under map_bins only.
+        # The map's (#639, D121(b)): map_problems reads them under map_bins, and
+        # slot_problems types them on every chart's traces, as every slot here is.
         "locationmode": STRING,
         "locations": STRING_LIST,
         "z": LIST,
@@ -1125,7 +1173,14 @@ SLOT_KINDS: Mapping[str, Mapping[str, frozenset[str]]] = {
     "pattern": {"shape": STRING},
     "marker_line": {"color": STRING},
     "line": {"dash": STRING},
-    "colorbar": {"tickmode": STRING, "tickvals": LIST, "ticktext": STRING_LIST},
+    "colorbar": {
+        "tickmode": STRING,
+        "tickvals": LIST,
+        "ticktext": STRING_LIST,
+        "title": OBJECT,
+        "outlinewidth": NUMBER,
+    },
+    "colorbar_title": {"text": STRING},
     "layout": {"legend": OBJECT, "annotations": LIST, "geo": OBJECT},
     "axis": {"tickformat": STRING},
     "annotation": {"text": STRING},
@@ -1193,9 +1248,12 @@ def slot_problems(figure: Mapping[str, Any]) -> list[str]:
                 marker.get("line"), "marker_line", f"{here}.marker.line"
             )
         problems += _slots_problems(line, "line", f"{here}.line")
-        problems += _slots_problems(
-            trace.get("colorbar"), "colorbar", f"{here}.colorbar"
-        )
+        colorbar = trace.get("colorbar")
+        problems += _slots_problems(colorbar, "colorbar", f"{here}.colorbar")
+        if isinstance(colorbar, dict):
+            problems += _slots_problems(
+                colorbar.get("title"), "colorbar_title", f"{here}.colorbar.title"
+            )
     layout = figure.get("layout")
     problems += _slots_problems(layout, "layout", "layout")
     if isinstance(layout, dict):

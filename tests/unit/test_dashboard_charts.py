@@ -759,8 +759,8 @@ MAP_BASE: dict[str, Any] = {
                 "tickmode": "array",
                 "tickvals": [0, 1, 2],
                 "ticktext": ["low", "middle", "high"],
-                "title": {"text": "t", "font": {"color": "var(--text)"}},
-                "tickfont": {"color": "var(--text-secondary)"},
+                "title": {"text": "t"},
+                "outlinewidth": 0,
             },
             "marker": {"line": {"color": "var(--page)"}},
             "hovertemplate": "%{hovertext}<extra></extra>",
@@ -1061,6 +1061,9 @@ class TestMapBins:
                 "data[0].marker:",
             ),
             ({"selectedpoints": [0]}, "data[0].selectedpoints: not a key"),
+            ({"selected": {}}, "data[0].selected: not a key"),
+            ({"opacity": 0.5}, "data[0].opacity: not a key"),
+            ({"visible": False}, "data[0].visible: not a key"),
             ({"unselected": {}}, "data[0].unselected: not a key"),
             ({"geojson": {}}, "data[0].geojson: not a key"),
             ({"featureidkey": "id"}, "data[0].featureidkey: not a key"),
@@ -1115,7 +1118,32 @@ class TestMapBins:
             ({"tickvals": None}, "data[0].colorbar.tickvals:"),
             ({"ticktext": None}, "data[0].colorbar.ticktext:"),
             ({"ticktext": ["a", "b"]}, "data[0].colorbar.ticktext:"),
+            ({"ticktext": ["a", "b", "c", "d"]}, "data[0].colorbar.ticktext:"),
             ({"ticktext": ["a", " ", "c"]}, "data[0].colorbar.ticktext:"),
+            ({"ticktext": ["a", "a", "c"]}, "data[0].colorbar.ticktext:"),
+            ({"ticktext": ["a", "a ", "c"]}, "data[0].colorbar.ticktext:"),
+            ({"outlinewidth": None}, "data[0].colorbar.outlinewidth:"),
+            ({"outlinewidth": 1}, "data[0].colorbar.outlinewidth:"),
+            ({"outlinewidth": 0.0}, "data[0].colorbar.outlinewidth:"),
+            ({"outlinewidth": False}, "data[0].colorbar.outlinewidth:"),
+            ({"title": "t"}, "data[0].colorbar.title:"),
+            ({"title": {"text": "t", "side": "top"}}, "data[0].colorbar.title:"),
+            ({"title": {"text": 7}}, "data[0].colorbar.title:"),
+            ({"title": {}}, "data[0].colorbar.title:"),
+            # Keys that could hide or rewrite the labels, or draw a stroke or frame
+            # in plotly's own color, or shrink the colorbar away (#639's review).
+            ({"showticklabels": False}, "data[0].colorbar.showticklabels: not a key"),
+            ({"ticklabelstep": 2}, "data[0].colorbar.ticklabelstep: not a key"),
+            ({"len": 0}, "data[0].colorbar.len: not a key"),
+            ({"thickness": 0}, "data[0].colorbar.thickness: not a key"),
+            ({"tickprefix": "$"}, "data[0].colorbar.tickprefix: not a key"),
+            ({"ticksuffix": "%"}, "data[0].colorbar.ticksuffix: not a key"),
+            ({"labelalias": {}}, "data[0].colorbar.labelalias: not a key"),
+            ({"ticks": "outside"}, "data[0].colorbar.ticks: not a key"),
+            (
+                {"outlinecolor": "var(--text)"},
+                "data[0].colorbar.outlinecolor: not a key",
+            ),
         ],
         ids=lambda v: str(v)[:40],
     )
@@ -1199,8 +1227,56 @@ class TestMapBins:
             components.chart("C1", figure, "elections-table", "A caption.")
         )
 
-    def test_only_true_in_the_registry_row(self) -> None:
-        assert not [c for c, row in charts.CHARTS.items() if row.map_bins]
+    def test_the_map_s_key_sets_are_the_hand_written_ones(self) -> None:
+        """Each closed set is written here by hand, so a key added to one fails
+        (#639's review): the trace's and the colorbar's."""
+        assert (
+            frozenset(
+                {
+                    "type",
+                    "locationmode",
+                    "locations",
+                    "z",
+                    "zmin",
+                    "zmax",
+                    "colorscale",
+                    "showscale",
+                    "colorbar",
+                    "marker",
+                    "hovertemplate",
+                    "hoverinfo",
+                    "hovertext",
+                    "customdata",
+                    "text",
+                    "name",
+                    "geo",
+                }
+            )
+            == charts.MAP_TRACE_KEYS
+        )
+        assert (
+            frozenset({"tickmode", "tickvals", "ticktext", "title", "outlinewidth"})
+            == charts.MAP_COLORBAR_KEYS
+        )
+
+    def test_the_exception_needs_a_choropleth_at_data_0(self) -> None:
+        """One test of the map's exception, shared by the trace-type and color rules
+        (#639's review): a bar at ``data[0]`` under the flag gets neither."""
+        figure = {
+            "data": [{**colored("bar"), "colorscale": [], "showscale": True}],
+        }
+        assert charts.color_problems(figure, map_bins=True) == [
+            "data[0].colorscale: no colorscale or colorbar",
+            "data[0].showscale: no colorscale or colorbar",
+        ]
+
+    def test_the_map_s_slots_are_typed_on_every_chart(self) -> None:
+        """``slot_problems`` types the map's slots on every trace, with or without the
+        flag, as it types every slot (D099)."""
+        figure = {"data": [{**colored("bar"), "marker": {"line": None}}]}
+        assert "data[0].marker.line: null, not an object" in charts.figure_problems(
+            figure
+        )
 
 
 class TestMarkupNumbersAndOverrides:
@@ -2430,7 +2506,10 @@ EXPECTED_KINDS: dict[str, dict[str, set[str]]] = {
         "tickmode": {"a string"},
         "tickvals": {"a list", "a list of strings"},
         "ticktext": {"a list of strings"},
+        "title": {"an object"},
+        "outlinewidth": {"a number"},
     },
+    "colorbar_title": {"text": {"a string"}},
     "layout": {
         "legend": {"an object"},
         "annotations": {"a list", "a list of strings"},
@@ -2452,6 +2531,7 @@ MAP_ANCHORS: dict[str, list[SlotPath]] = {
     "marker": [("data", 0, "marker")],
     "marker_line": [("data", 0, "marker", "line")],
     "colorbar": [("data", 0, "colorbar")],
+    "colorbar_title": [("data", 0, "colorbar", "title")],
     "layout": [("layout",)],
 }
 
@@ -2512,6 +2592,7 @@ ANCHOR_PATHS = {
     "marker_line": "data[i].marker.line",
     "line": "data[i].line",
     "colorbar": "data[i].colorbar",
+    "colorbar_title": "data[i].colorbar.title",
     "layout": "layout",
     "axis": "layout.<axis>",
     "annotation": "layout.annotations[i]",
