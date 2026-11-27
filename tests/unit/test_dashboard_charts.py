@@ -923,6 +923,25 @@ class TestMapBins:
             "data[1].type: 'choropleth', not a chart trace type (scatter or bar)"
         ]
 
+    def test_a_choropleth_at_data_0_admits_no_other_trace(self) -> None:
+        """The exception is the first trace's alone: with the map at ``data[0]``, a
+        second choropleth or another refused type is still refused by the trace-type
+        rule itself (#639's acceptance gate)."""
+        figure = copy.deepcopy(MAP_BASE)
+        figure["data"] += [copy.deepcopy(MAP_BASE["data"][0]), {"type": "pie"}]
+        assert charts.trace_type_problems(figure, map_bins=True) == [
+            "data[1].type: 'choropleth', not a chart trace type (scatter or bar)",
+            "data[2].type: 'pie', not a chart trace type (scatter or bar)",
+        ]
+
+    @pytest.mark.parametrize("flag", [1, "yes"])
+    def test_only_true_asks_for_the_map(self, flag: Any) -> None:
+        """A truthy flag that is not ``True`` neither admits the map nor makes a plain
+        chart answer to the map's shape (#639's acceptance gate)."""
+        assert (
+            charts.figure_problems({"data": [colored("scatter")]}, map_bins=flag) == []
+        )
+
     def test_scatter_and_bar_stay_admitted_under_the_flag(self) -> None:
         figure = {"data": [colored("scatter"), colored("bar")]}
         assert charts.trace_type_problems(figure, map_bins=True) == []
@@ -1122,6 +1141,7 @@ class TestMapBins:
             ({"ticktext": ["a", " ", "c"]}, "data[0].colorbar.ticktext:"),
             ({"ticktext": ["a", "a", "c"]}, "data[0].colorbar.ticktext:"),
             ({"ticktext": ["a", "a ", "c"]}, "data[0].colorbar.ticktext:"),
+            ({"ticktext": ["a", "b", "c", "c"]}, "data[0].colorbar.ticktext:"),
             ({"outlinewidth": None}, "data[0].colorbar.outlinewidth:"),
             ({"outlinewidth": 1}, "data[0].colorbar.outlinewidth:"),
             ({"outlinewidth": 0.0}, "data[0].colorbar.outlinewidth:"),
