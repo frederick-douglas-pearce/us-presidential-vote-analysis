@@ -186,8 +186,9 @@ FONT_TOKEN = "--font-body"
 #: ``colorscale``), and in a scatter's ``fillgradient``; ``zmid`` and ``zauto`` are on
 #: no allowed trace type, and are here so that every refusal D121(a) makes for the map
 #: is in this one set. ``zmin`` and ``zmax`` are not, since the map sets them.
-#: The one exception is the map's (#639, D121(b)): under ``map_bins``,
-#: :data:`MAP_COLOR_PATHS` on its ``data[0]`` only.
+#: The one exception is the map's (#639, D121(b)): under ``map_bins``, while
+#: ``data[0]`` is a choropleth (:func:`_is_map`), :data:`MAP_COLOR_PATHS` on its
+#: ``data[0]`` only.
 _REFUSED_KEY_RE = re.compile(
     r"(?:.*colorscale|showscale|colorbar|cauto|cmin|cmax|cmid|coloraxis\d*"
     r"|reversescale|fillgradient|zmid|zauto)"
@@ -201,7 +202,8 @@ _REFUSED_KEY_RE = re.compile(
 MAP_COLOR_PATHS = ("data[0].colorscale", "data[0].colorbar", "data[0].showscale")
 
 #: Where the map's colorscale sits: it and every path under it are skipped by
-#: :func:`color_problems` under ``map_bins``.
+#: :func:`color_problems` under ``map_bins``, while ``data[0]`` is a choropleth
+#: (:func:`_is_map`).
 _MAP_COLORSCALE = MAP_COLOR_PATHS[0]
 
 #: The one Plotly template every chart is drawn with (#432), in both palettes: its color
@@ -991,11 +993,12 @@ MAP_TRACE_KEYS = frozenset(
 
 #: The keys the map's colorbar may hold (#639, D121(d); code review round 1's scope
 #: ruling): one tick per bin with its written range, a title, and no outline
-#: (``outlinewidth`` 0, since plotly's default outline is ``#444``, no token). A
-#: placement or size key (``orientation``, ``len``, ``thickness``, ``x``, ``y``, …) is
-#: #623's to add, with its bounds, as a chart that needs another slot widens it in its
-#: own story; and so is any key that could hide or rewrite the labels
-#: (``showticklabels``, ``ticklabelstep``, ``labelalias``, ``tickprefix``, …).
+#: (``outlinewidth`` 0, since plotly's default outline is ``#444``, no token). A key
+#: that could hide or rewrite the labels (``showticklabels``, ``ticklabelstep``,
+#: ``labelalias``, ``tickprefix``, …) stays refused, since the written ranges are how a
+#: bin's meaning reaches a reader without color (D121(d)). A placement or size key
+#: (``orientation``, ``len``, ``thickness``, ``x``, ``y``, …) is #623's to add, with
+#: its bounds, as a chart that needs another slot widens it in its own story.
 MAP_COLORBAR_KEYS = frozenset(
     {"tickmode", "tickvals", "ticktext", "title", "outlinewidth"}
 )
