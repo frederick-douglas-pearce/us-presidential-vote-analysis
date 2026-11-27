@@ -283,7 +283,13 @@ def test_a_hover_and_a_click_on_texas_name_it(page: Page, width: int) -> None:
     and a click returns its location, at 390 and 360 px."""
     open_map(page, width=width)
     path = texas(page)
+    # The map can sit below an 844 px viewport (it did on CI at 360 px, where text
+    # wraps taller); a pointer outside the viewport hovers nothing.
+    path.scroll_into_view_if_needed()
     x, y = center(path)
+    assert page.evaluate(
+        f"() => document.elementFromPoint({x}, {y})?.closest('{C11} .geo') != null"
+    )
     page.mouse.move(x, y)
     hover = page.locator(f"{C11} .hoverlayer .hovertext")
     expect(hover).to_contain_text("Texas")

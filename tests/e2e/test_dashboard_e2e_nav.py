@@ -301,19 +301,31 @@ def test_a_nav_click_loads_no_document_and_posts_only_the_router(page: Page) -> 
 
     page.on("request", on_request)
     page.evaluate("window.__e2e_mark = 1")
-    for key, success, mark in (
-        ("states", "#states", ("states", "page")),
-        ("home", HOME_SUCCESS, ("home", "page")),
-        ("elections", ELECTIONS_SUCCESS, ("elections", "page")),
+    # The first /states visit in a document also fetches what C11 needs once per
+    # document (#623): dcc's dropdown chunk and the self-hosted state outlines. A
+    # second visit asks for neither, so it is the router's one request again.
+    once_per_document = [
+        ("script", "GET", "/_dash-component-suites/dash/dcc/async-dropdown.js"),
+        ("xhr", "GET", "/assets/usa_110m.json"),
+    ]
+    for key, success, mark, extra in (
+        ("states", "#states", ("states", "page"), once_per_document),
+        ("home", HOME_SUCCESS, ("home", "page"), []),
+        ("elections", ELECTIONS_SUCCESS, ("elections", "page"), []),
+        ("states", "#states", ("states", "page"), []),
     ):
         seen.clear()
         page.locator(f"#{LINK_IDS[key]}").click()
         assert_rendered(page, success)
         expect_marked(page, mark)
+        if key == "states":
+            page.locator("#c11 .main-svg").first.wait_for()
         page.wait_for_timeout(SETTLE_MS)
-        # The router's one request, and nothing else: no document, no re-bootstrap, no
-        # asset, and no request for the marker, which runs in the browser.
-        assert seen == [("callback", "POST", ROUTER_OUTPUT)], (key, seen)
+        # The router's one request, then only what is fetched once per document:
+        # no document, no re-bootstrap, and no request for the marker, which runs in
+        # the browser.
+        assert seen[:1] == [("callback", "POST", ROUTER_OUTPUT)], (key, seen)
+        assert sorted(seen[1:]) == sorted(extra), (key, seen)
     assert page.evaluate("window.__e2e_mark") == 1
 
 
