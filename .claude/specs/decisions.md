@@ -7926,3 +7926,10 @@ The architect's review preferred a tile grid on cost and phone reach. The owner 
 **Action required.** After deploy, re-measure D071(g) cold on `/elections` and `/states`, recording the fill times before and after, the `api body` lines and the instance's memory, in the runbook (#494's AC4).
 
 **Guards.** `tests/unit/test_dashboard_app.py`: `TestFetch` (the request asks for gzip; a gzip body with a weak `ETag` reads the same body and version; every spelling of gzip and of identity; the read bounded at the cap plus one; the cap read at call time; every refusal with its message; the boundaries at the cap and one byte over for both codings; a gzip bomb at the real cap under a `tracemalloc` peak bound; the `api body` line), `TestDecodeBody` (each refusal directly, and what it keeps), `test_every_recorded_fixture_is_well_under_the_cap`. `tests/unit/test_dashboard_guards.py`: `BANNED_MODULES`, `CHOKEPOINT_ONLY`, `PLAIN_IMPORT_ONLY`, `DECODER`, the new rows of `test_the_lint_rules_flag_what_they_should`, the gzip answer in `test_the_fake_transport_answers_the_api_host_only`, and the success run's `ASKED_GZIP` assertion.
+
+**Amendment (2026-11-27, PR #657 code review).** Three changes from (c) and (e) as first written:
+- **(c)** `_decode_body` no longer checks `unconsumed_tail`. zlib leaves input unconsumed only when the output reaches `max_length`, which is the cap plus one, and the length check already refuses that output.
+- **(e)** The lint refuses `zlib` in every form but a bare name inside `api._decode_body`: as an attribute (`api.zlib`), as an import alias at any level (relative imports included), and as the string `"zlib"`.
+- **(e)** `test_only_fetch_calls_the_decoder` holds (a)'s claim that only `fetch` calls `_decode_body`.
+
+The `api body` line in (f) is logged after the JSON object check, so it marks exactly the bodies `fetch` returns. Re-exported modules other than `zlib` (`from explore.api import urllib`) are #658's.
