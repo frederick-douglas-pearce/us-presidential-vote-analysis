@@ -15,6 +15,7 @@ body:
 
         - **Accessibility:** if you pick any item in the accessibility checklist below, also add the `a11y` label.
         - **Data or content:** E14's routing test (#361) asks whether the change would look the same whatever the data. If it would, it is a presentation finding and stays in `epic:dashboard-ui`. If it would not (a new field, endpoint, page or filter, table contents, a label's meaning, or one chart's own content), swap the label to `epic:dashboard`.
+        - **Wording:** a finding on a label, help text or other reader-facing words goes to `epic:dashboard` (#361; root `CLAUDE.md`, *Who writes wording*).
         - **API docs:** a finding on the API's `/docs` page goes to `epic:internal-api` instead.
   - type: dropdown
     id: page

@@ -148,6 +148,7 @@ class TestLabels:
         assert "`epic:dashboard`" in text
         assert "#361" in text
         assert "look the same whatever the data" in text
+        assert "reader-facing words goes to `epic:dashboard`" in text
         assert "`/docs`" in text
         assert "`epic:internal-api`" in text
 
