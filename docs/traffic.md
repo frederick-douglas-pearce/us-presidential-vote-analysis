@@ -2,9 +2,9 @@
 
 Request logs are the project's only record of traffic to the dashboard and the API. This
 runbook says how long each record is kept, how to export it, and how to keep the cost of
-keeping it in check (§1–§5, #502), then what each source counts and cannot see (§6), how to
-recognize the project's own traffic (§7), the queries that read a window (§8), and whether
-API callers can be identified at all (§9) (§6–§9, #503).
+keeping it in check (§1–§5, #502). It then says what each source counts and cannot see
+(§6), how to recognize the project's own traffic (§7), the queries that read a window (§8),
+and whether API callers can be identified at all (§9) (§6–§9, #503).
 
 **Never commit an export.** Request logs carry client IP addresses. Exports live on the
 owner's machine (or a private bucket), never in this public repo, and nothing per-visitor
@@ -91,8 +91,9 @@ visits; §6 says what each source counts.
 `AND timestamp>="<the earlier export's last timestamp, UTC>"` to each filter. Exports may
 overlap, at that boundary entry or by more; §8's queries drop repeated entries by their
 `insertId`, so an overlap never counts twice. The second export (2026-11-28) started at
-2026-11-23T00:00Z, before the first one's end (it ran just after midnight UTC), so the two
-share the entries from 2026-11-23 00:00 to 01:50 UTC; nothing between them is missing.
+2026-11-23T00:00Z, before the first one's end (it ran at about 01:53 UTC on 2026-11-23),
+so the two share the entries from 2026-11-23 00:00 to 01:50 UTC; nothing between them is
+missing.
 
 ## 4. Cloudflare
 
@@ -183,7 +184,7 @@ data center and keyed on the full URL, query string included, so the origin sees
 least** the first request for each URL at each data center after a purge; it sees more when
 Cloudflare evicts an entry early, and every request whose query string is new.
 **Origin counts for `/v1` are a floor, not API use.** Paths outside `/v1` (`/`, `/docs`,
-`/openapi.json`, `/health`) and every non-200 the Worker handles are never cached, so the
+`/openapi.json`, `/health`) and every non-200 the Worker handles is never cached, so the
 origin sees all of those that get past Cloudflare: requests the zone blocks first (the WAF
 rate limit on `/v1`, [`deploy-cloud-run.md` §7](deploy-cloud-run.md), or its security
 checks) never reach the Worker or the origin.
@@ -210,9 +211,9 @@ nothing (#510 adds its redirect).
 | HTTP requests log (Observability → Logs → HTTP requests) | one entry per request to the zone, cached or not: time, method, host, path, edge status, cache status, client IP, with further request and client fields | yes, per request | not checked: the client field group is where it would be | 30 days |
 | Workers Logs (Observability) | the Worker's own log lines, of which the published Worker ([`deploy-cloud-run.md` §7](deploy-cloud-run.md)) writes none, plus each invocation's request if invocation logs are on (not checked) | only with invocation logs | only with invocation logs | 7 days (§4) |
 
-Zone Analytics and the HTTP requests log also show client IPs; a capture of it is kept privately (§4) and never
-quoted here. **Query:** these are console views; there is no query to save. A reading is a
-capture, taken when wanted (§4).
+Zone Analytics and the HTTP requests log also show client IPs. A capture of Zone Analytics
+is kept privately (§4); neither is quoted here. **Query:** these are console views; there
+is no query to save. A reading is a capture, taken when wanted (§4).
 
 ### 6.4 Google Search Console (Domain property)
 
@@ -284,8 +285,8 @@ def entries: [inputs] | unique_by(.insertId) | .[];
 ```
 
 `entries` reads every export in `EX` and keeps one copy of each log entry, so overlapping
-exports (§3) are safe. The user-agent classes are `browser`, `crawler` (including scanners), `script`, `curl`,
-`headless` and `own`; §7 says which of them are ours.
+exports (§3) are safe. The user-agent classes are `browser`, `crawler` (including
+scanners), `script`, `curl`, `headless` and `own`; §7 says which of them are ours.
 
 ### 8.1 Dashboard landings, by user-agent class and by page
 
@@ -349,7 +350,9 @@ for d in $EX; do zcat "$d/explore_request_log.ndjson.gz"; done \
 `gh` lists each workflow's runs; a `curl/…` request inside a run (plus a minute either
 side) belongs to it. Two limits: a re-run moves the run's `updatedAt` to the re-run's end,
 so its window also takes in every curl in between; and a manual curl made while a run is
-going is counted as the run's. Both only move requests between our own buckets.
+going is counted as the run's. Both can also count a curl that is not ours, the owner's or
+a third party's, as the run's, so a run's bucket is not proof that every request in it is
+ours.
 
 ```
 for w in api-canary.yml deploy.yml deploy-dashboard.yml; do
@@ -386,16 +389,17 @@ commands in place of the `zcat` loop.
   `referer`.
 - **At the edge (§6.3):** Zone Analytics lists the zone's top user agents and top paths for
   30 days, separately, so a new caller shows up only once it is among the top entries, and
-  never as "this agent read these routes". Worker metrics carry no path or user agent. Workers
-  Logs hold no line the Worker writes (it writes none), and at most seven days of
-  invocations if invocation logs are on. The **HTTP requests log**
-  has one entry per request, cached or not, with its path and cache status, for 30 days: it
-  is the one place a cached read is visible at all, in the console only.
+  never as "this agent read these routes". Worker metrics carry no path or user agent.
+  Workers Logs hold no line the Worker writes (it writes none), and at most seven days of
+  invocations if invocation logs are on. The **HTTP requests log** has one entry per
+  request, cached or not, with its path and cache status, for 30 days: it is the one place
+  a single cached read is visible, with its path (Zone Analytics shows cached reads only in
+  aggregate), in the console only.
 
 **What would make callers visible:** a record written at the edge for every request,
 cached or not, that keeps the user agent's class, the endpoint template, the cache result
 and the data center, and no IP address, kept longer than 30 days and readable by a query
-rather than in the console. Options are a regular export from the HTTP requests log, the
-Worker writing that line to Workers Logs with a weekly export, or the Worker writing it to
-a store Cloudflare keeps longer. Choosing one, and the report built on it, is the API usage
-report story (#511).
+rather than in the console. Options are a regular export from the HTTP requests log, if
+the plan allows one (#511 checks), the Worker writing that line to Workers Logs with a
+weekly export, or the Worker writing it to a store Cloudflare keeps longer. Choosing one,
+and the report built on it, is the API usage report story (#511).
