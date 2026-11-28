@@ -16,7 +16,7 @@ is quoted here: aggregates only.
 |---|---|---|---|
 | Dashboard requests (App Engine) | GCP `uspv-explore` | `appengine.googleapis.com/request_log` in the `_Default` bucket | 365 days (from 2026-11-22; was 30) |
 | API origin requests (Cloud Run `usvote-api`) | GCP `uspv-api` | `run.googleapis.com/requests` in the `_Default` bucket | 365 days (from 2026-11-22; was 30) |
-| API edge (`usvote-api-proxy` Worker, zone analytics) | Cloudflare, Workers Free | Workers Logs and analytics views | 7 days for Workers Logs (Observability Free, §4); 30 days for Zone Analytics and Worker metrics |
+| API edge (`usvote-api-proxy` Worker, zone analytics) | Cloudflare, Workers Free | HTTP requests log, Workers Logs and analytics views (§6.3) | 30 days for the HTTP requests log, Zone Analytics and Worker metrics; 7 days for Workers Logs (Observability Free, §4) |
 | Google Search (the apex's Domain property) | Google Search Console | Performance, Pages, Sitemaps reports | about 16 months for Performance |
 
 The `_Required` bucket in each project (audit logs only, 400 days, free) is unchanged.
@@ -87,10 +87,12 @@ entries and 21,325 API entries, from 2026-10-24 to 2026-11-23 UTC. Nothing older
 One dashboard visit writes several entries (the page, its callbacks), so entries are not
 visits; §6 says what each source counts.
 
-**A later export** reads only what the earlier one does not hold: add
-`AND timestamp>="<the earlier export's end, UTC>"` to each filter. The second export
-(2026-11-28) starts at 2026-11-23T00:00Z. The dashboard entries from 2026-11-22T20:23Z to
-midnight are in neither file; retention now keeps them, so a full re-export recovers them.
+**A later export** starts where the earlier one ends: add
+`AND timestamp>="<the earlier export's last timestamp, UTC>"` to each filter. Exports may
+overlap, at that boundary entry or by more; §8's queries drop repeated entries by their
+`insertId`, so an overlap never counts twice. The second export (2026-11-28) started at
+2026-11-23T00:00Z, before the first one's end (it ran just after midnight UTC), so the two
+share the entries from 2026-11-23 00:00 to 01:50 UTC; nothing between them is missing.
 
 ## 4. Cloudflare
 
@@ -158,7 +160,10 @@ Referer on same-origin requests, and the app sets no referrer policy that would 
 So the server log counts **landings, not pageviews**. Navigations can be recovered, as a
 count, by ordering each visitor's callback referrers and counting the changes of path
 (§8.3); every interaction on a page sends the same referrer, so a change of path is the
-only sign of a navigation. Both export windows show pages in callback referrers that no
+only sign of a navigation. **That count is an upper bound.** A visitor is an IP address and
+user agent pair, so two tabs open on different pages, or two people on one network with the
+same browser, interleave their referrers and every switch counts as a navigation. Landings
+alone are the lower bound. Both export windows show pages in callback referrers that no
 browser landed on, which is the navigation path at work.
 
 **Cannot see:** who is a person. Many `Mozilla/…` user agents load `/` and never run a
@@ -173,15 +178,21 @@ anyone else's without an IP address (§7).
 
 **Counts:** requests that reach the origin, which are **edge-cache misses only** for
 `GET /v1`. The Worker answers cached `GET /v1` 200s from Cloudflare's edge for 30 days
-(`s-maxage=2592000`, [`deploy-cloud-run.md` §7](deploy-cloud-run.md)), and the cache is
-per data center, so the origin sees the first request for each route at each data center
-after a purge, and nothing after it. **Origin counts for `/v1` are a floor, not API use.**
-Paths outside `/v1` (`/`, `/docs`, `/openapi.json`, `/health`) and every non-200 are never
-cached, so the origin sees all of those.
+(`s-maxage=2592000`, [`deploy-cloud-run.md` §7](deploy-cloud-run.md)). The cache is per
+data center and keyed on the full URL, query string included, so the origin sees **at
+least** the first request for each URL at each data center after a purge; it sees more when
+Cloudflare evicts an entry early, and every request whose query string is new.
+**Origin counts for `/v1` are a floor, not API use.** Paths outside `/v1` (`/`, `/docs`,
+`/openapi.json`, `/health`) and every non-200 the Worker handles are never cached, so the
+origin sees all of those that get past Cloudflare: requests the zone blocks first (the WAF
+rate limit on `/v1`, [`deploy-cloud-run.md` §7](deploy-cloud-run.md), or its security
+checks) never reach the Worker or the origin.
 
 **Cannot see:** cached `/v1` reads, which are the normal case for a repeat caller. The
 `referer` is logged when sent: the `/docs` page's own requests carry
 `api.us-presidential-election-center.org`, and search arrivals carry a search engine's host.
+A referer naming the apex is forged: the apex has no address record (§6.3), and every such
+request in the exports was a failed scanner probe.
 
 **Retention:** 365 days (§1). **Query:** §8.2.
 
@@ -189,15 +200,17 @@ cached, so the origin sees all of those.
 
 Cloudflare sees **only the API host**. The dashboard's record is a DNS-only CNAME to App
 Engine ([`deploy-dashboard.md`](deploy-dashboard.md), the custom-domain steps), so its
-traffic never passes through Cloudflare; the apex is not served yet (#510).
+traffic never passes through Cloudflare. The apex has no address record yet, so it serves
+nothing (#510 adds its redirect).
 
 | View | Shows | Per endpoint? | Per user agent? | History |
 |---|---|---|---|---|
 | Zone Analytics (the zone's requests view) | requests, data transfer, visits, cache hit rate, status codes, cache status, top paths, countries, hosts, browsers, OS, device types, user agents | top paths, zone-wide | top user agents, zone-wide; not crossed with paths | 30 days |
 | Worker `usvote-api-proxy` → Metrics | invocations, subrequests to the origin by status, errors, CPU and wall time, requests by data center | no | no | 30 days |
-| Workers Logs (Observability) | one entry per invocation, as the Worker logs it | yes, per request | yes, per request | 7 days (§4) |
+| HTTP requests log (Observability → Logs → HTTP requests) | one entry per request to the zone, cached or not: time, method, host, path, edge status, cache status, client IP, with further request and client fields | yes, per request | not checked: the client field group is where it would be | 30 days |
+| Workers Logs (Observability) | the Worker's own log lines, of which the published Worker ([`deploy-cloud-run.md` §7](deploy-cloud-run.md)) writes none, plus each invocation's request if invocation logs are on (not checked) | only with invocation logs | only with invocation logs | 7 days (§4) |
 
-Zone Analytics also lists top client IPs; a capture of it is kept privately (§4) and never
+Zone Analytics and the HTTP requests log also show client IPs; a capture of it is kept privately (§4) and never
 quoted here. **Query:** these are console views; there is no query to save. A reading is a
 capture, taken when wanted (§4).
 
@@ -206,7 +219,7 @@ capture, taken when wanted (§4).
 The apex is verified as a **Domain property**, which covers every host under it, so the
 dashboard and the API appear in one property, separated by page URL.
 
-- **Performance → Search results:** clicks, impressions, click-through rate and average
+- **Performance** (search type Web): clicks, impressions, click-through rate and average
   position, by query, page, country, device and date; about 16 months of history, with a
   delay of a few days.
 - **Indexing → Pages:** which URLs Google has indexed and why the others are not.
@@ -224,10 +237,10 @@ Each filter recognizes our traffic by a field in the log, never by an IP address
 
 | Filter | Recognized by | Where it shows |
 |---|---|---|
-| `own-agents` | user agent starting `usvote-`: `usvote-explore` (the dashboard's keep-warm `/health` ping and its `/v1` fills, `dashboard/explore/api.py`), and one-off check scripts run by hand (`usvote-density-check/1.0`, `usvote-dev-check`, `usvote-fixture-recorder`, …) | API origin; Zone Analytics |
+| `own-agents` | user agent starting `usvote-`: `usvote-explore` (the dashboard's keep-warm `/health` ping and its `/v1` fills, `dashboard/explore/api.py`), `usvote-load-test` (`scripts/dashboard_load_test.py`), and one-off scripts not in the repo, seen in the logs as `usvote-density-check/1.0`, `usvote-dev-check`, `usvote-fixture-recorder` and others | dashboard and API |
 | `canary` | user agent `curl/…`, inside a run of `api-canary.yml` (daily, scheduled 13:17 UTC, though GitHub often starts it late, so match the run's own start and end, §8.4) | dashboard and API |
 | `deploy-smoke` | user agent `curl/…`, inside a run of `deploy.yml` or `deploy-dashboard.yml` (§8.4) | dashboard and API |
-| `manual-curl` | user agent `curl/…` outside any workflow run: the owner's and the loop's own checks | dashboard and API |
+| `unattributed-curl` | user agent `curl/…` outside any workflow run: mostly the owner's and the loop's own checks, but a third-party caller using curl lands here too, so do not exclude it as ours without looking | dashboard and API |
 | `cold-start-script` | user agent containing `HeadlessChrome`: `scripts/measure_dashboard_cold_start.py` drives headless Chromium with Playwright's default user agent. Headless crawlers share it, so this filter over-excludes | dashboard |
 | `owner-browsing` | **not recognizable** in the logs without an IP address. Exclude it in analytics instead (#504, #506 pick the method) | dashboard |
 | `warmup` | path `/_ah/warmup`: App Engine starting an instance, not a request from outside | dashboard |
@@ -267,9 +280,11 @@ def endpoint: bare
   | sub("^/v1/candidates/[^/]+"; "/v1/candidates/<id>");
 def landing: .protoPayload | .method == "GET" and .status == 200 and ((.resource | bare | asset) | not);
 def tally: group_by(.) | map({(.[0]): length}) | add // {} | to_entries | sort_by(-.value) | from_entries;
+def entries: [inputs] | unique_by(.insertId) | .[];
 ```
 
-The user-agent classes are `browser`, `crawler` (including scanners), `script`, `curl`,
+`entries` reads every export in `EX` and keeps one copy of each log entry, so overlapping
+exports (§3) are safe. The user-agent classes are `browser`, `crawler` (including scanners), `script`, `curl`,
 `headless` and `own`; §7 says which of them are ours.
 
 ### 8.1 Dashboard landings, by user-agent class and by page
@@ -277,7 +292,7 @@ The user-agent classes are `browser`, `crawler` (including scanners), `script`, 
 ```
 for d in $EX; do zcat "$d/explore_request_log.ndjson.gz"; done \
 | jq -n -L . --arg from "$FROM" --arg to "$TO" 'include "traffic";
-  [inputs | select(.timestamp >= $from and .timestamp < $to) | select(landing)
+  [entries | select(.timestamp >= $from and .timestamp < $to) | select(landing)
    | .protoPayload | {c: (.userAgent | uaclass), p: (.resource | page),
                       r: ((.referrer // "") | sub("^https?://"; "") | split("/")[0] // "(none)")}]
   | {landings_by_class: (map(.c) | tally),
@@ -290,7 +305,7 @@ for d in $EX; do zcat "$d/explore_request_log.ndjson.gz"; done \
 ```
 for d in $EX; do zcat "$d/api_requests.ndjson.gz"; done \
 | jq -n -L . --arg from "$FROM" --arg to "$TO" 'include "traffic";
-  [inputs | select(.timestamp >= $from and .timestamp < $to) | .httpRequest
+  [entries | select(.timestamp >= $from and .timestamp < $to) | .httpRequest
    | {c: (.userAgent | uaclass), ua: .userAgent, s: .status,
       e: (.requestUrl | sub("^https?://[^/]+"; "") | endpoint),
       r: ((.referer // "") | sub("^https?://"; "") | split("/")[0] // "(none)")}]
@@ -305,12 +320,13 @@ for d in $EX; do zcat "$d/api_requests.ndjson.gz"; done \
 
 A visitor here is one IP address and user agent pair, held in memory only. It ran the app
 if it sent at least one callback; a navigation is a change of path in its callback
-referrers (§6.1).
+referrers (§6.1). Two tabs, or two people on one network with the same browser, share a
+key, so `client_side_navigations` is an upper bound.
 
 ```
 for d in $EX; do zcat "$d/explore_request_log.ndjson.gz"; done \
 | jq -n -L . --arg from "$FROM" --arg to "$TO" 'include "traffic";
-  [inputs | select(.timestamp >= $from and .timestamp < $to) | .timestamp as $t | .protoPayload
+  [entries | select(.timestamp >= $from and .timestamp < $to) | .timestamp as $t | .protoPayload
    | select(.status == 200 and (.userAgent | uaclass) == "browser")
    | if .method == "GET" and ((.resource | bare | asset) | not)
      then {k: (.ip + "|" + .userAgent), t: $t, kind: "L", p: (.resource | bare)}
@@ -331,7 +347,9 @@ for d in $EX; do zcat "$d/explore_request_log.ndjson.gz"; done \
 ### 8.4 Our curl traffic, by workflow run
 
 `gh` lists each workflow's runs; a `curl/…` request inside a run (plus a minute either
-side) belongs to it.
+side) belongs to it. Two limits: a re-run moves the run's `updatedAt` to the re-run's end,
+so its window also takes in every curl in between; and a manual curl made while a run is
+going is counted as the run's. Both only move requests between our own buckets.
 
 ```
 for w in api-canary.yml deploy.yml deploy-dashboard.yml; do
@@ -344,7 +362,7 @@ for f in explore_request_log api_requests; do
   | jq -n -c -L . --slurpfile runs runs.json --arg from "$FROM" --arg to "$TO" 'include "traffic";
     def secs: sub("[.][0-9]+"; "") | sub("Z$"; "") | . + "Z" | fromdate;
     ($runs[0] | map({w, a: ((.from | secs) - 60), b: ((.to | secs) + 60)})) as $r
-    | [inputs | select(.timestamp >= $from and .timestamp < $to)
+    | [entries | select(.timestamp >= $from and .timestamp < $to)
        | select(((.protoPayload.userAgent // .httpRequest.userAgent) // "") | uaclass == "curl")
        | (.timestamp | secs) as $t
        | ([$r[] | select($t >= .a and $t <= .b) | .w] | first // "outside any run")]
@@ -368,13 +386,16 @@ commands in place of the `zcat` loop.
   `referer`.
 - **At the edge (§6.3):** Zone Analytics lists the zone's top user agents and top paths for
   30 days, separately, so a new caller shows up only once it is among the top entries, and
-  never as "this agent read these routes". Worker metrics carry no path or user agent.
-  Workers Logs carry one entry per request, but for seven days only, and hold only what the
-  Worker writes to them.
+  never as "this agent read these routes". Worker metrics carry no path or user agent. Workers
+  Logs hold no line the Worker writes (it writes none), and at most seven days of
+  invocations if invocation logs are on. The **HTTP requests log**
+  has one entry per request, cached or not, with its path and cache status, for 30 days: it
+  is the one place a cached read is visible at all, in the console only.
 
 **What would make callers visible:** a record written at the edge for every request,
 cached or not, that keeps the user agent's class, the endpoint template, the cache result
-and the data center, and no IP address, kept longer than seven days. Options are the
+and the data center, and no IP address, kept longer than 30 days and readable by a query
+rather than in the console. Options are a regular export from the HTTP requests log, the
 Worker writing that line to Workers Logs with a weekly export, or the Worker writing it to
 a store Cloudflare keeps longer. Choosing one, and the report built on it, is the API usage
 report story (#511).
