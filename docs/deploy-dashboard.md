@@ -547,6 +547,14 @@ gcloud logging read 'resource.type="gae_app" AND textPayload:"api fetch"' \
   --project="$PROJECT" --freshness=10m --format='value(timestamp,textPayload)'
 ```
 
+Since #494 (D125), `fetch` asks the API for gzip and decodes the body itself, refusing one
+over 8 MiB on the wire or decoded. Each body it accepts logs one
+`api body <path> <coding> <wire>-><decoded>` line (`gzip` or `identity`, then the bytes
+received and the bytes decoded), so a fill that arrived compressed can be told from one
+that did not; the keep-warm ping's `/health` reads log one too. The prefix matches
+neither `api fetch` nor `api ping`, so the counts above and in §11 are unchanged. To
+see them, query `textPayload:"api body"` the same way.
+
 ### Restarting the instance to empty its cache
 
 The cache lives in the one gunicorn process on the one pinned instance (`app.yaml`). A new

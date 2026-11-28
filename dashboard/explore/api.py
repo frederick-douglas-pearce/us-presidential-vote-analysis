@@ -1,7 +1,8 @@
 """The dashboard's only way to read data: the public API, cached in-process (D071(d)).
 
 These properties hold here (the tests that pin them are in
-``test_dashboard_app.py``: ``TestBuildUrl``, ``TestFetch`` and ``TestOpener``,
+``test_dashboard_app.py``: ``TestBuildUrl``, ``TestFetch``, ``TestDecodeBody`` and
+``TestOpener``,
 ``TestCache``, ``TestView``, ``TestRenderDeadline``, ``TestWakeInterval``,
 ``TestKeepWarm`` and ``TestNoPageReadsHealth``):
 
@@ -10,7 +11,10 @@ These properties hold here (the tests that pin them are in
   the URL on the fixed :data:`~explore.config.API_BASE`, checks scheme and host before
   opening, follows no redirect and honours no proxy variable. A path like
   ``//evil.example/x`` or a 3xx to the Cloud Run origin therefore cannot move a request
-  off the public host.
+  off the public host. It also owns decompression and the body cap (#494, D125): it asks
+  for gzip, reads at most :data:`MAX_BODY_BYTES` plus one byte, and
+  :func:`_decode_body`, which only it calls, decodes the body under the same cap and
+  refuses every coding but identity and gzip (``TestFetch`` and ``TestDecodeBody``).
 - **A cache keyed on ``snapshot_version``.** The API serves one immutable snapshot at a
   time, and each response's ``ETag`` is that snapshot's content hash. So a cached
   response stays correct until the version changes, and the cache is replaced whole
@@ -82,6 +86,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -172,6 +177,14 @@ SUMMARY_PATH = "/v1/elections/summary"
 #: (D074(ii)), so D072's prefetch extent is unchanged (D123 names when that changes).
 ELECTION_STATES_PATH = "/v1/elections/states"
 
+#: The most bytes a response body may hold, as read off the wire and after decoding
+#: (#494, D125). It comes from the F1 instance's headroom: the instance uses 119 to
+#: 139 MB of its 384 MB, a parsed body takes several times its byte size in memory, and
+#: two fills (the refresher's and a visitor's) can run at once. N2, the largest
+#: response, is 681 KB uncompressed, so the cap is about 12 times it. :func:`fetch` and
+#: :func:`_decode_body` read it at call time.
+MAX_BODY_BYTES = 8 * 1024 * 1024
+
 _PLACEHOLDER_RE = re.compile(r"{(.*?)}")
 
 _PATH_RE = re.compile(r"^/v1/[A-Za-z0-9_\-./]*(\?[A-Za-z0-9_\-.=&%]*)?$")
@@ -230,8 +243,9 @@ def build_url(path: str) -> str:
 def etag_version(etag: str | None) -> str | None:
     """The snapshot version an ``ETag`` names, ignoring a weak-validator prefix.
 
-    Cloudflare rewrites the strong tag to ``W/"…"`` whenever it compresses; the value
-    identifies the snapshot and the validator strength does not.
+    Cloudflare rewrites the strong tag to ``W/"…"`` whenever it compresses, as it can
+    for any response since :func:`fetch` asks for gzip (#494); the value identifies
+    the snapshot and the validator strength does not.
     """
     if not etag:
         return None
@@ -241,19 +255,87 @@ def etag_version(etag: str | None) -> str | None:
     return value.strip('"') or None
 
 
+def _content_coding(path: str, values: list[str] | None) -> str:
+    """The one content coding a response names: ``"identity"`` or ``"gzip"``.
+
+    ``values`` is every ``Content-Encoding`` header the response carried. The rule is
+    closed. After stripping and lower-casing, no header, an empty one and ``identity``
+    mean no coding, and ``gzip`` and ``x-gzip`` mean gzip. A header sent twice, a list
+    such as ``gzip, identity`` and any other coding (``br``, ``deflate``) are refused,
+    since the request asked for gzip alone.
+    """
+    if not values:
+        return "identity"
+    if len(values) > 1:
+        raise ApiUnavailable(f"GET {path}: Content-Encoding sent {len(values)} times")
+    value = values[0].strip().lower()
+    if "," in value:
+        raise ApiUnavailable(f"GET {path}: Content-Encoding is a list: {values[0]!r}")
+    if value in ("", "identity"):
+        return "identity"
+    if value in ("gzip", "x-gzip"):
+        return "gzip"
+    raise ApiUnavailable(f"GET {path}: unsupported Content-Encoding {values[0]!r}")
+
+
+def _decode_body(path: str, payload: bytes, encoding: list[str] | None) -> bytes:
+    """A response body decoded by its ``Content-Encoding`` headers, under the cap.
+
+    Called only from :func:`fetch`, and the one place a runtime module decompresses
+    (the D070(b) lint). Each refusal is :class:`ApiUnavailable` with its own message:
+    a coding :func:`_content_coding` refuses, a body over :data:`MAX_BODY_BYTES` on the
+    wire or decoded, a corrupt stream, a truncated one, and data after the stream's
+    end. That last rule also refuses a stream of several gzip members, on purpose.
+    ``zlib`` gets a ``max_length`` one byte over the cap, so a small body that would
+    expand without bound produces at most that much output.
+    """
+    cap = MAX_BODY_BYTES
+    coding = _content_coding(path, encoding)
+    if len(payload) > cap:
+        raise ApiUnavailable(f"GET {path}: body over {cap} bytes")
+    if coding == "identity":
+        return payload
+    decompressor = zlib.decompressobj(wbits=31)
+    try:
+        decoded = decompressor.decompress(payload, cap + 1)
+    except zlib.error as exc:
+        raise ApiUnavailable(f"GET {path}: corrupt gzip stream: {exc}") from exc
+    if len(decoded) > cap or decompressor.unconsumed_tail:
+        raise ApiUnavailable(f"GET {path}: decoded body over {cap} bytes")
+    if not decompressor.eof:
+        raise ApiUnavailable(f"GET {path}: truncated gzip stream")
+    if decompressor.unused_data:
+        raise ApiUnavailable(f"GET {path}: data after the end of the gzip stream")
+    return decoded
+
+
 def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
-    """GET one API path. The only function in the dashboard that opens a connection."""
+    """GET one API path. The only function in the dashboard that opens a connection.
+
+    It asks for gzip and reads at most :data:`MAX_BODY_BYTES` plus one byte, so an
+    oversized body is refused without being read whole. A bounded read of a body
+    shorter than its ``Content-Length`` returns short where an unbounded read raised
+    ``IncompleteRead``; such a body still fails, as invalid JSON or a truncated gzip
+    stream. Each body it accepts logs one ``api body <path> <coding> <wire>-><decoded>``
+    line, which never matches the ``api fetch`` lines the runbook counts.
+    """
     # Outside the try on purpose: a path refused as off-host is a bug to surface, not
     # an unavailable API to paper over.
     url = build_url(path)
     request = urllib.request.Request(
-        url, headers={"Accept": "application/json", "User-Agent": "usvote-explore"}
+        url,
+        headers={
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "User-Agent": "usvote-explore",
+        },
     )
     try:
         with _OPENER.open(request, timeout=timeout) as raw:
             status = raw.status
             etag = raw.headers.get("ETag")
-            payload = raw.read()
+            encoding = raw.headers.get_all("Content-Encoding")
+            payload = raw.read(MAX_BODY_BYTES + 1)
     except urllib.error.HTTPError as exc:
         raise ApiUnavailable(f"GET {path}: HTTP {exc.code}") from exc
     except Exception as exc:
@@ -264,8 +346,17 @@ def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
         raise ApiUnavailable(f"GET {path}: {type(exc).__name__}: {exc}") from exc
     if status != 200:
         raise ApiUnavailable(f"GET {path}: HTTP {status}")
+    # Outside the I/O try: each refusal keeps its own message.
+    decoded = _decode_body(path, payload, encoding)
+    log.info(
+        "api body %s %s %d->%d",
+        path,
+        _content_coding(path, encoding),
+        len(payload),
+        len(decoded),
+    )
     try:
-        body = json.loads(payload)
+        body = json.loads(decoded)
     except (ValueError, RecursionError) as exc:
         # RecursionError: a deeply nested body is not a ValueError, and a fill on a
         # visitor's request (a page's on_miss) would otherwise answer a server error.

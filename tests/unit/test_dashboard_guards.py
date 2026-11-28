@@ -323,15 +323,20 @@ def _transport(fixtures: dict[str, str], version: str) -> str:
     ``fetch`` and the stdlib's request and response handling all run on top of it. The
     socket is an in-memory buffer, never a real one: creating a socket is refused. Every
     200 response carries the meta fixture's snapshot version as its ``ETag``, since the
-    cache compares only that; a 404 carries none.
+    cache compares only that; a 404 carries none. As the live edge does (#494), a 200
+    to a request that asks for gzip is the gzipped fixture with ``Content-Encoding:
+    gzip`` and a weak ``ETag``, so the real response handling, bounded read and
+    decoding run here too. ``ASKED_GZIP`` records, per request, whether it asked.
     """
     return f"""
+import gzip
 import http.client
 import io
 
 _FIXTURES = {ascii(fixtures)}
 _VERSION = {version!r}
 _API_HOST = {PUBLIC_API_HOST!r}
+ASKED_GZIP = []
 
 
 class _FixtureSocket:
@@ -344,10 +349,23 @@ class _FixtureSocket:
     def makefile(self, mode, *args, **kwargs):
         target = self._sent.split(b" ", 2)[1].decode("ascii")
         REQUESTED.append(target)  # every request, answered from a fixture or not
+        head_lines = self._sent.split(b"\\r\\n\\r\\n", 1)[0].split(b"\\r\\n")[1:]
+        asked = any(
+            line.lower().replace(b" ", b"") == b"accept-encoding:gzip"
+            for line in head_lines
+        )
+        ASKED_GZIP.append(asked)
         body = _FIXTURES.get(target)
         if body is None:
             head = "HTTP/1.1 404 Not Found\\r\\n"
             payload = b'{{"error": "no fixture"}}'
+        elif asked:
+            SERVED.append(target)
+            head = (
+                f'HTTP/1.1 200 OK\\r\\nETag: W/"{{_VERSION}}"\\r\\n'
+                "Content-Encoding: gzip\\r\\n"
+            )
+            payload = gzip.compress(body.encode("utf-8"), mtime=0)
         else:
             SERVED.append(target)
             head = f'HTTP/1.1 200 OK\\r\\nETag: "{{_VERSION}}"\\r\\n'
@@ -699,6 +717,9 @@ expected = [api.META_PATH]
 expected += [path for path in registered if path != api.META_PATH]
 expected += [*{CANDIDATE_MISSES!r}, *{ELECTION_MISSES!r}, *{ELECTIONS_MISSES!r}, *{STATE_MISSES!r}, *{STATES_MISSES!r}]
 assert SERVED == expected, (SERVED, expected)
+# #494: every request the dashboard made asked for gzip, so every fill above was
+# decoded at the chokepoint.
+assert len(ASKED_GZIP) == len(REQUESTED) and all(ASKED_GZIP), ASKED_GZIP
 """
         + _ALL_MODULES_LOADED
         + _RESULT
@@ -1006,6 +1027,15 @@ with opener.open("https://{PUBLIC_API_HOST}/v1/meta", timeout=5) as response:
     assert response.status == 200
     assert response.headers["ETag"] == f'"{{_VERSION}}"'
     assert json.loads(response.read())["provenance"]["snapshot_version"] == _VERSION
+asking = urllib.request.Request(
+    "https://{PUBLIC_API_HOST}/v1/meta", headers={{"Accept-Encoding": "gzip"}}
+)
+with opener.open(asking, timeout=5) as response:
+    assert response.headers["ETag"] == f'W/"{{_VERSION}}"'
+    assert response.headers["Content-Encoding"] == "gzip"
+    body = gzip.decompress(response.read())
+    assert json.loads(body)["provenance"]["snapshot_version"] == _VERSION
+assert ASKED_GZIP == [False, True], ASKED_GZIP
 try:
     opener.open("https://{PUBLIC_API_HOST}/v1/no-such-path", timeout=5)
 except urllib.error.HTTPError as exc:
@@ -1022,7 +1052,7 @@ else:
         + _RESULT
     )
     result = _result(_run(program))
-    assert result["served"] == ["/v1/meta"]
+    assert result["served"] == ["/v1/meta", "/v1/meta"]
     assert set(result["hosts"]) == {PUBLIC_API_HOST, "example.invalid"}
 
 
@@ -1113,6 +1143,16 @@ BANNED_MODULES = frozenset(
         # The whole package is banned, since ``from plotly import express`` and plotly's
         # lazy ``plotly.graph_objects`` attribute would pass a dotted-name rule.
         "plotly",
+        # Decompression and archives (#494, D125): only ``fetch`` decodes a body, with
+        # ``zlib`` under its cap (``CHOKEPOINT_ONLY``). ``gzip`` and the archive modules
+        # also open files, and ``codecs`` can decode a compressed body by name.
+        "gzip",
+        "bz2",
+        "lzma",
+        "zipfile",
+        "tarfile",
+        "zipimport",
+        "codecs",
     }
 )
 
@@ -1120,6 +1160,18 @@ BANNED_MODULES = frozenset(
 #: and is allowed only in the chokepoint module.
 CHOKEPOINT = PACKAGE / "api.py"
 URLLIB_ANYWHERE = frozenset({"urllib.parse"})
+
+#: Modules only the chokepoint module may import, each with the dotted names any module
+#: may import. ``zlib`` decompresses, so it is allowed only in ``api.py``, and only as a
+#: plain ``import zlib`` (``PLAIN_IMPORT_ONLY``), so every use is a ``zlib`` name the
+#: lint can see; a ``zlib`` name is allowed only inside :data:`DECODER` (#494, D125).
+CHOKEPOINT_ONLY = {"urllib": URLLIB_ANYWHERE, "zlib": frozenset()}
+PLAIN_IMPORT_ONLY = frozenset({"zlib"})
+
+#: The one function allowed to name ``zlib``. Accepted residual: the lint tracks only
+#: the innermost function's name, so a nested function named ``_decode_body`` inside
+#: another function of ``api.py`` would pass, the same weakness the ``fetch`` rule has.
+DECODER = "_decode_body"
 
 #: Names that read files or open connections, flagged wherever they appear (as a name
 #: or an attribute, called or not), so ``o = open; o(x)`` is caught too.
@@ -1153,12 +1205,18 @@ def _is_the_chokepoint_call(node: ast.AST, func: str | None, path: Path) -> bool
 def _violations(tree: ast.AST, path: Path) -> list[str]:
     found: list[str] = []
 
-    def check_import(name: str, line: int) -> None:
+    def check_import(name: str, line: int, plain: bool) -> None:
         top = name.split(".")[0]
         if top in BANNED_MODULES:
             found.append(f"line {line}: imports {name}")
-        elif top == "urllib" and name not in URLLIB_ANYWHERE and path != CHOKEPOINT:
+        elif (
+            top in CHOKEPOINT_ONLY
+            and name not in CHOKEPOINT_ONLY[top]
+            and path != CHOKEPOINT
+        ):
             found.append(f"line {line}: imports {name}; only api.py may")
+        elif top in PLAIN_IMPORT_ONLY and not (plain and name == top):
+            found.append(f"line {line}: imports {name} other than as `import {top}`")
 
     def visit(node: ast.AST, func: str | None) -> None:
         for child in ast.iter_child_nodes(node):
@@ -1170,14 +1228,20 @@ def _violations(tree: ast.AST, path: Path) -> list[str]:
             line = getattr(child, "lineno", 0)
             if isinstance(child, ast.Import):
                 for alias in child.names:
-                    check_import(alias.name, line)
+                    check_import(alias.name, line, plain=alias.asname is None)
             elif isinstance(child, ast.ImportFrom) and child.module and child.level == 0:
-                check_import(child.module, line)
+                check_import(child.module, line, plain=False)
                 for alias in child.names:
                     if alias.name in BANNED_NAMES:
                         found.append(f"line {line}: imports {alias.name}")
             elif isinstance(child, ast.Name) and child.id in BANNED_NAMES:
                 found.append(f"line {line}: {child.id}")
+            elif (
+                isinstance(child, ast.Name)
+                and child.id == "zlib"
+                and (path != CHOKEPOINT or func != DECODER)
+            ):
+                found.append(f"line {line}: zlib outside api.{DECODER}")
             elif (
                 isinstance(child, ast.Attribute)
                 and child.attr in BANNED_NAMES
@@ -1232,6 +1296,21 @@ def test_the_runtime_modules_are_the_expected_ones() -> None:
         ("import plotly.graph_objects as go\n", PACKAGE / "charts.py", True),
         ("from plotly import express\n", PACKAGE / "charts.py", True),
         ("import plotly\nplotly.graph_objects.Figure()\n", PACKAGE / "charts.py", True),
+        # #494: only api._decode_body decompresses, through a plain `import zlib`.
+        ("import zlib\n", PACKAGE / "app.py", True),
+        ("import gzip\n", CHOKEPOINT, True),
+        ("import codecs\n", CHOKEPOINT, True),
+        ("import lzma\n", CHOKEPOINT, True),
+        ("from zlib import decompressobj\n", CHOKEPOINT, True),
+        ("import zlib as z\n", CHOKEPOINT, True),
+        ("def fetch():\n    return zlib.decompress(b)\n", CHOKEPOINT, True),
+        ("def other():\n    return zlib.decompressobj()\n", CHOKEPOINT, True),
+        ("import zlib\n", CHOKEPOINT, False),
+        (
+            "def _decode_body():\n    return zlib.decompressobj(wbits=31)\n",
+            CHOKEPOINT,
+            False,
+        ),
     ],
 )
 def test_the_lint_rules_flag_what_they_should(
