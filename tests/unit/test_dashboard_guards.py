@@ -1168,9 +1168,13 @@ URLLIB_ANYWHERE = frozenset({"urllib.parse"})
 CHOKEPOINT_ONLY = {"urllib": URLLIB_ANYWHERE, "zlib": frozenset()}
 PLAIN_IMPORT_ONLY = frozenset({"zlib"})
 
-#: The one function allowed to name ``zlib``. Accepted residual: the lint tracks only
-#: the innermost function's name, so a nested function named ``_decode_body`` inside
-#: another function of ``api.py`` would pass, the same weakness the ``fetch`` rule has.
+#: The one function allowed to name ``zlib``, and only as a bare name. Everywhere, a
+#: ``zlib`` attribute (``api.zlib``), a ``zlib`` alias in a ``from`` import at any
+#: level, and outside it the string ``"zlib"`` (``sys.modules["zlib"]``) are flagged.
+#: Accepted residual: the lint tracks only the innermost function's name, so a nested
+#: function named ``_decode_body`` inside another function of ``api.py`` would pass,
+#: the same weakness the ``fetch`` rule has. Who calls it is
+#: ``test_only_fetch_calls_the_decoder``'s rule.
 DECODER = "_decode_body"
 
 #: Names that read files or open connections, flagged wherever they appear (as a name
@@ -1229,11 +1233,15 @@ def _violations(tree: ast.AST, path: Path) -> list[str]:
             if isinstance(child, ast.Import):
                 for alias in child.names:
                     check_import(alias.name, line, plain=alias.asname is None)
-            elif isinstance(child, ast.ImportFrom) and child.module and child.level == 0:
-                check_import(child.module, line, plain=False)
+            elif isinstance(child, ast.ImportFrom):
+                if child.module and child.level == 0:
+                    check_import(child.module, line, plain=False)
+                # The names at every level: ``from .api import zlib`` is relative.
                 for alias in child.names:
                     if alias.name in BANNED_NAMES:
                         found.append(f"line {line}: imports {alias.name}")
+                    if "zlib" in (alias.name, alias.asname):
+                        found.append(f"line {line}: imports zlib by name")
             elif isinstance(child, ast.Name) and child.id in BANNED_NAMES:
                 found.append(f"line {line}: {child.id}")
             elif (
@@ -1242,6 +1250,14 @@ def _violations(tree: ast.AST, path: Path) -> list[str]:
                 and (path != CHOKEPOINT or func != DECODER)
             ):
                 found.append(f"line {line}: zlib outside api.{DECODER}")
+            elif isinstance(child, ast.Attribute) and child.attr == "zlib":
+                found.append(f"line {line}: .zlib")
+            elif (
+                isinstance(child, ast.Constant)
+                and child.value == "zlib"
+                and (path != CHOKEPOINT or func != DECODER)
+            ):
+                found.append(f"line {line}: 'zlib' outside api.{DECODER}")
             elif (
                 isinstance(child, ast.Attribute)
                 and child.attr in BANNED_NAMES
@@ -1311,6 +1327,17 @@ def test_the_runtime_modules_are_the_expected_ones() -> None:
             CHOKEPOINT,
             False,
         ),
+        # The zlib token rule: no attribute, alias or string reaches it elsewhere.
+        ("from explore import api\napi.zlib.decompress(b)\n", PACKAGE / "app.py", True),
+        (
+            "import explore.api\nexplore.api.zlib.decompressobj()\n",
+            PACKAGE / "app.py",
+            True,
+        ),
+        ("from explore.api import zlib as z\n", PACKAGE / "app.py", True),
+        ("from .api import zlib as z\n", PACKAGE / "app.py", True),
+        ("import sys\nsys.modules['zlib']\n", PACKAGE / "app.py", True),
+        ("def other():\n    return 'zlib'\n", CHOKEPOINT, True),
     ],
 )
 def test_the_lint_rules_flag_what_they_should(
@@ -1318,6 +1345,14 @@ def test_the_lint_rules_flag_what_they_should(
 ) -> None:
     """Non-vacuity at the level of the rules, not of the tree walk."""
     assert bool(_violations(ast.parse(source), path)) is flagged
+
+
+@pytest.mark.parametrize("module", sorted(BANNED_MODULES))
+@pytest.mark.parametrize("path", [PACKAGE / "app.py", CHOKEPOINT], ids=["app", "api"])
+def test_every_banned_module_is_flagged_even_in_the_chokepoint(
+    module: str, path: Path
+) -> None:
+    assert _violations(ast.parse(f"import {module}\n"), path)
 
 
 def dash_table_uses(source: str) -> list[str]:
@@ -1773,6 +1808,68 @@ def test_the_ping_call_site_rule_finds_what_it_should(
 ) -> None:
     """Non-vacuity of the call-site guard, rule by rule."""
     assert _ping_references(ast.parse(source)) == found
+
+
+def _decode_body_references(tree: ast.AST) -> list[str]:
+    """Where a module refers to ``_decode_body``, as the enclosing function's name.
+
+    A call, a bare reference (``f = api._decode_body``), a ``getattr`` string and an
+    imported name all count, so none of them can reach the decoder outside ``fetch``.
+    """
+    found: list[str] = []
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = (*scope, child.name)
+            if (
+                (isinstance(child, ast.Attribute) and child.attr == DECODER)
+                or (isinstance(child, ast.Name) and child.id == DECODER)
+                or (isinstance(child, ast.Constant) and child.value == DECODER)
+                or (isinstance(child, ast.alias) and DECODER in (child.name, child.asname))
+            ):
+                found.append(".".join(scope) or "<module>")
+            visit(child, inner)
+
+    visit(tree, ())
+    return found
+
+
+@pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))
+def test_only_fetch_calls_the_decoder(path: Path) -> None:
+    """``fetch`` is the one place any runtime module refers to ``_decode_body`` (#494,
+    D125), so every decoded body has passed the chokepoint's bounded read."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    expected = ["fetch"] if path == CHOKEPOINT else []
+    assert _decode_body_references(tree) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "found"),
+    [
+        ("def fetch():\n    _decode_body(p, b, e)\n", ["fetch"]),
+        ("def _decode_body(p, b, e):\n    pass\n", []),
+        (
+            "from explore.api import _decode_body\n\n"
+            "def layout():\n    _decode_body(p, b, e)\n",
+            ["<module>", "layout"],
+        ),
+        ("from explore import api\n\ndef layout():\n    api._decode_body(p)\n", ["layout"]),
+        ("def hook():\n    f = api._decode_body\n", ["hook"]),
+        ("def hook():\n    getattr(api, '_decode_body')(p, b, e)\n", ["hook"]),
+        (
+            "def fetch():\n    _decode_body(p, b, e)\n\n"
+            "def other():\n    _decode_body(p, b, e)\n",
+            ["fetch", "other"],
+        ),
+    ],
+)
+def test_the_decoder_call_site_rule_finds_what_it_should(
+    source: str, found: list[str]
+) -> None:
+    """Non-vacuity of the decoder's call-site guard, rule by rule."""
+    assert _decode_body_references(ast.parse(source)) == found
 
 
 @pytest.mark.parametrize("path", RUNTIME_MODULES, ids=lambda p: str(p.relative_to(REPO)))

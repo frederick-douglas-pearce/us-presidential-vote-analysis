@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import copy
+import functools
 import gzip
 import html
 import html.parser
@@ -3316,37 +3317,62 @@ GZ_META = _gzipped(json.dumps(META).encode())
 #: the cap) would need at least twice this.
 BOMB_PEAK_BOUND = 2 * api.MAX_BODY_BYTES + (1 << 20)
 
-#: Each refusal: the body, its ``Content-Encoding`` and the reason its message gives.
-_REFUSAL_TABLE: list[tuple[str, bytes, str | tuple[str, ...], str]] = [
-    ("br", GZ_META, "br", "unsupported Content-Encoding 'br'"),
-    ("deflate", GZ_META, "deflate", "unsupported Content-Encoding 'deflate'"),
-    ("a-list", GZ_META, "gzip, identity", "Content-Encoding is a list"),
-    ("repeated", GZ_META, ("gzip", "gzip"), "Content-Encoding sent 2 times"),
-    ("corrupt", b"not a gzip stream", "gzip", "corrupt gzip stream"),
-    ("truncated", GZ_META[: len(GZ_META) // 2], "gzip", "truncated gzip stream"),
-    ("trailing", GZ_META + b"x", "gzip", "data after the end of the gzip stream"),
-    ("two-members", GZ_META + GZ_META, "gzip", "data after the end of the gzip stream"),
-    (
-        "identity-over-cap",
-        _json_of_size(api.MAX_BODY_BYTES + 1),
+@functools.cache
+def _bomb() -> bytes:
+    """Four times the cap of zeros, gzipped: built once, at test time, and shared."""
+    return _gzip_bomb(4 * api.MAX_BODY_BYTES)
+
+
+def _anchored(message: str) -> str:
+    """A ``match=`` pattern for exactly ``message``."""
+    return "^" + re.escape(message) + "$"
+
+
+_CORRUPT = "corrupt gzip stream: Error -3 while decompressing data: incorrect header check"
+
+#: Each refusal: a builder of the body, its ``Content-Encoding`` and the reason its
+#: message gives in full. The bodies are built at test time, so the large ones cost
+#: nothing at import.
+_REFUSAL_TABLE: dict[str, tuple[Callable[[], bytes], str | tuple[str, ...], str]] = {
+    "br": (lambda: GZ_META, "br", "unsupported Content-Encoding 'br'"),
+    "deflate": (lambda: GZ_META, "deflate", "unsupported Content-Encoding 'deflate'"),
+    "a-list": (
+        lambda: GZ_META,
+        "gzip, identity",
+        "Content-Encoding is a list: 'gzip, identity'",
+    ),
+    "repeated": (lambda: GZ_META, ("gzip", "gzip"), "Content-Encoding sent 2 times"),
+    "corrupt": (lambda: b"not a gzip stream", "gzip", _CORRUPT),
+    # A zlib-format stream (wbits 15) labeled gzip: wbits=31 refuses it, where 47
+    # (detect the header) would accept it.
+    "zlib-format": (lambda: zlib.compress(json.dumps(META).encode()), "gzip", _CORRUPT),
+    "truncated": (lambda: GZ_META[: len(GZ_META) // 2], "gzip", "truncated gzip stream"),
+    "trailing": (lambda: GZ_META + b"x", "gzip", "data after the end of the gzip stream"),
+    "two-members": (
+        lambda: GZ_META + GZ_META,
+        "gzip",
+        "data after the end of the gzip stream",
+    ),
+    "identity-over-cap": (
+        lambda: _json_of_size(api.MAX_BODY_BYTES + 1),
         (),
         f"body over {api.MAX_BODY_BYTES} bytes",
     ),
-    (
-        "wire-over-cap",
-        bytes(api.MAX_BODY_BYTES + 1),
+    "wire-over-cap": (
+        lambda: bytes(api.MAX_BODY_BYTES + 1),
         "gzip",
         f"body over {api.MAX_BODY_BYTES} bytes",
     ),
-    (
-        "bomb",
-        _gzip_bomb(4 * api.MAX_BODY_BYTES),
-        "gzip",
-        f"decoded body over {api.MAX_BODY_BYTES} bytes",
-    ),
-]
-REFUSALS = [row[1:] for row in _REFUSAL_TABLE]
-REFUSAL_IDS = [row[0] for row in _REFUSAL_TABLE]
+    "bomb": (_bomb, "gzip", f"decoded body over {api.MAX_BODY_BYTES} bytes"),
+}
+REFUSAL_IDS = list(_REFUSAL_TABLE)
+
+
+@functools.cache
+def _refusal(row: str) -> tuple[bytes, str | tuple[str, ...], str]:
+    """One refusal row's body, its ``Content-Encoding`` and its reason."""
+    build, encoding, reason = _REFUSAL_TABLE[row]
+    return build(), encoding, reason
 
 
 class TestFetch:
@@ -3474,26 +3500,27 @@ class TestFetch:
         monkeypatch.setattr(api, "MAX_BODY_BYTES", 10)
         raw = _FakeRaw(200, b'{"x": "ab"}', None)  # 11 bytes
         monkeypatch.setattr(api, "_OPENER", _FakeOpener(raw))
-        with pytest.raises(api.ApiUnavailable, match=re.escape("body over 10 bytes")):
+        with pytest.raises(
+            api.ApiUnavailable, match=_anchored("GET /v1/meta: body over 10 bytes")
+        ) as excinfo:
             api.fetch("/v1/meta")
+        assert not isinstance(excinfo.value.__cause__, api.ApiUnavailable)
         assert raw.amts == [11]
 
-    @pytest.mark.parametrize(
-        ("payload", "encoding", "message"), REFUSALS, ids=REFUSAL_IDS
-    )
+    @pytest.mark.parametrize("row", REFUSAL_IDS)
     def test_every_refused_body_is_api_unavailable_with_its_reason(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        payload: bytes,
-        encoding: str | tuple[str, ...],
-        message: str,
+        self, monkeypatch: pytest.MonkeyPatch, row: str
     ) -> None:
+        """Anchored, and not raised from an ``ApiUnavailable``: a refusal wrapped by the
+        I/O ``try`` would carry a second prefix and the first refusal as its cause."""
+        payload, encoding, message = _refusal(row)
         raw = _FakeRaw(200, payload, f'W/"{VERSION}"', encoding=encoding)
         monkeypatch.setattr(api, "_OPENER", _FakeOpener(raw))
         with pytest.raises(
-            api.ApiUnavailable, match=re.escape(f"GET /v1/meta: {message}")
-        ):
+            api.ApiUnavailable, match=_anchored(f"GET /v1/meta: {message}")
+        ) as excinfo:
             api.fetch("/v1/meta")
+        assert not isinstance(excinfo.value.__cause__, api.ApiUnavailable)
 
     @pytest.mark.parametrize("encoding", [(), "gzip"])
     def test_a_body_exactly_at_the_cap_is_accepted(
@@ -3519,25 +3546,28 @@ class TestFetch:
         raw = _FakeRaw(200, payload, f'"{VERSION}"', encoding=encoding)
         monkeypatch.setattr(api, "_OPENER", _FakeOpener(raw))
         expected = f"GET /v1/meta: {message} {api.MAX_BODY_BYTES} bytes"
-        with pytest.raises(api.ApiUnavailable, match=re.escape(expected)):
+        with pytest.raises(api.ApiUnavailable, match=_anchored(expected)) as excinfo:
             api.fetch("/v1/meta")
+        assert not isinstance(excinfo.value.__cause__, api.ApiUnavailable)
 
     def test_a_gzip_bomb_is_refused_without_holding_its_expansion(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Four times the cap of zeros, compressed to a few tens of KB. Refused at the
         real cap, and the traced peak stays far below the full expansion."""
-        bomb = _gzip_bomb(4 * api.MAX_BODY_BYTES)
+        bomb = _bomb()  # built before tracing starts, so its build is not counted
         assert len(bomb) < api.MAX_BODY_BYTES // 100
         raw = _FakeRaw(200, bomb, f'W/"{VERSION}"', encoding="gzip")
         monkeypatch.setattr(api, "_OPENER", _FakeOpener(raw))
+        expected = f"GET /v1/meta: decoded body over {api.MAX_BODY_BYTES} bytes"
         tracemalloc.start()
         try:
-            with pytest.raises(api.ApiUnavailable, match="decoded body over"):
+            with pytest.raises(api.ApiUnavailable, match=_anchored(expected)) as excinfo:
                 api.fetch("/v1/meta")
             _, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
+        assert not isinstance(excinfo.value.__cause__, api.ApiUnavailable)
         assert peak < BOMB_PEAK_BOUND, peak
 
     def test_logs_one_api_body_line_that_is_no_api_fetch_line(
@@ -3552,28 +3582,53 @@ class TestFetch:
         assert messages == [f"api body /v1/meta gzip {len(GZ_META)}->{decoded}"]
         assert not any("api fetch" in m or "api ping" in m for m in messages)
 
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [(b"not json", "invalid JSON"), (b"[]", "expected a JSON object")],
+        ids=["invalid-json", "non-object"],
+    )
+    @pytest.mark.parametrize("encoding", [(), "gzip"])
+    def test_a_body_refused_after_decoding_logs_no_api_body_line(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        body: bytes,
+        message: str,
+        encoding: str | tuple[str, ...],
+    ) -> None:
+        """Only a body ``fetch`` returns logs the line."""
+        payload = _gzipped(body) if encoding else body
+        raw = _FakeRaw(200, payload, f'"{VERSION}"', encoding=encoding)
+        monkeypatch.setattr(api, "_OPENER", _FakeOpener(raw))
+        with (
+            caplog.at_level(logging.INFO, logger=api.log.name),
+            pytest.raises(
+                api.ApiUnavailable, match=_anchored(f"GET /v1/meta: {message}")
+            ),
+        ):
+            api.fetch("/v1/meta")
+        assert not any("api body" in r.getMessage() for r in caplog.records)
+
 
 class TestDecodeBody:
     """``api._decode_body`` alone: each refusal of ``TestFetch``, and what it keeps."""
 
-    @pytest.mark.parametrize(
-        ("payload", "encoding", "message"), REFUSALS, ids=REFUSAL_IDS
-    )
-    def test_every_refusal_names_its_reason(
-        self, payload: bytes, encoding: str | tuple[str, ...], message: str
-    ) -> None:
+    @pytest.mark.parametrize("row", REFUSAL_IDS)
+    def test_every_refusal_names_its_reason(self, row: str) -> None:
+        payload, encoding, message = _refusal(row)
         values = [encoding] if isinstance(encoding, str) else list(encoding)
-        with pytest.raises(api.ApiUnavailable, match=re.escape(f"GET /p: {message}")):
+        with pytest.raises(api.ApiUnavailable, match=_anchored(f"GET /p: {message}")):
             api._decode_body("/p", payload, values or None)
 
     @pytest.mark.parametrize("values", [None, [""], ["identity"]])
     def test_identity_returns_the_payload_as_read(
         self, values: list[str] | None
     ) -> None:
-        assert api._decode_body("/p", b"{}", values) == b"{}"
+        assert api._decode_body("/p", b"{}", values) == ("identity", b"{}")
 
     def test_gzip_returns_the_decoded_body(self) -> None:
-        assert api._decode_body("/p", GZ_META, ["gzip"]) == json.dumps(META).encode()
+        decoded = json.dumps(META).encode()
+        assert api._decode_body("/p", GZ_META, ["gzip"]) == ("gzip", decoded)
 
     @pytest.mark.parametrize("values", [None, ["gzip"]])
     def test_the_cap_is_inclusive(
@@ -3582,9 +3637,12 @@ class TestDecodeBody:
         monkeypatch.setattr(api, "MAX_BODY_BYTES", 100)
         body = _json_of_size(100)
         payload = _gzipped(body) if values else body
-        assert api._decode_body("/p", payload, values) == body
+        assert api._decode_body("/p", payload, values)[1] == body
         over = _json_of_size(101)
-        with pytest.raises(api.ApiUnavailable, match="body over 100 bytes"):
+        message = "decoded body over" if values else "body over"
+        with pytest.raises(
+            api.ApiUnavailable, match=_anchored(f"GET /p: {message} 100 bytes")
+        ):
             api._decode_body("/p", _gzipped(over) if values else over, values)
 
 

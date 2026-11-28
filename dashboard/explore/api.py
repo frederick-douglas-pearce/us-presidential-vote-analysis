@@ -1,10 +1,9 @@
 """The dashboard's only way to read data: the public API, cached in-process (D071(d)).
 
 These properties hold here (the tests that pin them are in
-``test_dashboard_app.py``: ``TestBuildUrl``, ``TestFetch``, ``TestDecodeBody`` and
-``TestOpener``,
-``TestCache``, ``TestView``, ``TestRenderDeadline``, ``TestWakeInterval``,
-``TestKeepWarm`` and ``TestNoPageReadsHealth``):
+``test_dashboard_app.py``: ``TestBuildUrl``, ``TestFetch``, ``TestDecodeBody``,
+``TestOpener``, ``TestCache``, ``TestView``, ``TestRenderDeadline``,
+``TestWakeInterval``, ``TestKeepWarm`` and ``TestNoPageReadsHealth``):
 
 - **One outbound chokepoint.** :func:`fetch` is the only function that opens a
   connection. It accepts ``/v1/`` paths and the one literal :data:`HEALTH_PATH`, builds
@@ -278,8 +277,10 @@ def _content_coding(path: str, values: list[str] | None) -> str:
     raise ApiUnavailable(f"GET {path}: unsupported Content-Encoding {values[0]!r}")
 
 
-def _decode_body(path: str, payload: bytes, encoding: list[str] | None) -> bytes:
-    """A response body decoded by its ``Content-Encoding`` headers, under the cap.
+def _decode_body(
+    path: str, payload: bytes, encoding: list[str] | None
+) -> tuple[str, bytes]:
+    """The coding a response names and its body decoded by it, under the cap.
 
     Called only from :func:`fetch`, and the one place a runtime module decompresses
     (the D070(b) lint). Each refusal is :class:`ApiUnavailable` with its own message:
@@ -294,19 +295,21 @@ def _decode_body(path: str, payload: bytes, encoding: list[str] | None) -> bytes
     if len(payload) > cap:
         raise ApiUnavailable(f"GET {path}: body over {cap} bytes")
     if coding == "identity":
-        return payload
+        return coding, payload
     decompressor = zlib.decompressobj(wbits=31)
     try:
         decoded = decompressor.decompress(payload, cap + 1)
     except zlib.error as exc:
         raise ApiUnavailable(f"GET {path}: corrupt gzip stream: {exc}") from exc
-    if len(decoded) > cap or decompressor.unconsumed_tail:
+    # Input is left unconsumed only when the output reached max_length, cap + 1 bytes,
+    # which this length check already refuses.
+    if len(decoded) > cap:
         raise ApiUnavailable(f"GET {path}: decoded body over {cap} bytes")
     if not decompressor.eof:
         raise ApiUnavailable(f"GET {path}: truncated gzip stream")
     if decompressor.unused_data:
         raise ApiUnavailable(f"GET {path}: data after the end of the gzip stream")
-    return decoded
+    return coding, decoded
 
 
 def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
@@ -347,14 +350,7 @@ def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
     if status != 200:
         raise ApiUnavailable(f"GET {path}: HTTP {status}")
     # Outside the I/O try: each refusal keeps its own message.
-    decoded = _decode_body(path, payload, encoding)
-    log.info(
-        "api body %s %s %d->%d",
-        path,
-        _content_coding(path, encoding),
-        len(payload),
-        len(decoded),
-    )
+    coding, decoded = _decode_body(path, payload, encoding)
     try:
         body = json.loads(decoded)
     except (ValueError, RecursionError) as exc:
@@ -363,6 +359,7 @@ def fetch(path: str, timeout: float = FETCH_TIMEOUT_S) -> Response:
         raise ApiUnavailable(f"GET {path}: invalid JSON") from exc
     if not isinstance(body, dict):
         raise ApiUnavailable(f"GET {path}: expected a JSON object")
+    log.info("api body %s %s %d->%d", path, coding, len(payload), len(decoded))
     return Response(body=body, version=etag_version(etag))
 
 
