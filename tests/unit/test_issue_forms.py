@@ -24,7 +24,9 @@ import yaml
 
 from explore import app, labels
 
-FORM = Path(__file__).resolve().parents[2] / ".github" / "ISSUE_TEMPLATE" / "ux-review.yml"
+FORM = (
+    Path(__file__).resolve().parents[2] / ".github" / "ISSUE_TEMPLATE" / "ux-review.yml"
+)
 
 #: The option the form gives Dash's custom-404 page, and its catch-all.
 NOT_FOUND_OPTION = "Page not found (the link matches no page)"
@@ -148,9 +150,29 @@ class TestLabels:
         assert "`epic:dashboard`" in text
         assert "#361" in text
         assert "look the same whatever the data" in text
-        assert "reader-facing words goes to `epic:dashboard`" in text
-        assert "`/docs`" in text
-        assert "`epic:internal-api`" in text
+
+    def test_each_routing_bullet_sends_its_findings_to_its_epic(
+        self, form: dict[str, Any]
+    ) -> None:
+        # Each bullet is checked on its own, so a target swapped within one bullet
+        # cannot pass on a label another bullet happens to name.
+        bullets = {
+            match[1]: match[2]
+            for match in re.finditer(r"^- \*\*(.+?):\*\* (.+)$", help_text(form), re.M)
+        }
+        assert set(bullets) == {
+            "Accessibility",
+            "Data or content",
+            "Wording",
+            "API docs",
+        }
+        assert "also add the `a11y` label" in bullets["Accessibility"]
+        data = bullets["Data or content"]
+        assert "stays in `epic:dashboard-ui`" in data
+        assert data.endswith("swap the label to `epic:dashboard`.")
+        assert "goes to `epic:dashboard` (#361" in bullets["Wording"]
+        assert "`/docs`" in bullets["API docs"]
+        assert bullets["API docs"].endswith("goes to `epic:internal-api` instead.")
 
 
 class TestChecklist:
