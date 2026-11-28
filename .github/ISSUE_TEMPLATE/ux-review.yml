@@ -1,0 +1,115 @@
+# A finding from the owner's page-by-page UX review of the live dashboard (#514, E16).
+# The page dropdown lists every page the dashboard registers, and the theme dropdown the
+# dashboard's own theme names: tests/unit/test_issue_forms.py pins both to the app.
+# Path variables are written {year}, not <year>: GitHub strips <...> from the filed issue.
+name: UX-review finding
+description: Report one thing seen while reviewing a page of the live dashboard.
+title: "UX review: "
+labels:
+  - epic:dashboard-ui
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for the owner's page-by-page UX review of the live dashboard. One finding per issue. It applies `epic:dashboard-ui`.
+
+        - **Accessibility:** if you pick any item in the accessibility checklist below, also add the `a11y` label.
+        - **Data or content:** E14's routing test (#361) asks whether the change would look the same whatever the data. If it would, it is a presentation finding and stays in `epic:dashboard-ui`. If it would not (a new field, endpoint, page or filter, table contents, a label's meaning, or one chart's own content), swap the label to `epic:dashboard`.
+        - **Wording:** a finding on a label, help text or other reader-facing words goes to `epic:dashboard` (#361; root `CLAUDE.md`, *Who writes wording*).
+        - **API docs:** a finding on the API's `/docs` page goes to `epic:internal-api` instead.
+  - type: dropdown
+    id: page
+    attributes:
+      label: Page
+      description: >-
+        The page's template. A not-found message on a year, state or candidate page goes
+        under that page's template; "Page not found" is for a link that matches no page.
+      options:
+        - /
+        - /elections
+        - /elections/majority
+        - /elections/over-time
+        - /election/{year}
+        - /election/{year}/states
+        - /election/{year}/per-capita
+        - /states
+        - /state/{usps}
+        - /state/{usps}/elections
+        - /state/{usps}/per-capita
+        - /candidate/{slug}
+        - Page not found (the link matches no page)
+        - other
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: URL
+      description: The full address, including any query string or fragment.
+      placeholder: https://explore.us-presidential-election-center.org/election/2000
+    validations:
+      required: true
+  - type: dropdown
+    id: theme
+    attributes:
+      label: Theme
+      description: >-
+        The theme picked in the page header's toggle (its icons' tooltips name each one).
+        If you never picked one, it is Auto, which follows the device's light or dark
+        setting; with Auto, say in What was seen whether the page showed light or dark.
+      options:
+        - Dark
+        - Auto
+        - Light
+    validations:
+      required: true
+  - type: input
+    id: viewport-width
+    attributes:
+      label: Viewport width
+      description: >-
+        The viewport's width in CSS pixels (window.innerWidth, or the width devtools'
+        device toolbar shows), not the browser window's.
+      placeholder: 390 or 1280
+    validations:
+      required: false
+  - type: textarea
+    id: seen
+    attributes:
+      label: What was seen
+      description: What the page did or showed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What it should do or show instead.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Paste or drag an image here.
+    validations:
+      required: false
+  - type: dropdown
+    id: accessibility
+    attributes:
+      label: Accessibility checklist
+      description: >-
+        Pick every item that applies, then add the `a11y` label. Each item names its
+        WCAG 2.2 success criteria (the target is Level AA).
+      multiple: true
+      options:
+        - "Contrast: 1.4.3 Contrast (Minimum), 1.4.11 Non-text Contrast"
+        - "Color as the only cue: 1.4.1 Use of Color"
+        - "Keyboard reach and order: 2.1.1 Keyboard, 2.1.2 No Keyboard Trap, 2.4.3 Focus Order"
+        - "Visible focus: 2.4.7 Focus Visible, 2.4.11 Focus Not Obscured (Minimum)"
+        - "Text resize and reflow at 320 px: 1.4.4 Resize Text, 1.4.10 Reflow"
+        - "Labels and names: 1.3.1 Info and Relationships, 2.4.6 Headings and Labels, 2.5.3 Label in Name, 3.3.2 Labels or Instructions, 4.1.2 Name, Role, Value"
+        - "Motion: 2.2.2 Pause, Stop, Hide"
+        - "Chart alternative: 1.1.1 Non-text Content"
+    validations:
+      required: false
