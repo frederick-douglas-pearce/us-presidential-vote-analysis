@@ -279,8 +279,10 @@ ways the first version could fail quietly.
   diff at step 5, which compares only `## Approach`. If the architect's review changes the
   reader-facing output, ask `ba` again before that stop.
 - **Implementation applies both halves on the branch.** The orchestrator applies the label spec to
-  code (`dashboard/explore/labels.py`, and wherever else *Who writes wording* says the wording lives)
-  and the glossary delta to `docs/glossary.md`, so both land in the same PR. `ba` doesn't edit the
+  code (`dashboard/explore/labels.py` for the dashboard; `src/usvote/api/models.py`, `routes.py`,
+  `app.py`, `origin_guard.py` and `provenance.py` for the API's published text; and wherever else
+  *Who writes wording* says the wording lives; `docs/glossary.md`'s opening maps which file ships
+  which kind) and the glossary delta to `docs/glossary.md`, so both land in the same PR. `ba` doesn't edit the
   working tree itself, which keeps the engine's rule that a writing agent's changes come back to the
   parent to apply.
 - **No wording of the orchestrator's own.** A reader-facing string the spec doesn't cover goes back
@@ -327,15 +329,30 @@ ways the first version could fail quietly.
   the plan has a wording spec, so a plan that missed its reader-facing output is still caught):
   1. **Spec match.** A reader-facing string added or changed in the diff that the wording spec
      doesn't carry, or that differs from it, is a BLOCKING finding. The spec is the plan's table plus
-     anything `ba` added since.
+     anything `ba` added since. **On the API**, a reader-facing string is any text the API
+     publishes: what its `/docs` page shows (the API title, summary and description, field
+     descriptions, response-model docstrings, endpoint summaries and docstrings, query-parameter
+     descriptions, tag names and descriptions), `redistributable_note`, a served error message
+     (404, 422, 403) and the prose inside a response example. A data value, in an example or a
+     response, is not; nor is a code comment or a private function's docstring. The spec's wording
+     must also follow `docs/glossary.md`'s Wording rules for the API: public `/v1` names as served,
+     no internal table, column or key names, no tracking references, JSON null rather than None.
   2. **Key index.** A diff that adds, renames, changes or removes a `LABELS` key, a closed value
-     (a `pv_status` or count-status label, a party display form) or a reader-facing string either
+     (a `pv_status` or count-status label, a party display form), a reader-facing string or a
+     published API description either
      updates `docs/glossary.md` to match, or the PR body names a filed `ba` follow-up issue. **A diff that does neither
      gets a BLOCKING finding.** The orchestrator files the follow-up (`gh issue create
      --body-file`); `ba` has no GitHub write tools. "To match" means: a `LABELS` key has its row
      in `## Key index`, which lists `LABELS` keys only; a closed value or other reader-facing
      string has a defining entry whose **Shown as** names where it ships: its constant, or the
-     module for a page-level sentence with none. A string that needs a glossary term no entry
+     module for a page-level sentence with none. An API field description matches when the
+     field's defining entry has a **Shown as** naming it ("on the API's `/docs` page, the
+     `Model.field` field description in `src/usvote/api/models.py`") and every domain term its
+     prose uses has an entry; a field that describes the response rather than the elections
+     (`meta.count`, `schema_version`, `row_count`, `build_timestamp`, the license URLs) needs no
+     entry. Any other API text (a model or endpoint docstring, a tag description, the API
+     description, an error message) matches when every domain term it uses has an entry; it needs
+     no per-string **Shown as**. An API description is never a Key index row. A string that needs a glossary term no entry
      defines is BLOCKING like the rest, and resolved the same two ways: `ba` returns the new entry
      as text and the orchestrator applies it on the branch, or the PR body names a filed follow-up.
      It never becomes a Key index row unless it is a `LABELS` key.
@@ -343,7 +360,12 @@ ways the first version could fail quietly.
   **Not these:** `TestNoRawValues` already fails an underscore or a served code in rendered text, and
   `TestLabels` a `LABELS` key that isn't a public `/v1` field (`dashboard/CLAUDE.md`). The two checks
   are for what those tests can't see, wording that differs from the spec and drift between the code
-  and the glossary, so neither re-checks what a test already guards.
+  and the glossary, so neither re-checks what a test already guards. On the API, no test guards
+  the published text's wording today (the API's tests check structure: `candidate_id` absent from
+  every public model, the coverage window and provenance note in the description), so both checks
+  read all of it. If a scan of `/openapi.json` text is added later (for `dwh.`, `president_`, the
+  snapshot's table names, decision ids or `None`), the checks stop re-checking what it covers, and
+  this paragraph names the test.
 - **The two checks have their own verdict.** `CODE_REVIEW` is a skill invoked by name, so the loop
   has no prompt of its own to put the checks in, and nothing shows whether the skill applied them.
   So:
